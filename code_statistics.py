@@ -432,6 +432,17 @@ class CodeStatistics:
                 except re.error as e:
                     print(f"警告：无效的目录排除正则表达式 '{pattern}': {e}")
     
+    def format_size(self, size_in_bytes):
+        """格式化文件大小"""
+        if size_in_bytes < 1024:
+            return f"{size_in_bytes} B"
+        elif size_in_bytes < 1024 * 1024:
+            return f"{size_in_bytes / 1024:.1f} KB"
+        elif size_in_bytes < 1024 * 1024 * 1024:
+            return f"{size_in_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_in_bytes / (1024 * 1024 * 1024):.1f} GB"
+    
     def get_language_emoji(self, language):
         """获取语言对应的emoji图标"""
         emoji_map = {
@@ -606,35 +617,137 @@ class CodeStatistics:
         except Exception:
             return True  # 读取出错时假定为二进制文件
 
-    def count_lines(self, file_path):
-        """统计文件行数"""
+    def analyze_file_content(self, file_path):
+        """分析文件内容，返回详细的行数统计"""
         # 先检测是否为二进制文件
         if self.is_binary_file(file_path):
-            return 0
+            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
             
         try:
+            file_size = os.path.getsize(file_path)
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = sum(1 for _ in f)
+                lines = f.readlines()
                 
-                # 应用最小行数过滤
-                if self.args.min_lines and lines < self.args.min_lines:
-                    return 0
+            total_lines = len(lines)
+            code_lines = 0
+            comment_lines = 0
+            blank_lines = 0
+            
+            # 获取文件扩展名以确定注释风格
+            ext = Path(file_path).suffix.lower()
+            lang = LANGUAGE_MAP.get(ext, 'other')
+            
+            # 定义各语言的注释模式
+            single_line_comment = {
+                'python': '#', 'ruby': '#', 'perl': '#', 'shell': '#', 'yaml': '#',
+                'javascript': '//', 'typescript': '//', 'java': '//', 'cpp': '//', 
+                'c': '//', 'csharp': '//', 'go': '//', 'rust': '//', 'swift': '//',
+                'kotlin': '//', 'scala': '//', 'dart': '//', 'php': '//',
+                'sql': '--', 'lua': '--', 'haskell': '--', 'elm': '--',
+                'assembly': ';', 'lisp': ';', 'clojure': ';', 'scheme': ';',
+                'fortran': '!', 'vbnet': "'", 'matlab': '%', 'latex': '%',
+                'erlang': '%', 'prolog': '%'
+            }
+            
+            multi_line_comment = {
+                'c': ('/*', '*/'), 'cpp': ('/*', '*/'), 'java': ('/*', '*/'),
+                'javascript': ('/*', '*/'), 'typescript': ('/*', '*/'),
+                'css': ('/*', '*/'), 'php': ('/*', '*/'), 'go': ('/*', '*/'),
+                'rust': ('/*', '*/'), 'swift': ('/*', '*/'), 'kotlin': ('/*', '*/'),
+                'scala': ('/*', '*/'), 'dart': ('/*', '*/'), 'sql': ('/*', '*/'),
+                'html': ('<!--', '-->'), 'xml': ('<!--', '-->'),
+                'python': ('"""', '"""'), 'ruby': ('=begin', '=end'),
+                'lua': ('--[[', ']]'), 'haskell': ('{-', '-}')
+            }
+            
+            # 获取当前语言的注释符号
+            single_comment = single_line_comment.get(lang, '#')
+            multi_comment = multi_line_comment.get(lang, None)
+            
+            in_multi_comment = False
+            multi_start, multi_end = multi_comment if multi_comment else (None, None)
+            
+            for line in lines:
+                stripped = line.strip()
                 
-                # 应用最大行数过滤
-                if self.args.max_lines and lines > self.args.max_lines:
-                    return 0
+                # 空行
+                if not stripped:
+                    blank_lines += 1
+                    continue
                 
-                return lines
+                # 处理多行注释
+                if multi_comment:
+                    # Python 的特殊处理（docstring）
+                    if lang == 'python' and '"""' in stripped:
+                        if stripped.count('"""') == 2:
+                            # 单行 docstring
+                            comment_lines += 1
+                            continue
+                        else:
+                            in_multi_comment = not in_multi_comment
+                            comment_lines += 1
+                            continue
+                    
+                    # 其他语言的多行注释
+                    if multi_start in stripped and multi_end in stripped:
+                        # 单行内的多行注释
+                        comment_lines += 1
+                        continue
+                    elif multi_start in stripped:
+                        in_multi_comment = True
+                        comment_lines += 1
+                        continue
+                    elif multi_end in stripped:
+                        in_multi_comment = False
+                        comment_lines += 1
+                        continue
+                    elif in_multi_comment:
+                        comment_lines += 1
+                        continue
+                
+                # 单行注释
+                if stripped.startswith(single_comment):
+                    comment_lines += 1
+                else:
+                    code_lines += 1
+            
+            # 应用行数过滤
+            if self.args.min_lines and total_lines < self.args.min_lines:
+                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
+            
+            if self.args.max_lines and total_lines > self.args.max_lines:
+                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
+            
+            return {
+                'total': total_lines,
+                'code': code_lines,
+                'comment': comment_lines,
+                'blank': blank_lines,
+                'size': file_size
+            }
+            
         except Exception as e:
             if self.args.verbose:
                 print(f"Error reading {file_path}: {e}")
-            return 0
+            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
+    
+    def count_lines(self, file_path):
+        """统计文件行数（向后兼容）"""
+        result = self.analyze_file_content(file_path)
+        return result['total']
     
     def analyze_repository(self, repo_path):
         """分析单个仓库的代码统计"""
-        stats = defaultdict(lambda: {'files': 0, 'lines': 0})
+        stats = defaultdict(lambda: {
+            'files': 0, 'lines': 0, 'code_lines': 0, 
+            'comment_lines': 0, 'blank_lines': 0, 'size': 0
+        })
         total_files = 0
         total_lines = 0
+        total_code_lines = 0
+        total_comment_lines = 0
+        total_blank_lines = 0
+        total_size = 0
         file_details = []
         
         for root, dirs, files in os.walk(repo_path):
@@ -645,25 +758,42 @@ class CodeStatistics:
                 file_path = os.path.join(root, file)
                 
                 if self.is_code_file(file_path):
-                    lines = self.count_lines(file_path)
-                    if lines > 0:
+                    file_stats = self.analyze_file_content(file_path)
+                    if file_stats['total'] > 0:
                         ext = Path(file_path).suffix.lower() or 'no_extension'
                         stats[ext]['files'] += 1
-                        stats[ext]['lines'] += lines
+                        stats[ext]['lines'] += file_stats['total']
+                        stats[ext]['code_lines'] += file_stats['code']
+                        stats[ext]['comment_lines'] += file_stats['comment']
+                        stats[ext]['blank_lines'] += file_stats['blank']
+                        stats[ext]['size'] += file_stats['size']
+                        
                         total_files += 1
-                        total_lines += lines
+                        total_lines += file_stats['total']
+                        total_code_lines += file_stats['code']
+                        total_comment_lines += file_stats['comment']
+                        total_blank_lines += file_stats['blank']
+                        total_size += file_stats['size']
                         
                         if self.args.verbose:
                             relative_path = os.path.relpath(file_path, repo_path)
                             file_details.append({
                                 'path': relative_path,
-                                'lines': lines,
+                                'lines': file_stats['total'],
+                                'code_lines': file_stats['code'],
+                                'comment_lines': file_stats['comment'],
+                                'blank_lines': file_stats['blank'],
+                                'size': file_stats['size'],
                                 'extension': ext
                             })
         
         return {
             'total_files': total_files,
             'total_lines': total_lines,
+            'total_code_lines': total_code_lines,
+            'total_comment_lines': total_comment_lines,
+            'total_blank_lines': total_blank_lines,
+            'total_size': total_size,
             'by_extension': dict(stats),
             'file_details': file_details if self.args.verbose else []
         }
@@ -752,6 +882,10 @@ class CodeStatistics:
                                 'language': main_language,
                                 'files': stats['total_files'],
                                 'lines': stats['total_lines'],
+                                'code_lines': stats['total_code_lines'],
+                                'comment_lines': stats['total_comment_lines'],
+                                'blank_lines': stats['total_blank_lines'],
+                                'size': stats['total_size'],
                                 'details': stats['by_extension'],
                                 'file_details': stats.get('file_details', [])
                             }
@@ -771,6 +905,10 @@ class CodeStatistics:
                         'language': main_language,
                         'files': stats['total_files'],
                         'lines': stats['total_lines'],
+                        'code_lines': stats['total_code_lines'],
+                        'comment_lines': stats['total_comment_lines'],
+                        'blank_lines': stats['total_blank_lines'],
+                        'size': stats['total_size'],
                         'details': stats['by_extension'],
                         'file_details': stats.get('file_details', [])
                     }
@@ -782,18 +920,35 @@ class CodeStatistics:
         """生成统计摘要"""
         total_all_files = sum(repo['files'] for repo in all_repos)
         total_all_lines = sum(repo['lines'] for repo in all_repos)
+        total_all_code_lines = sum(repo.get('code_lines', repo['lines']) for repo in all_repos)
+        total_all_comment_lines = sum(repo.get('comment_lines', 0) for repo in all_repos)
+        total_all_blank_lines = sum(repo.get('blank_lines', 0) for repo in all_repos)
+        total_all_size = sum(repo.get('size', 0) for repo in all_repos)
         
-        language_summary = defaultdict(lambda: {'repos': 0, 'files': 0, 'lines': 0})
+        language_summary = defaultdict(lambda: {
+            'repos': 0, 'files': 0, 'lines': 0, 
+            'code_lines': 0, 'comment_lines': 0, 
+            'blank_lines': 0, 'size': 0
+        })
+        
         for repo in all_repos:
             lang = repo['language']
             language_summary[lang]['repos'] += 1
             language_summary[lang]['files'] += repo['files']
             language_summary[lang]['lines'] += repo['lines']
+            language_summary[lang]['code_lines'] += repo.get('code_lines', repo['lines'])
+            language_summary[lang]['comment_lines'] += repo.get('comment_lines', 0)
+            language_summary[lang]['blank_lines'] += repo.get('blank_lines', 0)
+            language_summary[lang]['size'] += repo.get('size', 0)
         
         return {
             'total_repos': len(all_repos),
             'total_files': total_all_files,
             'total_lines': total_all_lines,
+            'total_code_lines': total_all_code_lines,
+            'total_comment_lines': total_all_comment_lines,
+            'total_blank_lines': total_all_blank_lines,
+            'total_size': total_all_size,
             'by_language': dict(language_summary)
         }
     
@@ -945,7 +1100,9 @@ class CodeStatistics:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>代码统计报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
