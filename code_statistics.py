@@ -78,14 +78,17 @@ DEFAULT_EXCLUDE_DIRS = {
     '.terraform', '.vagrant', '.docker'
 }
 
-# 文档和配置文件扩展名（需要排除）
+# 文档文件扩展名
 DOC_EXTENSIONS = {
-    # 文档文件
     '.md', '.markdown', '.rst', '.txt', '.doc', '.docx',
     '.pdf', '.odt', '.rtf', '.tex', '.wiki', '.org',
-    '.adoc', '.asciidoc', '.pod', '.man',
-    
-    # 配置文件
+    '.adoc', '.asciidoc', '.pod', '.man', '.textile',
+    'readme', 'license', 'changelog', 'authors', 'contributors',
+    'notice', 'history', 'changes', 'install', 'todo'
+}
+
+# 配置文件扩展名（需要排除）
+CONFIG_EXTENSIONS = {
     '.yml', '.yaml', '.json', '.xml', '.toml', '.ini',
     '.cfg', '.conf', '.config', '.properties', '.props',
     '.env', '.env.example', '.env.sample', '.env.local',
@@ -742,12 +745,19 @@ class CodeStatistics:
             'files': 0, 'lines': 0, 'code_lines': 0, 
             'comment_lines': 0, 'blank_lines': 0, 'size': 0
         })
+        doc_stats = defaultdict(lambda: {
+            'files': 0, 'lines': 0, 'size': 0
+        })
         total_files = 0
         total_lines = 0
         total_code_lines = 0
         total_comment_lines = 0
         total_blank_lines = 0
         total_size = 0
+        total_doc_files = 0
+        total_doc_lines = 0
+        total_doc_size = 0
+        total_all_size = 0  # 仓库总大小
         file_details = []
         
         for root, dirs, files in os.walk(repo_path):
@@ -757,7 +767,37 @@ class CodeStatistics:
             for file in files:
                 file_path = os.path.join(root, file)
                 
-                if self.is_code_file(file_path):
+                # 统计仓库总大小（所有文件）
+                if os.path.isfile(file_path):
+                    try:
+                        total_all_size += os.path.getsize(file_path)
+                    except:
+                        pass
+                
+                # 判断是否是文档文件
+                file_ext = Path(file_path).suffix.lower()
+                file_name = os.path.basename(file_path).lower()
+                
+                if file_ext in DOC_EXTENSIONS or file_name in DOC_EXTENSIONS:
+                    # 统计文档文件
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            lines = len(f.readlines())
+                        
+                        ext = file_ext or file_name
+                        doc_stats[ext]['files'] += 1
+                        doc_stats[ext]['lines'] += lines
+                        doc_stats[ext]['size'] += file_size
+                        
+                        total_doc_files += 1
+                        total_doc_lines += lines
+                        total_doc_size += file_size
+                    except:
+                        pass
+                        
+                elif self.is_code_file(file_path):
+                    # 统计代码文件
                     file_stats = self.analyze_file_content(file_path)
                     if file_stats['total'] > 0:
                         ext = Path(file_path).suffix.lower() or 'no_extension'
@@ -794,7 +834,12 @@ class CodeStatistics:
             'total_comment_lines': total_comment_lines,
             'total_blank_lines': total_blank_lines,
             'total_size': total_size,
+            'doc_files': total_doc_files,
+            'doc_lines': total_doc_lines,
+            'doc_size': total_doc_size,
+            'total_all_size': total_all_size,  # 仓库总大小
             'by_extension': dict(stats),
+            'doc_details': dict(doc_stats),
             'file_details': file_details if self.args.verbose else []
         }
     
@@ -886,7 +931,12 @@ class CodeStatistics:
                                 'comment_lines': stats['total_comment_lines'],
                                 'blank_lines': stats['total_blank_lines'],
                                 'size': stats['total_size'],
+                                'doc_files': stats.get('doc_files', 0),
+                                'doc_lines': stats.get('doc_lines', 0),
+                                'doc_size': stats.get('doc_size', 0),
+                                'total_size': stats.get('total_all_size', stats['total_size']),
                                 'details': stats['by_extension'],
+                                'doc_details': stats.get('doc_details', {}),
                                 'file_details': stats.get('file_details', [])
                             }
                             all_repos.append(repo_info)
@@ -909,7 +959,12 @@ class CodeStatistics:
                         'comment_lines': stats['total_comment_lines'],
                         'blank_lines': stats['total_blank_lines'],
                         'size': stats['total_size'],
+                        'doc_files': stats.get('doc_files', 0),
+                        'doc_lines': stats.get('doc_lines', 0),
+                        'doc_size': stats.get('doc_size', 0),
+                        'total_size': stats.get('total_all_size', stats['total_size']),
                         'details': stats['by_extension'],
+                        'doc_details': stats.get('doc_details', {}),
                         'file_details': stats.get('file_details', [])
                     }
                     all_repos.append(repo_info)
@@ -925,10 +980,17 @@ class CodeStatistics:
         total_all_blank_lines = sum(repo.get('blank_lines', 0) for repo in all_repos)
         total_all_size = sum(repo.get('size', 0) for repo in all_repos)
         
+        # 文档统计
+        total_all_doc_files = sum(repo.get('doc_files', 0) for repo in all_repos)
+        total_all_doc_lines = sum(repo.get('doc_lines', 0) for repo in all_repos)
+        total_all_doc_size = sum(repo.get('doc_size', 0) for repo in all_repos)
+        total_all_total_size = sum(repo.get('total_size', repo.get('size', 0)) for repo in all_repos)
+        
         language_summary = defaultdict(lambda: {
             'repos': 0, 'files': 0, 'lines': 0, 
             'code_lines': 0, 'comment_lines': 0, 
-            'blank_lines': 0, 'size': 0
+            'blank_lines': 0, 'size': 0, 'doc_files': 0,
+            'doc_lines': 0, 'doc_size': 0
         })
         
         for repo in all_repos:
@@ -940,6 +1002,9 @@ class CodeStatistics:
             language_summary[lang]['comment_lines'] += repo.get('comment_lines', 0)
             language_summary[lang]['blank_lines'] += repo.get('blank_lines', 0)
             language_summary[lang]['size'] += repo.get('size', 0)
+            language_summary[lang]['doc_files'] += repo.get('doc_files', 0)
+            language_summary[lang]['doc_lines'] += repo.get('doc_lines', 0)
+            language_summary[lang]['doc_size'] += repo.get('doc_size', 0)
         
         return {
             'total_repos': len(all_repos),
@@ -949,6 +1014,10 @@ class CodeStatistics:
             'total_comment_lines': total_all_comment_lines,
             'total_blank_lines': total_all_blank_lines,
             'total_size': total_all_size,
+            'total_doc_files': total_all_doc_files,
+            'total_doc_lines': total_all_doc_lines,
+            'total_doc_size': total_all_doc_size,
+            'total_all_size': total_all_total_size,
             'by_language': dict(language_summary)
         }
     
@@ -973,16 +1042,31 @@ class CodeStatistics:
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['Repository', 'Language', 'Files', 'Lines'])
+            writer.writerow(['Repository', 'Language', 'Code_Files', 'Code_Lines', 'Doc_Files', 'Doc_Lines', 'Code_Size_MB', 'Total_Size_MB'])
             
             for repo in all_repos:
-                writer.writerow([repo['name'], repo['language'], repo['files'], repo['lines']])
+                code_size_mb = round(repo.get('size', 0) / (1024 * 1024), 2)
+                total_size_mb = round(repo.get('total_size', 0) / (1024 * 1024), 2)
+                writer.writerow([
+                    repo['name'], 
+                    repo['language'], 
+                    repo['files'], 
+                    repo['lines'],
+                    repo.get('doc_files', 0),
+                    repo.get('doc_lines', 0),
+                    code_size_mb,
+                    total_size_mb
+                ])
             
             writer.writerow([])
             writer.writerow(['Summary'])
             writer.writerow(['Total Repos', summary['total_repos']])
-            writer.writerow(['Total Files', summary['total_files']])
-            writer.writerow(['Total Lines', summary['total_lines']])
+            writer.writerow(['Total Code Files', summary['total_files']])
+            writer.writerow(['Total Code Lines', summary['total_lines']])
+            writer.writerow(['Total Doc Files', summary.get('total_doc_files', 0)])
+            writer.writerow(['Total Doc Lines', summary.get('total_doc_lines', 0)])
+            writer.writerow(['Total Code Size (MB)', round(summary.get('total_code_size', 0) / (1024 * 1024), 2)])
+            writer.writerow(['Total Repository Size (MB)', round(summary.get('total_all_size', 0) / (1024 * 1024), 2)])
         
         if not self.args.summary:
             print(f"\n统计结果已保存到: {output_file}")
@@ -1002,8 +1086,12 @@ class CodeStatistics:
             f.write("| 指标 | 数值 |\n")
             f.write("|------|------|\n")
             f.write(f"| 🗂️ **仓库总数** | {summary['total_repos']} |\n")
-            f.write(f"| 📄 **文件总数** | {summary['total_files']:,} |\n")
+            f.write(f"| 📄 **代码文件总数** | {summary['total_files']:,} |\n")
             f.write(f"| 📝 **代码总行数** | {summary['total_lines']:,} |\n")
+            f.write(f"| 📋 **文档文件总数** | {summary.get('total_doc_files', 0):,} |\n")
+            f.write(f"| 📑 **文档总行数** | {summary.get('total_doc_lines', 0):,} |\n")
+            f.write(f"| 💾 **代码文件大小** | {self.format_size(summary.get('total_code_size', 0))} |\n")
+            f.write(f"| 📁 **仓库总大小** | {self.format_size(summary.get('total_all_size', 0))} |\n")
             f.write(f"| 📊 **平均每仓库代码行数** | {summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0:,} |\n")
             f.write(f"| 📈 **平均每文件代码行数** | {summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0} |\n\n")
             
@@ -1040,14 +1128,14 @@ class CodeStatistics:
             # 按代码行数排序
             sorted_by_lines = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
             f.write("### 📈 按代码行数 TOP 10\n\n")
-            f.write("| 排名 | 仓库名 | 主要语言 | 文件数 | 代码行数 | 占比 |\n")
-            f.write("|------|--------|----------|--------|----------|------|\n")
+            f.write("| 排名 | 仓库名 | 主要语言 | 代码文件 | 代码行数 | 文档文件 | 文档行数 | 占比 |\n")
+            f.write("|------|--------|----------|--------|----------|--------|----------|------|\n")
             
             for i, repo in enumerate(sorted_by_lines[:10], 1):
                 percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
                 medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}"
                 lang_emoji = self.get_language_emoji(repo['language'])
-                f.write(f"| {medal} | **{repo['name']}** | {lang_emoji} {repo['language']} | {repo['files']:,} | {repo['lines']:,} | {percentage:.1f}% |\n")
+                f.write(f"| {medal} | **{repo['name']}** | {lang_emoji} {repo['language']} | {repo['files']:,} | {repo['lines']:,} | {repo.get('doc_files', 0):,} | {repo.get('doc_lines', 0):,} | {percentage:.1f}% |\n")
             
             # 仓库详细列表
             f.write("\n## 📁 仓库详细信息\n\n")
@@ -1069,8 +1157,27 @@ class CodeStatistics:
                 lang_emoji = self.get_language_emoji(repo['language'])
                 f.write(f"### 📦 {repo['name']}\n\n")
                 f.write(f"- **主要语言**: {lang_emoji} {repo['language']}\n")
-                f.write(f"- **文件数**: {repo['files']:,}\n")
+                f.write(f"- **代码文件数**: {repo['files']:,}\n")
                 f.write(f"- **代码行数**: {repo['lines']:,}\n")
+                
+                # 添加代码组成分析
+                total_lines = repo['lines']
+                code_lines = repo.get('code_lines', 0)
+                comment_lines = repo.get('comment_lines', 0)
+                blank_lines = repo.get('blank_lines', 0)
+                
+                if total_lines > 0:
+                    comment_rate = (comment_lines / total_lines) * 100
+                    blank_rate = (blank_lines / total_lines) * 100
+                    code_rate = (code_lines / total_lines) * 100
+                    f.write(f"  - 纯代码行: {code_lines:,} ({code_rate:.1f}%)\n")
+                    f.write(f"  - 注释行: {comment_lines:,} ({comment_rate:.1f}%)\n")
+                    f.write(f"  - 空行: {blank_lines:,} ({blank_rate:.1f}%)\n")
+                
+                f.write(f"- **文档文件数**: {repo.get('doc_files', 0):,}\n")
+                f.write(f"- **文档行数**: {repo.get('doc_lines', 0):,}\n")
+                f.write(f"- **代码文件大小**: {self.format_size(repo.get('size', 0))}\n")
+                f.write(f"- **仓库总大小**: {self.format_size(repo.get('total_size', 0))}\n")
                 
                 # 显示文件类型分布
                 if repo.get('details'):
@@ -1104,119 +1211,93 @@ class CodeStatistics:
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        /* 自定义样式 */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f5f5f5;
         }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 20px;
-            text-align: center;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        
+        /* 暗色模式支持 */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --primary-gradient: linear-gradient(135deg, #4c1d95 0%, #5b21b6 100%);
+            }
         }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .header p { font-size: 1.1em; opacity: 0.9; }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
+        
+        /* 图表动画 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        .stat-card {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s;
+        
+        .animate-fade-in {
+            animation: fadeIn 0.6s ease-out;
         }
-        .stat-card:hover { transform: translateY(-5px); }
-        .stat-card .emoji { font-size: 2.5em; margin-bottom: 10px; }
-        .stat-card .value { font-size: 2em; font-weight: bold; color: #4a5568; }
-        .stat-card .label { color: #718096; margin-top: 5px; }
-        .chart-container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
+        
+        /* 进度条动画 */
+        @keyframes progressAnimation {
+            from { width: 0; }
         }
-        .chart-container h2 { margin-bottom: 20px; color: #2d3748; }
-        .table-container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-            overflow-x: auto;
+        
+        .progress-animation {
+            animation: progressAnimation 1s ease-out;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
+        
+        /* 数字动画 */
+        @property --num {
+            syntax: '<integer>';
+            initial-value: 0;
+            inherits: false;
         }
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e2e8f0;
+        
+        .counter-animation {
+            counter-reset: num var(--num);
+            animation: counter 2s ease-out;
         }
-        th {
-            background-color: #f7fafc;
-            font-weight: 600;
-            color: #2d3748;
+        
+        .counter-animation::after {
+            content: counter(num);
         }
-        tr:hover { background-color: #f7fafc; }
-        .repo-card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
+        
+        @keyframes counter {
+            from { --num: 0; }
         }
-        .repo-card h3 {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        .progress-bar {
-            background: #e2e8f0;
-            height: 8px;
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 10px 0;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #4299e1, #667eea);
-            transition: width 0.3s;
-        }
-        .footer {
-            text-align: center;
-            color: #718096;
-            margin-top: 50px;
-            padding: 20px;
-        }
-        @media (max-width: 768px) {
-            .stats-grid { grid-template-columns: 1fr; }
+        
+        /* 打印样式 */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; }
+            .shadow-lg { box-shadow: none !important; }
         }
     </style>
 </head>
-<body>
-    <div class="container">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
 """)
             
             # 头部信息
             f.write(f"""
-        <div class="header">
-            <h1>📊 代码统计报告</h1>
-            <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 扫描目录: {self.current_dir}</p>
+        <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-xl p-8 mb-8 text-white animate-fade-in">
+            <h1 class="text-4xl font-bold mb-4 flex items-center justify-center">
+                <span class="mr-3">📊</span> 代码统计报告
+            </h1>
+            <div class="flex flex-wrap justify-center gap-4 text-sm opacity-90">
+                <div class="flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                </div>
+                <div class="flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                    </svg>
+                    {self.current_dir}
+                </div>
+            </div>
         </div>
 """)
             
@@ -1224,83 +1305,197 @@ class CodeStatistics:
             avg_lines_per_repo = summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0
             avg_lines_per_file = summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0
             
+            # 计算新的统计数据
+            comment_rate = (summary.get('total_comment_lines', 0) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+            blank_rate = (summary.get('total_blank_lines', 0) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+            code_rate = (summary.get('total_code_lines', summary['total_lines']) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+            
             f.write("""
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="emoji">🗂️</div>
-                <div class="value">{:,}</div>
-                <div class="label">仓库总数</div>
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- 仓库总数 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.1s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-5xl">🗂️</div>
+                    <div class="text-right">
+                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">仓库总数</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="emoji">📄</div>
-                <div class="value">{:,}</div>
-                <div class="label">文件总数</div>
+            
+            <!-- 文件总数 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.2s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-5xl">📄</div>
+                    <div class="text-right">
+                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">文件总数</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="emoji">📝</div>
-                <div class="value">{:,}</div>
-                <div class="label">代码总行数</div>
+            
+            <!-- 代码总行数 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.3s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-5xl">📝</div>
+                    <div class="text-right">
+                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">代码总行数</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="emoji">📊</div>
-                <div class="value">{:,}</div>
-                <div class="label">平均行/仓库</div>
+            
+            <!-- 总大小 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.4s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-5xl">💾</div>
+                    <div class="text-right">
+                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{}</div>
+                        <div class="text-sm text-gray-600 dark:text-gray-400">总大小</div>
+                    </div>
+                </div>
             </div>
         </div>
-""".format(summary['total_repos'], summary['total_files'], summary['total_lines'], avg_lines_per_repo))
+        
+        <!-- 代码质量指标 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <!-- 注释率 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.5s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">💬 注释率</div>
+                    <div class="text-2xl font-bold text-green-600">{:.1f}%</div>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                    <div class="bg-green-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
+                </div>
+                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 注释行</div>
+            </div>
             
-            # 语言分布图表
+            <!-- 代码率 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.6s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">⌨️ 代码率</div>
+                    <div class="text-2xl font-bold text-blue-600">{:.1f}%</div>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                    <div class="bg-blue-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
+                </div>
+                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 实际代码行</div>
+            </div>
+            
+            <!-- 空行率 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.7s">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">📏 空行率</div>
+                    <div class="text-2xl font-bold text-purple-600">{:.1f}%</div>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                    <div class="bg-purple-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
+                </div>
+                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 空行</div>
+            </div>
+        </div>
+""".format(
+                summary['total_repos'], 
+                summary['total_files'], 
+                summary['total_lines'],
+                self.format_size(summary.get('total_size', 0)),
+                comment_rate, comment_rate, summary.get('total_comment_lines', 0),
+                code_rate, code_rate, summary.get('total_code_lines', summary['total_lines']),
+                blank_rate, blank_rate, summary.get('total_blank_lines', 0)
+            ))
+            
+            # 图表部分
             sorted_languages = sorted(summary['by_language'].items(), 
                                     key=lambda x: x[1]['lines'], reverse=True)[:10]
             
             f.write("""
-        <div class="chart-container">
-            <h2>语言分布</h2>
-            <div style="position: relative; height: 400px; width: 100%;">
-                <canvas id="languageChart"></canvas>
+        <!-- 图表部分 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- 语言分布饼图 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.8s">
+                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🌐 语言分布</h3>
+                <div style="position: relative; height: 300px;">
+                    <canvas id="languageChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- 仓库大小柱状图 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.9s">
+                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📊 仓库大小对比 (TOP 10)</h3>
+                <div style="position: relative; height: 300px;">
+                    <canvas id="repoChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 代码组成分析 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.0s">
+            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📋 代码组成分析</h3>
+            <div style="position: relative; height: 400px;">
+                <canvas id="compositionChart"></canvas>
             </div>
         </div>
 """)
             
             # 语言统计表
             f.write("""
-        <div class="table-container">
-            <h2>📊 语言详细统计</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>排名</th>
-                        <th>语言</th>
-                        <th>仓库数</th>
-                        <th>文件数</th>
-                        <th>代码行数</th>
-                        <th>占比</th>
-                        <th>平均行/文件</th>
-                    </tr>
-                </thead>
-                <tbody>
+        <!-- 语言统计表 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.1s">
+            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📊 语言详细统计</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-900">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">排名</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">语言</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">仓库数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文件数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码行数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">注释率</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">占比</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">大小</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
 """)
             
             for idx, (lang, data) in enumerate(sorted_languages, 1):
                 percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-                avg_lines = data['lines'] // data['files'] if data['files'] > 0 else 0
+                comment_rate = (data.get('comment_lines', 0) / data['lines'] * 100) if data['lines'] > 0 else 0
                 lang_emoji = self.get_language_emoji(lang)
                 
                 f.write(f"""
-                    <tr>
-                        <td>{idx}</td>
-                        <td>{lang_emoji} {lang}</td>
-                        <td>{data['repos']}</td>
-                        <td>{data['files']:,}</td>
-                        <td>{data['lines']:,}</td>
-                        <td>{percentage:.1f}%</td>
-                        <td>{avg_lines}</td>
-                    </tr>
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">{idx}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                <span class="text-lg mr-2">{lang_emoji}</span>{lang}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['repos']}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['files']:,}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['lines']:,}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                <span class="text-green-600 dark:text-green-400">{comment_rate:.1f}%</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                <div class="flex items-center justify-end">
+                                    <span class="mr-2">{percentage:.1f}%</span>
+                                    <div class="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: {percentage:.1f}%"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                {self.format_size(data.get('size', 0))}
+                            </td>
+                        </tr>
 """)
             
             f.write("""
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </div>
         </div>
 """)
             
@@ -1308,36 +1503,68 @@ class CodeStatistics:
             sorted_by_lines = sorted(all_repos, key=lambda x: x['lines'], reverse=True)[:10]
             
             f.write("""
-        <div class="table-container">
-            <h2>🏆 仓库排行榜 (TOP 10)</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>排名</th>
-                        <th>仓库名</th>
-                        <th>主要语言</th>
-                        <th>文件数</th>
-                        <th>代码行数</th>
-                        <th>占比</th>
-                    </tr>
-                </thead>
-                <tbody>
+        <!-- 仓库排行榜 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.2s">
+            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🏆 仓库排行榜 (TOP 10)</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-900">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">排名</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">仓库名</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">主要语言</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文件数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码行数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文档行数</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">注释率</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">占比</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码大小</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">总大小</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
 """)
             
             for i, repo in enumerate(sorted_by_lines, 1):
                 percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                comment_rate = (repo.get('comment_lines', 0) / repo['lines'] * 100) if repo['lines'] > 0 else 0
                 medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}"
                 lang_emoji = self.get_language_emoji(repo['language'])
                 
                 f.write(f"""
-                    <tr>
-                        <td>{medal}</td>
-                        <td><strong>{repo['name']}</strong></td>
-                        <td>{lang_emoji} {repo['language']}</td>
-                        <td>{repo['files']:,}</td>
-                        <td>{repo['lines']:,}</td>
-                        <td>{percentage:.1f}%</td>
-                    </tr>
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                                <span class="text-2xl">{medal}</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                {repo['name']}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                <span class="text-lg mr-2">{lang_emoji}</span>{repo['language']}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{repo['files']:,}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{repo['lines']:,}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                <span class="text-purple-600 dark:text-purple-400">{repo.get('doc_lines', 0):,}</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                <span class="text-green-600 dark:text-green-400">{comment_rate:.1f}%</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                <div class="flex items-center justify-end">
+                                    <span class="mr-2">{percentage:.1f}%</span>
+                                    <div class="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                                        <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {percentage:.1f}%"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                {self.format_size(repo.get('size', 0))}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
+                                {self.format_size(repo.get('total_size', repo.get('size', 0)))}
+                            </td>
+                        </tr>
 """)
             
             f.write("""
@@ -1346,58 +1573,8 @@ class CodeStatistics:
         </div>
 """)
             
-            # 仓库详细信息
-            f.write("""
-        <div class="table-container">
-            <h2>📁 所有仓库</h2>
-""")
-            
-            # 排序
-            sort_key = self.args.sort
-            if sort_key == 'lines':
-                sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
-            elif sort_key == 'files':
-                sorted_repos = sorted(all_repos, key=lambda x: x['files'], reverse=True)
-            else:  # name
-                sorted_repos = sorted(all_repos, key=lambda x: x['name'])
-            
-            # 应用top限制
-            if self.args.top:
-                sorted_repos = sorted_repos[:self.args.top]
-            
-            for repo in sorted_repos:
-                lang_emoji = self.get_language_emoji(repo['language'])
-                percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-                
-                f.write(f"""
-            <div class="repo-card">
-                <h3>{lang_emoji} {repo['name']}</h3>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                    <div><strong>主要语言:</strong> {repo['language']}</div>
-                    <div><strong>文件数:</strong> {repo['files']:,}</div>
-                    <div><strong>代码行数:</strong> {repo['lines']:,}</div>
-                    <div><strong>占比:</strong> {percentage:.1f}%</div>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {percentage}%"></div>
-                </div>
-""")
-                
-                # 显示文件类型分布
-                if repo.get('details'):
-                    sorted_exts = sorted(repo['details'].items(), 
-                                       key=lambda x: x[1]['lines'], reverse=True)[:5]
-                    f.write("<div style='margin-top: 10px; color: #718096;'>")
-                    f.write("<strong>主要文件类型:</strong> ")
-                    ext_info = []
-                    for ext, data in sorted_exts:
-                        ext_info.append(f"{ext} ({data['files']} 文件, {data['lines']:,} 行)")
-                    f.write(" | ".join(ext_info))
-                    f.write("</div>")
-                
-                f.write("</div>")
-            
-            f.write("</div>")
+            # 仓库详细信息部分（现在不需要，信息已足够）
+            # 如果需要可以添加更详细的仓库卡片
             
             # 页脚
             f.write("""
@@ -1407,33 +1584,45 @@ class CodeStatistics:
     </div>
     
     <script>
-        // 语言分布图表
-        const ctx = document.getElementById('languageChart').getContext('2d');
+        // 配置 Chart.js 默认字体
+        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+        
+        // 语言分布饼图
+        const languageCtx = document.getElementById('languageChart').getContext('2d');
         const languageData = {
             labels: [""" + ", ".join([f"'{lang}'" for lang, _ in sorted_languages]) + """],
             datasets: [{
                 data: [""" + ", ".join([str(data['lines']) for _, data in sorted_languages]) + """],
                 backgroundColor: [
-                    '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
-                    '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
-                ]
+                    '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+                    '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16'
+                ],
+                borderWidth: 2,
+                borderColor: '#fff'
             }]
         };
         
-        new Chart(ctx, {
+        new Chart(languageCtx, {
             type: 'doughnut',
             data: languageData,
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
-                aspectRatio: 2,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         position: 'right',
                         labels: {
-                            padding: 20,
-                            font: {
-                                size: 14
+                            padding: 15,
+                            font: { size: 13 },
+                            generateLabels: function(chart) {
+                                const data = chart.data;
+                                const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                return data.labels.map((label, i) => ({
+                                    text: `${label} (${((data.datasets[0].data[i] / total) * 100).toFixed(1)}%)`,
+                                    fillStyle: data.datasets[0].backgroundColor[i],
+                                    hidden: false,
+                                    index: i
+                                }));
                             }
                         }
                     },
@@ -1448,6 +1637,160 @@ class CodeStatistics:
                     }
                 }
             }
+        });
+        
+        // 仓库大小对比柱状图
+        const repoCtx = document.getElementById('repoChart').getContext('2d');
+        const repoLabels = [""" + ", ".join([f"'{repo['name']}'" for repo in sorted_by_lines]) + """];
+        const repoData = [""" + ", ".join([str(repo['lines']) for repo in sorted_by_lines]) + """];
+        
+        new Chart(repoCtx, {
+            type: 'bar',
+            data: {
+                labels: repoLabels.slice(0, 10),  // Top 10
+                datasets: [{
+                    label: '代码行数',
+                    data: repoData.slice(0, 10),
+                    backgroundColor: '#3B82F6',
+                    borderColor: '#2563EB',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return '代码行数: ' + context.parsed.y.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // 代码组成分析（堆叠柱状图）
+        const compositionCtx = document.getElementById('compositionChart').getContext('2d');
+        const compositionData = {
+            labels: [""" + ", ".join([f"'{repo['name']}'" for repo in sorted_by_lines[:10]]) + """],
+            code: [""" + ", ".join([str(repo.get('code_lines', repo['lines'])) for repo in sorted_by_lines[:10]]) + """],
+            comment: [""" + ", ".join([str(repo.get('comment_lines', 0)) for repo in sorted_by_lines[:10]]) + """],
+            blank: [""" + ", ".join([str(repo.get('blank_lines', 0)) for repo in sorted_by_lines[:10]]) + """],
+            doc: [""" + ", ".join([str(repo.get('doc_lines', 0)) for repo in sorted_by_lines[:10]]) + """]
+        };
+        
+        new Chart(compositionCtx, {
+            type: 'bar',
+            data: {
+                labels: compositionData.labels,
+                datasets: [
+                    {
+                        label: '代码行',
+                        data: compositionData.code,
+                        backgroundColor: '#3B82F6',
+                        borderColor: '#2563EB',
+                        borderWidth: 1
+                    },
+                    {
+                        label: '注释行',
+                        data: compositionData.comment,
+                        backgroundColor: '#10B981',
+                        borderColor: '#059669',
+                        borderWidth: 1
+                    },
+                    {
+                        label: '空行',
+                        data: compositionData.blank,
+                        backgroundColor: '#F59E0B',
+                        borderColor: '#D97706',
+                        borderWidth: 1
+                    },
+                    {
+                        label: '文档行',
+                        data: compositionData.doc,
+                        backgroundColor: '#8B5CF6',
+                        borderColor: '#7C3AED',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        stacked: true,
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' 行';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // 暗色模式切换
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const htmlElement = document.documentElement;
+        
+        // 检查本地存储的主题设置
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        if (currentTheme === 'dark') {
+            htmlElement.classList.add('dark');
+        }
+        
+        darkModeToggle.addEventListener('click', () => {
+            htmlElement.classList.toggle('dark');
+            const theme = htmlElement.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+            
+            // 更新图表颜色
+            const isDark = theme === 'dark';
+            Chart.defaults.color = isDark ? '#E5E7EB' : '#374151';
+            Chart.defaults.borderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+            Chart.defaults.plugins.legend.labels.color = isDark ? '#E5E7EB' : '#374151';
+            
+            // 重新渲染图表
+            window.location.reload();
         });
     </script>
 </body>
@@ -1467,7 +1810,21 @@ class CodeStatistics:
                 print(f"\n仓库: {repo['name']}")
                 print(f"  主要语言: {repo['language']}")
                 print(f"  文件数: {repo['files']:,}")
-                print(f"  代码行数: {repo['lines']:,}")
+                print(f"  总行数: {repo['lines']:,}")
+                
+                # 计算并显示注释率和空行率
+                total_lines = repo['lines']
+                code_lines = repo.get('code_lines', 0)
+                comment_lines = repo.get('comment_lines', 0)
+                blank_lines = repo.get('blank_lines', 0)
+                
+                if total_lines > 0:
+                    comment_rate = (comment_lines / total_lines) * 100
+                    blank_rate = (blank_lines / total_lines) * 100
+                    code_rate = (code_lines / total_lines) * 100
+                    print(f"    - 纯代码行: {code_lines:,} ({code_rate:.1f}%)")
+                    print(f"    - 注释行: {comment_lines:,} ({comment_rate:.1f}%)")
+                    print(f"    - 空行: {blank_lines:,} ({blank_rate:.1f}%)")
                 
                 # 显示前5个文件类型
                 sorted_exts = sorted(repo['details'].items(), 
@@ -1482,8 +1839,27 @@ class CodeStatistics:
         print("总体统计")
         print("=" * 80)
         print(f"仓库总数: {summary['total_repos']}")
-        print(f"文件总数: {summary['total_files']:,}")
+        print(f"代码文件数: {summary['total_files']:,}")
         print(f"代码总行数: {summary['total_lines']:,}")
+        
+        # 显示代码组成分析
+        total_code_lines = summary.get('total_code_lines', 0)
+        total_comment_lines = summary.get('total_comment_lines', 0)
+        total_blank_lines = summary.get('total_blank_lines', 0)
+        if summary['total_lines'] > 0:
+            code_rate = (total_code_lines / summary['total_lines']) * 100
+            comment_rate = (total_comment_lines / summary['total_lines']) * 100
+            blank_rate = (total_blank_lines / summary['total_lines']) * 100
+            print(f"  - 纯代码行: {total_code_lines:,} ({code_rate:.1f}%)")
+            print(f"  - 注释行: {total_comment_lines:,} ({comment_rate:.1f}%)")
+            print(f"  - 空行: {total_blank_lines:,} ({blank_rate:.1f}%)")
+        
+        print(f"文档文件数: {summary.get('total_doc_files', 0):,}")
+        print(f"文档总行数: {summary.get('total_doc_lines', 0):,}")
+        print(f"\n大小统计:")
+        print(f"  代码大小: {self.format_size(summary.get('total_size', 0))}")
+        print(f"  文档大小: {self.format_size(summary.get('total_doc_size', 0))}")
+        print(f"  仓库总大小: {self.format_size(summary.get('total_all_size', summary.get('total_size', 0)))}")
         
         # 按语言统计
         print("\n按语言统计:")
