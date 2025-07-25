@@ -1,0 +1,1458 @@
+#!/usr/bin/env python3
+"""
+代码统计脚本 - 统计当前目录下所有仓库的代码行数
+支持多种参数自定义统计行为
+"""
+
+__version__ = "1.2.0"
+
+import os
+import argparse
+from pathlib import Path
+from collections import defaultdict
+import json
+import csv
+import fnmatch
+import concurrent.futures
+from datetime import datetime
+import time
+import re
+
+# 需要排除的目录模式
+DEFAULT_EXCLUDE_DIRS = {
+    # Python
+    '__pycache__', '.venv', 'venv', 'env', '.env', 'virtualenv',
+    '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
+    '*.egg-info', '.eggs', 'site-packages', 'htmlcov',
+    '.hypothesis', '.coverage', '.ruff_cache',
+    
+    # JavaScript/Node
+    'node_modules', '.npm', 'bower_components', 'jspm_packages',
+    '.yarn', '.pnp', 'coverage', '.nyc_output', '.next',
+    '.nuxt', '.cache', 'dist', 'out', '.parcel-cache',
+    '.turbo', '.vercel', '.netlify', '.sveltekit',
+    
+    # Go
+    'vendor', 'pkg', '.go', 'bin',
+    
+    # Java/JVM
+    'target', '.gradle', '.mvn', 'out', 'classes',
+    '.m2', 'generated', 'generated-sources', 'generated-test-sources',
+    
+    # .NET
+    'bin', 'obj', '.vs', 'packages', '.nuget',
+    '_ReSharper*', '*.resharper*',
+    
+    # Ruby
+    '.bundle', 'gems', '.sass-cache', '_site',
+    
+    # PHP
+    'vendor', '.phpunit.result.cache', '.php_cs.cache',
+    '.phpstan', '.psalm',
+    
+    # Rust
+    'target', 'Cargo.lock',
+    
+    # Dart/Flutter
+    '.dart_tool', '.flutter-plugins', '.flutter-plugins-dependencies',
+    'build', '.pub-cache', '.pub',
+    
+    # iOS/macOS
+    'Pods', '.build', 'xcuserdata', '*.xcworkspace',
+    'DerivedData', '.swiftpm',
+    
+    # Android
+    '.gradle', 'gradle', 'build', '.android',
+    'local.properties', '*.iml',
+    
+    # Elixir
+    '_build', 'deps', '.fetch', 'erl_crash.dump',
+    '*.ez', 'priv/static',
+    
+    # General
+    '.git', '.svn', '.hg', '.bzr', '_darcs',
+    '.idea', '.vscode', '.vs', '.settings', '.project',
+    'logs', 'log', 'tmp', 'temp', 'cache', '.cache',
+    '.DS_Store', 'Thumbs.db', 'desktop.ini',
+    '*.pyc', '*.pyo', '*.swp', '*.swo', '*~',
+    '.terraform', '.vagrant', '.docker'
+}
+
+# 文档和配置文件扩展名（需要排除）
+DOC_EXTENSIONS = {
+    # 文档文件
+    '.md', '.markdown', '.rst', '.txt', '.doc', '.docx',
+    '.pdf', '.odt', '.rtf', '.tex', '.wiki', '.org',
+    '.adoc', '.asciidoc', '.pod', '.man',
+    
+    # 配置文件
+    '.yml', '.yaml', '.json', '.xml', '.toml', '.ini',
+    '.cfg', '.conf', '.config', '.properties', '.props',
+    '.env', '.env.example', '.env.sample', '.env.local',
+    
+    # 锁文件和日志
+    '.lock', '.log', '.pid', '.seed', '.csv', '.tsv',
+    
+    # 忽略文件
+    '.gitignore', '.dockerignore', '.editorconfig',
+    '.gitattributes', '.npmignore', '.prettierignore',
+    '.eslintignore', '.stylelintignore',
+    
+    # 其他
+    'LICENSE', 'README', 'CHANGELOG', 'TODO',
+    'AUTHORS', 'CONTRIBUTORS', 'NOTICE', 'PATENTS'
+}
+
+# 二进制文件扩展名（需要排除）
+BINARY_EXTENSIONS = {
+    # 可执行文件
+    '.exe', '.dll', '.so', '.dylib', '.lib', '.a', '.o', '.obj',
+    '.class', '.jar', '.war', '.ear', '.pyc', '.pyo', '.pyd',
+    '.wasm', '.bc', '.out', '.app', '.elf', '.deb', '.rpm',
+    
+    # 压缩文件
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz',
+    '.lz', '.lzma', '.z', '.Z', '.dz', '.bz', '.tbz', '.tbz2',
+    '.taz', '.tlz', '.txz', '.tzo', '.lz4', '.zst', '.zstd',
+    
+    # 图片文件
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg',
+    '.webp', '.tiff', '.tif', '.psd', '.raw', '.heif', '.heic',
+    '.dng', '.cr2', '.nef', '.arw', '.rw2', '.raf', '.orf',
+    
+    # 音频文件
+    '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a',
+    '.mp2', '.mp1', '.opus', '.vorbis', '.amr', '.ac3', '.ec3',
+    '.mka', '.m3u', '.m3u8', '.pls', '.cue',
+    
+    # 视频文件
+    '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm',
+    '.m4v', '.mpg', '.mpeg', '.3gp', '.3g2', '.mxf', '.ts',
+    '.m2ts', '.vob', '.ogv', '.drc', '.mng', '.qt', '.yuv',
+    '.rm', '.rmvb', '.asf', '.amv', '.m4p', '.m4v', '.svi',
+    
+    # 字体文件
+    '.ttf', '.otf', '.woff', '.woff2', '.eot', '.sfnt', '.fon',
+    '.fnt', '.font', '.ttc', '.pfb', '.pfm', '.afm',
+    
+    # 数据库文件
+    '.db', '.sqlite', '.sqlite3', '.mdb', '.accdb', '.dbf',
+    
+    # 办公文档（通常是二进制）
+    '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.odt', '.ods', '.odp', '.pdf',
+    
+    # 模型和数据文件
+    '.pkl', '.pickle', '.npy', '.npz', '.h5', '.hdf5', '.mat',
+    '.model', '.weights', '.pb', '.pth', '.pt', '.onnx',
+    '.safetensors', '.ckpt', '.bin', '.dat', '.data',
+    
+    # Git 对象
+    '.pack', '.idx',
+    
+    # 其他二进制格式
+    '.iso', '.dmg', '.pkg', '.msi', '.apk', '.ipa', '.dex',
+    '.bundle', '.framework', '.xcframework', '.aar',
+    '.rdb', '.aof', '.dump', '.mem', '.swap', '.core',
+    '.DS_Store', '.localized', '.Spotlight-V100', '.Trashes',
+    '.fseventsd', '.hotfiles.btree', '.DocumentRevisions-V100',
+    '.TemporaryItems', '.apdisk', '.VolumeIcon.icns'
+}
+
+# 代码文件扩展名（包含）
+CODE_EXTENSIONS = {
+    # Python
+    '.py', '.pyw', '.pyx', '.pxd', '.pxi', '.pyi',
+    
+    # Go
+    '.go', '.mod',
+    
+    # JavaScript/TypeScript/Node
+    '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.es6',
+    '.coffee', '.litcoffee',
+    
+    # Java/JVM Languages
+    '.java', '.kt', '.kts', '.scala', '.sc', '.groovy', '.gvy',
+    '.clj', '.cljs', '.cljc', '.edn',
+    
+    # C/C++/Objective-C
+    '.c', '.cc', '.cpp', '.cxx', '.c++', '.h', '.hh', '.hpp', '.hxx', '.h++',
+    '.ino', '.cu', '.cuh', '.m', '.mm',
+    
+    # C#/.NET
+    '.cs', '.csx', '.vb', '.fs', '.fsi', '.fsx', '.fsscript',
+    
+    # Ruby
+    '.rb', '.rbw', '.rake', '.gemspec', '.ru', '.erb', '.haml', '.slim',
+    
+    # PHP
+    '.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.php8', '.phps',
+    
+    # Rust
+    '.rs',
+    
+    # Swift
+    '.swift',
+    
+    # Shell/Bash
+    '.sh', '.bash', '.zsh', '.fish', '.ksh', '.csh', '.tcsh',
+    '.ps1', '.psm1', '.psd1', '.ps1xml', '.pssc', '.bat', '.cmd',
+    
+    # Web Frontend
+    '.html', '.htm', '.xhtml', '.xml', '.css', '.scss', '.sass', '.less', '.styl',
+    '.vue', '.svelte', '.astro', '.jsx', '.tsx',
+    
+    # Mobile
+    '.dart', '.gradle', '.pro',
+    
+    # Database
+    '.sql', '.plsql', '.tsql', '.psql', '.mysql',
+    
+    # Data Science / ML
+    '.r', '.R', '.rmd', '.Rmd', '.jl', '.ipynb',
+    '.mat', '.m', '.mlx',
+    
+    # Functional Programming
+    '.hs', '.lhs', '.elm', '.ml', '.mli', '.fs', '.fsi', '.fsx',
+    '.erl', '.hrl', '.ex', '.exs', '.nim', '.nims',
+    
+    # Systems Programming
+    '.asm', '.s', '.S', '.nasm', '.v', '.vhd', '.vhdl',
+    
+    # Scripting
+    '.pl', '.pm', '.pod', '.t', '.lua', '.tcl', '.awk',
+    '.sed', '.vim', '.vimrc', '.emacs', '.el',
+    
+    # Configuration as Code
+    '.tf', '.tfvars', '.hcl', '.nomad', '.workflow', '.wdl',
+    
+    # Other Languages
+    '.pas', '.pp', '.inc', '.d', '.di', '.zig', '.odin',
+    '.ada', '.adb', '.ads', '.f', '.f90', '.f95', '.f03',
+    '.cob', '.cbl', '.lisp', '.lsp', '.cl', '.rkt', '.scm',
+    '.pro', '.P', '.ecl', '.ncl', '.sml', '.sig',
+    
+    # Markup/Template
+    '.jsp', '.asp', '.aspx', '.ejs', '.pug', '.jade', '.hbs',
+    '.mustache', '.twig', '.liquid', '.jinja', '.j2',
+    
+    # Build/Make
+    '.cmake', '.mk', '.mak', '.gnumakefile', '.makefile',
+    '.ninja', '.gn', '.gni', '.bazel', '.bzl', '.BUILD',
+    
+    # Documentation (that contains code)
+    '.tex', '.cls', '.sty', '.bib',
+    
+    # Game Development
+    '.cs', '.shader', '.cginc', '.hlsl', '.glsl', '.vert', '.frag',
+    '.metal', '.wgsl',
+    
+    # Smart Contracts
+    '.sol', '.vy', '.yul', '.move'
+}
+
+# 语言映射
+LANGUAGE_MAP = {
+    # Python
+    '.py': 'python', '.pyw': 'python', '.pyx': 'python',
+    '.pxd': 'python', '.pxi': 'python', '.pyi': 'python',
+    
+    # Go
+    '.go': 'go', '.mod': 'go',
+    
+    # JavaScript/TypeScript
+    '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript',
+    '.cjs': 'javascript', '.es6': 'javascript',
+    '.ts': 'typescript', '.tsx': 'typescript',
+    '.coffee': 'coffeescript', '.litcoffee': 'coffeescript',
+    
+    # Java/JVM
+    '.java': 'java',
+    '.kt': 'kotlin', '.kts': 'kotlin',
+    '.scala': 'scala', '.sc': 'scala',
+    '.groovy': 'groovy', '.gvy': 'groovy',
+    '.clj': 'clojure', '.cljs': 'clojure', '.cljc': 'clojure',
+    
+    # C/C++/Objective-C
+    '.c': 'c', '.h': 'c',
+    '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.c++': 'cpp',
+    '.hh': 'cpp', '.hpp': 'cpp', '.hxx': 'cpp', '.h++': 'cpp',
+    '.cu': 'cuda', '.cuh': 'cuda',
+    '.m': 'objc', '.mm': 'objcpp',
+    '.ino': 'arduino',
+    
+    # C#/.NET
+    '.cs': 'csharp', '.csx': 'csharp',
+    '.vb': 'vbnet',
+    '.fs': 'fsharp', '.fsi': 'fsharp', '.fsx': 'fsharp',
+    
+    # Ruby
+    '.rb': 'ruby', '.rbw': 'ruby', '.rake': 'ruby',
+    '.gemspec': 'ruby', '.ru': 'ruby',
+    '.erb': 'erb', '.haml': 'haml', '.slim': 'slim',
+    
+    # PHP
+    '.php': 'php', '.phtml': 'php', '.php3': 'php',
+    '.php4': 'php', '.php5': 'php', '.php7': 'php',
+    '.php8': 'php', '.phps': 'php',
+    
+    # Rust
+    '.rs': 'rust',
+    
+    # Swift
+    '.swift': 'swift',
+    
+    # Shell
+    '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
+    '.fish': 'shell', '.ksh': 'shell', '.csh': 'shell',
+    '.tcsh': 'shell',
+    '.ps1': 'powershell', '.psm1': 'powershell', '.psd1': 'powershell',
+    '.bat': 'batch', '.cmd': 'batch',
+    
+    # Web
+    '.html': 'html', '.htm': 'html', '.xhtml': 'html',
+    '.xml': 'xml',
+    '.css': 'css', '.scss': 'scss', '.sass': 'sass',
+    '.less': 'less', '.styl': 'stylus',
+    '.vue': 'vue', '.svelte': 'svelte', '.astro': 'astro',
+    
+    # Mobile
+    '.dart': 'dart',
+    '.gradle': 'gradle',
+    
+    # Database
+    '.sql': 'sql', '.plsql': 'plsql', '.tsql': 'tsql',
+    '.psql': 'postgresql', '.mysql': 'mysql',
+    
+    # Data Science
+    '.r': 'r', '.R': 'r', '.rmd': 'rmarkdown', '.Rmd': 'rmarkdown',
+    '.jl': 'julia',
+    '.ipynb': 'jupyter',
+    '.mat': 'matlab', '.m': 'matlab', '.mlx': 'matlab',
+    
+    # Functional
+    '.hs': 'haskell', '.lhs': 'haskell',
+    '.elm': 'elm',
+    '.ml': 'ocaml', '.mli': 'ocaml',
+    '.erl': 'erlang', '.hrl': 'erlang',
+    '.ex': 'elixir', '.exs': 'elixir',
+    '.nim': 'nim', '.nims': 'nim',
+    
+    # Systems
+    '.asm': 'assembly', '.s': 'assembly', '.S': 'assembly',
+    '.nasm': 'nasm',
+    '.v': 'verilog', '.vhd': 'vhdl', '.vhdl': 'vhdl',
+    
+    # Scripting
+    '.pl': 'perl', '.pm': 'perl', '.pod': 'perl', '.t': 'perl',
+    '.lua': 'lua',
+    '.tcl': 'tcl',
+    '.awk': 'awk',
+    '.vim': 'viml', '.vimrc': 'viml',
+    '.el': 'elisp', '.emacs': 'elisp',
+    
+    # Configuration as Code
+    '.tf': 'terraform', '.tfvars': 'terraform',
+    '.hcl': 'hcl', '.nomad': 'hcl',
+    '.workflow': 'github-actions', '.wdl': 'wdl',
+    
+    # Other Languages
+    '.pas': 'pascal', '.pp': 'pascal', '.inc': 'pascal',
+    '.d': 'd', '.di': 'd',
+    '.zig': 'zig',
+    '.odin': 'odin',
+    '.ada': 'ada', '.adb': 'ada', '.ads': 'ada',
+    '.f': 'fortran', '.f90': 'fortran', '.f95': 'fortran',
+    '.cob': 'cobol', '.cbl': 'cobol',
+    '.lisp': 'lisp', '.lsp': 'lisp', '.cl': 'commonlisp',
+    '.rkt': 'racket', '.scm': 'scheme',
+    '.pro': 'prolog', '.P': 'prolog',
+    '.ecl': 'ecl', '.ncl': 'ncl',
+    '.sml': 'sml', '.sig': 'sml',
+    
+    # Templates
+    '.jsp': 'jsp', '.asp': 'asp', '.aspx': 'aspx',
+    '.ejs': 'ejs', '.pug': 'pug', '.jade': 'jade',
+    '.hbs': 'handlebars', '.mustache': 'mustache',
+    '.twig': 'twig', '.liquid': 'liquid',
+    '.jinja': 'jinja', '.j2': 'jinja',
+    
+    # Build
+    '.cmake': 'cmake', '.mk': 'make', '.mak': 'make',
+    '.ninja': 'ninja', '.gn': 'gn', '.gni': 'gn',
+    '.bazel': 'bazel', '.bzl': 'bazel', '.BUILD': 'bazel',
+    
+    # Documentation
+    '.tex': 'latex', '.cls': 'latex', '.sty': 'latex',
+    '.bib': 'bibtex',
+    
+    # Game Development
+    '.shader': 'shaderlab', '.cginc': 'shaderlab',
+    '.hlsl': 'hlsl', '.glsl': 'glsl',
+    '.vert': 'glsl', '.frag': 'glsl',
+    '.metal': 'metal', '.wgsl': 'wgsl',
+    
+    # Smart Contracts
+    '.sol': 'solidity', '.vy': 'vyper', '.yul': 'yul',
+    '.move': 'move'
+}
+
+class CodeStatistics:
+    def __init__(self, args):
+        self.args = args
+        self.exclude_dirs = set(DEFAULT_EXCLUDE_DIRS)
+        self.current_dir = os.getcwd()
+        self.progress_count = 0
+        self.total_repos = 0
+        
+        # 处理额外的排除模式
+        if args.excludes:
+            for pattern in args.excludes.split(','):
+                self.exclude_dirs.add(pattern.strip())
+        
+        # 处理语言过滤
+        self.target_languages = None
+        if args.lang:
+            self.target_languages = set(lang.strip().lower() for lang in args.lang.split(','))
+        
+        # 处理正则表达式排除模式
+        self.exclude_file_patterns = []
+        if args.exclude_files:
+            for pattern in args.exclude_files.split(','):
+                try:
+                    self.exclude_file_patterns.append(re.compile(pattern.strip()))
+                except re.error as e:
+                    print(f"警告：无效的文件排除正则表达式 '{pattern}': {e}")
+        
+        self.exclude_dir_patterns = []
+        if args.exclude_dirs:
+            for pattern in args.exclude_dirs.split(','):
+                try:
+                    self.exclude_dir_patterns.append(re.compile(pattern.strip()))
+                except re.error as e:
+                    print(f"警告：无效的目录排除正则表达式 '{pattern}': {e}")
+    
+    def get_language_emoji(self, language):
+        """获取语言对应的emoji图标"""
+        emoji_map = {
+            'python': '🐍',
+            'javascript': '📜',
+            'typescript': '📘',
+            'java': '☕',
+            'go': '🐹',
+            'rust': '🦀',
+            'cpp': '⚙️',
+            'c': '🔧',
+            'csharp': '🔷',
+            'ruby': '💎',
+            'php': '🐘',
+            'swift': '🦉',
+            'kotlin': '🟣',
+            'scala': '🔴',
+            'r': '📊',
+            'shell': '🐚',
+            'html': '🌐',
+            'css': '🎨',
+            'sql': '🗄️',
+            'dart': '🎯',
+            'vue': '💚',
+            'react': '⚛️',
+            'docker': '🐳',
+            'yaml': '📝',
+            'json': '📋',
+            'xml': '📄',
+            'markdown': '📑',
+            'terraform': '🏗️',
+            'kubernetes': '☸️',
+            'haskell': '🎓',
+            'elixir': '💧',
+            'erlang': '📡',
+            'julia': '🟢',
+            'matlab': '🔬',
+            'perl': '🐪',
+            'lua': '🌙',
+            'nim': '👑',
+            'zig': '⚡',
+            'assembly': '🔩',
+            'fortran': '🏛️',
+            'cobol': '🏦',
+            'pascal': '🔺',
+            'lisp': '🎭',
+            'clojure': '☯️',
+            'ocaml': '🐫',
+            'fsharp': '📐',
+            'vbnet': '🔵',
+            'powershell': '💠',
+            'batch': '📦',
+            'make': '🔨',
+            'cmake': '🛠️',
+            'gradle': '🐘',
+            'maven': '🏗️',
+            'unknown': '❓',
+            'other': '📌'
+        }
+        return emoji_map.get(language.lower(), '📄')
+    
+    def should_exclude_dir(self, dir_path):
+        """检查目录是否应该被排除"""
+        if self.args.all:
+            return False
+            
+        dir_name = os.path.basename(dir_path)
+        
+        # 检查完全匹配
+        if dir_name in self.exclude_dirs:
+            return True
+        
+        # 检查模式匹配
+        for pattern in self.exclude_dirs:
+            if '*' in pattern or '?' in pattern:
+                if fnmatch.fnmatch(dir_name, pattern):
+                    return True
+        
+        # 检查正则表达式匹配
+        for regex in self.exclude_dir_patterns:
+            if regex.search(dir_path):
+                return True
+        
+        return False
+    
+    def is_code_file(self, file_path):
+        """检查文件是否是代码文件"""
+        file_name = os.path.basename(file_path)
+        file_ext = Path(file_path).suffix.lower()
+        
+        # 排除二进制文件
+        if file_ext in BINARY_EXTENSIONS:
+            return False
+        
+        # 检查文件排除正则表达式
+        for regex in self.exclude_file_patterns:
+            if regex.search(file_path):
+                return False
+        
+        # 如果指定了统计所有文件（但仍排除二进制）
+        if self.args.all:
+            return True
+        
+        # 排除文档文件
+        if file_ext in DOC_EXTENSIONS or file_name.lower() in DOC_EXTENSIONS:
+            return False
+        
+        # 如果指定了语言过滤
+        if self.target_languages:
+            lang = LANGUAGE_MAP.get(file_ext, 'other')
+            if lang not in self.target_languages:
+                return False
+        
+        # 包含代码文件
+        if file_ext in CODE_EXTENSIONS:
+            return True
+        
+        # 检查没有扩展名但可能是脚本的文件
+        special_files = {
+            'Makefile', 'makefile', 'GNUmakefile', 'BSDmakefile',
+            'Dockerfile', 'dockerfile', 'Containerfile',
+            'Jenkinsfile', 'jenkinsfile',
+            'Rakefile', 'rakefile',
+            'Gemfile', 'Guardfile', 'Capfile', 'Thorfile',
+            'Vagrantfile', 'Berksfile', 'Cheffile',
+            'Pipfile', 'SConstruct', 'SConscript',
+            'BUILD', 'BUILD.bazel', 'WORKSPACE',
+            'CMakeLists.txt', 'meson.build',
+            'Cargo.toml', 'go.mod', 'go.sum',
+            'package.json', 'tsconfig.json',
+            'pom.xml', 'build.gradle', 'build.gradle.kts',
+            'requirements.txt', 'setup.py', 'setup.cfg',
+            'composer.json', 'phpunit.xml',
+            'Podfile', 'Package.swift',
+            '.gitlab-ci.yml', '.travis.yml', '.circleci/config.yml',
+            'azure-pipelines.yml', 'appveyor.yml',
+            '.github/workflows/*.yml', '.github/workflows/*.yaml'
+        }
+        
+        if not file_ext and file_name in special_files:
+            return True
+        
+        # 检查特殊模式匹配
+        for pattern in special_files:
+            if '*' in pattern and fnmatch.fnmatch(file_name, pattern):
+                return True
+        
+        return False
+    
+    def is_binary_file(self, file_path):
+        """检测文件是否为二进制文件"""
+        try:
+            with open(file_path, 'rb') as f:
+                # 读取前8192字节来判断
+                chunk = f.read(8192)
+                if not chunk:
+                    return False
+                
+                # 检测NULL字节
+                if b'\x00' in chunk:
+                    return True
+                
+                # 检测非文本字符的比例
+                text_chars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
+                non_text = len([b for b in chunk if b not in text_chars])
+                
+                # 如果非文本字符超过30%，认为是二进制文件
+                if non_text / len(chunk) > 0.30:
+                    return True
+                    
+            return False
+        except Exception:
+            return True  # 读取出错时假定为二进制文件
+
+    def count_lines(self, file_path):
+        """统计文件行数"""
+        # 先检测是否为二进制文件
+        if self.is_binary_file(file_path):
+            return 0
+            
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = sum(1 for _ in f)
+                
+                # 应用最小行数过滤
+                if self.args.min_lines and lines < self.args.min_lines:
+                    return 0
+                
+                # 应用最大行数过滤
+                if self.args.max_lines and lines > self.args.max_lines:
+                    return 0
+                
+                return lines
+        except Exception as e:
+            if self.args.verbose:
+                print(f"Error reading {file_path}: {e}")
+            return 0
+    
+    def analyze_repository(self, repo_path):
+        """分析单个仓库的代码统计"""
+        stats = defaultdict(lambda: {'files': 0, 'lines': 0})
+        total_files = 0
+        total_lines = 0
+        file_details = []
+        
+        for root, dirs, files in os.walk(repo_path):
+            # 过滤掉需要排除的目录
+            dirs[:] = [d for d in dirs if not self.should_exclude_dir(os.path.join(root, d))]
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                
+                if self.is_code_file(file_path):
+                    lines = self.count_lines(file_path)
+                    if lines > 0:
+                        ext = Path(file_path).suffix.lower() or 'no_extension'
+                        stats[ext]['files'] += 1
+                        stats[ext]['lines'] += lines
+                        total_files += 1
+                        total_lines += lines
+                        
+                        if self.args.verbose:
+                            relative_path = os.path.relpath(file_path, repo_path)
+                            file_details.append({
+                                'path': relative_path,
+                                'lines': lines,
+                                'extension': ext
+                            })
+        
+        return {
+            'total_files': total_files,
+            'total_lines': total_lines,
+            'by_extension': dict(stats),
+            'file_details': file_details if self.args.verbose else []
+        }
+    
+    def detect_language(self, repo_stats):
+        """根据文件扩展名检测主要编程语言"""
+        # 统计各语言的代码行数
+        language_lines = defaultdict(int)
+        for ext, data in repo_stats['by_extension'].items():
+            lang = LANGUAGE_MAP.get(ext, 'other')
+            language_lines[lang] += data['lines']
+        
+        # 返回代码行数最多的语言
+        if language_lines:
+            return max(language_lines.items(), key=lambda x: x[1])[0]
+        return 'unknown'
+    
+    def print_progress(self, message):
+        """打印进度信息"""
+        if self.args.verbose:
+            self.progress_count += 1
+            print(f"[{self.progress_count}/{self.total_repos}] {message}")
+    
+    def analyze_all_repos(self):
+        """分析所有仓库"""
+        all_repos = []
+        repo_paths = []
+        
+        # 收集所有仓库路径
+        # 如果指定了 --dirs 参数，统计指定的目录
+        if self.args.dirs:
+            for dir_name in self.args.dirs:
+                # 支持绝对路径和相对路径
+                if os.path.isabs(dir_name):
+                    dir_path = dir_name
+                else:
+                    dir_path = os.path.join(self.current_dir, dir_name)
+                
+                if os.path.isdir(dir_path):
+                    repo_name = os.path.basename(dir_path)
+                    repo_paths.append((repo_name, dir_path))
+                else:
+                    print(f"警告：目录不存在或不是目录: {dir_path}")
+        else:
+            # 原有逻辑：扫描当前目录下的所有仓库
+            items = os.listdir(self.current_dir)
+            
+            # 如果指定了特定仓库
+            if self.args.repo:
+                target_repos = set(repo.strip() for repo in self.args.repo.split(','))
+                items = [item for item in items if item in target_repos]
+            
+            for item in sorted(items):
+                item_path = os.path.join(self.current_dir, item)
+                
+                # 跳过非目录和以.开头的隐藏目录
+                if not os.path.isdir(item_path) or item.startswith('.'):
+                    continue
+                
+                # 跳过非仓库目录（仅在未指定 dirs 时检查）
+                if not os.path.exists(os.path.join(item_path, '.git')):
+                    continue
+                
+                repo_paths.append((item, item_path))
+        
+        self.total_repos = len(repo_paths)
+        
+        # 使用多线程并行处理
+        if self.args.parallel and len(repo_paths) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+                future_to_repo = {
+                    executor.submit(self.analyze_repository, path): (name, path) 
+                    for name, path in repo_paths
+                }
+                
+                for future in concurrent.futures.as_completed(future_to_repo):
+                    name, path = future_to_repo[future]
+                    self.print_progress(f"分析仓库: {name}")
+                    
+                    try:
+                        stats = future.result()
+                        if stats['total_files'] > 0:
+                            main_language = self.detect_language(stats)
+                            repo_info = {
+                                'name': name,
+                                'language': main_language,
+                                'files': stats['total_files'],
+                                'lines': stats['total_lines'],
+                                'details': stats['by_extension'],
+                                'file_details': stats.get('file_details', [])
+                            }
+                            all_repos.append(repo_info)
+                    except Exception as e:
+                        print(f"Error analyzing {name}: {e}")
+        else:
+            # 串行处理
+            for name, path in repo_paths:
+                self.print_progress(f"分析仓库: {name}")
+                stats = self.analyze_repository(path)
+                
+                if stats['total_files'] > 0:
+                    main_language = self.detect_language(stats)
+                    repo_info = {
+                        'name': name,
+                        'language': main_language,
+                        'files': stats['total_files'],
+                        'lines': stats['total_lines'],
+                        'details': stats['by_extension'],
+                        'file_details': stats.get('file_details', [])
+                    }
+                    all_repos.append(repo_info)
+        
+        return all_repos
+    
+    def generate_summary(self, all_repos):
+        """生成统计摘要"""
+        total_all_files = sum(repo['files'] for repo in all_repos)
+        total_all_lines = sum(repo['lines'] for repo in all_repos)
+        
+        language_summary = defaultdict(lambda: {'repos': 0, 'files': 0, 'lines': 0})
+        for repo in all_repos:
+            lang = repo['language']
+            language_summary[lang]['repos'] += 1
+            language_summary[lang]['files'] += repo['files']
+            language_summary[lang]['lines'] += repo['lines']
+        
+        return {
+            'total_repos': len(all_repos),
+            'total_files': total_all_files,
+            'total_lines': total_all_lines,
+            'by_language': dict(language_summary)
+        }
+    
+    def output_json(self, all_repos, summary):
+        """输出JSON格式"""
+        result = {
+            'generated_at': datetime.now().isoformat(),
+            'summary': summary,
+            'repositories': all_repos
+        }
+        
+        output_file = self.args.output_file or 'code_statistics.json'
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        if not self.args.summary:
+            print(f"\n详细统计结果已保存到: {output_file}")
+    
+    def output_csv(self, all_repos, summary):
+        """输出CSV格式"""
+        output_file = self.args.output_file or 'code_statistics.csv'
+        
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Repository', 'Language', 'Files', 'Lines'])
+            
+            for repo in all_repos:
+                writer.writerow([repo['name'], repo['language'], repo['files'], repo['lines']])
+            
+            writer.writerow([])
+            writer.writerow(['Summary'])
+            writer.writerow(['Total Repos', summary['total_repos']])
+            writer.writerow(['Total Files', summary['total_files']])
+            writer.writerow(['Total Lines', summary['total_lines']])
+        
+        if not self.args.summary:
+            print(f"\n统计结果已保存到: {output_file}")
+    
+    def output_markdown(self, all_repos, summary):
+        """输出Markdown格式"""
+        output_file = self.args.output_file or 'code_statistics.md'
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(f"# 代码统计报告\n\n")
+            f.write(f"> 📊 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"> 📁 扫描目录: `{self.current_dir}`\n\n")
+            
+            # 执行摘要
+            f.write("## 📋 执行摘要\n\n")
+            f.write("### 🎯 统计概览\n\n")
+            f.write("| 指标 | 数值 |\n")
+            f.write("|------|------|\n")
+            f.write(f"| 🗂️ **仓库总数** | {summary['total_repos']} |\n")
+            f.write(f"| 📄 **文件总数** | {summary['total_files']:,} |\n")
+            f.write(f"| 📝 **代码总行数** | {summary['total_lines']:,} |\n")
+            f.write(f"| 📊 **平均每仓库代码行数** | {summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0:,} |\n")
+            f.write(f"| 📈 **平均每文件代码行数** | {summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0} |\n\n")
+            
+            # 语言分布饼图（使用emoji模拟）
+            f.write("### 🌐 语言分布\n\n")
+            sorted_languages = sorted(summary['by_language'].items(), 
+                                    key=lambda x: x[1]['lines'], reverse=True)
+            
+            # 使用进度条可视化
+            max_lines = sorted_languages[0][1]['lines'] if sorted_languages else 0
+            for lang, data in sorted_languages[:10]:  # 只显示前10种语言
+                percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                bar_length = int((data['lines'] / max_lines) * 40) if max_lines > 0 else 0
+                bar = '█' * bar_length + '░' * (40 - bar_length)
+                f.write(f"**{lang:>15}** |{bar}| {percentage:>5.1f}% ({data['lines']:,} 行)\n")
+            
+            if len(sorted_languages) > 10:
+                f.write(f"\n*... 以及其他 {len(sorted_languages) - 10} 种语言*\n")
+            
+            # 按语言详细统计表
+            f.write("\n## 📊 按语言统计\n\n")
+            f.write("| # | 语言 | 仓库数 | 文件数 | 代码行数 | 占比 | 平均行/文件 |\n")
+            f.write("|---|------|--------|--------|----------|------|-------------|\n")
+            
+            for idx, (lang, data) in enumerate(sorted_languages, 1):
+                percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                avg_lines = data['lines'] // data['files'] if data['files'] > 0 else 0
+                lang_emoji = self.get_language_emoji(lang)
+                f.write(f"| {idx} | {lang_emoji} {lang} | {data['repos']} | {data['files']:,} | {data['lines']:,} | {percentage:.1f}% | {avg_lines} |\n")
+            
+            # 仓库排行榜
+            f.write("\n## 🏆 仓库排行榜\n\n")
+            
+            # 按代码行数排序
+            sorted_by_lines = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
+            f.write("### 📈 按代码行数 TOP 10\n\n")
+            f.write("| 排名 | 仓库名 | 主要语言 | 文件数 | 代码行数 | 占比 |\n")
+            f.write("|------|--------|----------|--------|----------|------|\n")
+            
+            for i, repo in enumerate(sorted_by_lines[:10], 1):
+                percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}"
+                lang_emoji = self.get_language_emoji(repo['language'])
+                f.write(f"| {medal} | **{repo['name']}** | {lang_emoji} {repo['language']} | {repo['files']:,} | {repo['lines']:,} | {percentage:.1f}% |\n")
+            
+            # 仓库详细列表
+            f.write("\n## 📁 仓库详细信息\n\n")
+            
+            # 排序
+            sort_key = self.args.sort
+            if sort_key == 'lines':
+                sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
+            elif sort_key == 'files':
+                sorted_repos = sorted(all_repos, key=lambda x: x['files'], reverse=True)
+            else:  # name
+                sorted_repos = sorted(all_repos, key=lambda x: x['name'])
+            
+            # 应用top限制
+            if self.args.top:
+                sorted_repos = sorted_repos[:self.args.top]
+            
+            for repo in sorted_repos:
+                lang_emoji = self.get_language_emoji(repo['language'])
+                f.write(f"### 📦 {repo['name']}\n\n")
+                f.write(f"- **主要语言**: {lang_emoji} {repo['language']}\n")
+                f.write(f"- **文件数**: {repo['files']:,}\n")
+                f.write(f"- **代码行数**: {repo['lines']:,}\n")
+                
+                # 显示文件类型分布
+                if repo.get('details'):
+                    f.write("- **文件类型分布**:\n")
+                    sorted_exts = sorted(repo['details'].items(), 
+                                       key=lambda x: x[1]['lines'], reverse=True)[:5]
+                    for ext, data in sorted_exts:
+                        f.write(f"  - `{ext}`: {data['files']} 个文件, {data['lines']:,} 行\n")
+                f.write("\n")
+            
+            # 统计信息页脚
+            f.write("---\n\n")
+            f.write("*使用 [code_statistics.py](https://github.com/yourusername/code-statistics) 生成*\n")
+        
+        if not self.args.summary:
+            print(f"\n统计结果已保存到: {output_file}")
+    
+    def output_html(self, all_repos, summary):
+        """输出HTML格式"""
+        output_file = self.args.output_file or 'code_statistics.html'
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            # HTML头部
+            f.write("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码统计报告</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .header p { font-size: 1.1em; opacity: 0.9; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card .emoji { font-size: 2.5em; margin-bottom: 10px; }
+        .stat-card .value { font-size: 2em; font-weight: bold; color: #4a5568; }
+        .stat-card .label { color: #718096; margin-top: 5px; }
+        .chart-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        .chart-container h2 { margin-bottom: 20px; color: #2d3748; }
+        .table-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #f7fafc;
+            font-weight: 600;
+            color: #2d3748;
+        }
+        tr:hover { background-color: #f7fafc; }
+        .repo-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .repo-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .progress-bar {
+            background: #e2e8f0;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4299e1, #667eea);
+            transition: width 0.3s;
+        }
+        .footer {
+            text-align: center;
+            color: #718096;
+            margin-top: 50px;
+            padding: 20px;
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+""")
+            
+            # 头部信息
+            f.write(f"""
+        <div class="header">
+            <h1>📊 代码统计报告</h1>
+            <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 扫描目录: {self.current_dir}</p>
+        </div>
+""")
+            
+            # 统计卡片
+            avg_lines_per_repo = summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0
+            avg_lines_per_file = summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0
+            
+            f.write("""
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="emoji">🗂️</div>
+                <div class="value">{:,}</div>
+                <div class="label">仓库总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="emoji">📄</div>
+                <div class="value">{:,}</div>
+                <div class="label">文件总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="emoji">📝</div>
+                <div class="value">{:,}</div>
+                <div class="label">代码总行数</div>
+            </div>
+            <div class="stat-card">
+                <div class="emoji">📊</div>
+                <div class="value">{:,}</div>
+                <div class="label">平均行/仓库</div>
+            </div>
+        </div>
+""".format(summary['total_repos'], summary['total_files'], summary['total_lines'], avg_lines_per_repo))
+            
+            # 语言分布图表
+            sorted_languages = sorted(summary['by_language'].items(), 
+                                    key=lambda x: x[1]['lines'], reverse=True)[:10]
+            
+            f.write("""
+        <div class="chart-container">
+            <h2>语言分布</h2>
+            <div style="position: relative; height: 400px; width: 100%;">
+                <canvas id="languageChart"></canvas>
+            </div>
+        </div>
+""")
+            
+            # 语言统计表
+            f.write("""
+        <div class="table-container">
+            <h2>📊 语言详细统计</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>语言</th>
+                        <th>仓库数</th>
+                        <th>文件数</th>
+                        <th>代码行数</th>
+                        <th>占比</th>
+                        <th>平均行/文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+""")
+            
+            for idx, (lang, data) in enumerate(sorted_languages, 1):
+                percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                avg_lines = data['lines'] // data['files'] if data['files'] > 0 else 0
+                lang_emoji = self.get_language_emoji(lang)
+                
+                f.write(f"""
+                    <tr>
+                        <td>{idx}</td>
+                        <td>{lang_emoji} {lang}</td>
+                        <td>{data['repos']}</td>
+                        <td>{data['files']:,}</td>
+                        <td>{data['lines']:,}</td>
+                        <td>{percentage:.1f}%</td>
+                        <td>{avg_lines}</td>
+                    </tr>
+""")
+            
+            f.write("""
+                </tbody>
+            </table>
+        </div>
+""")
+            
+            # 仓库排行榜
+            sorted_by_lines = sorted(all_repos, key=lambda x: x['lines'], reverse=True)[:10]
+            
+            f.write("""
+        <div class="table-container">
+            <h2>🏆 仓库排行榜 (TOP 10)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>仓库名</th>
+                        <th>主要语言</th>
+                        <th>文件数</th>
+                        <th>代码行数</th>
+                        <th>占比</th>
+                    </tr>
+                </thead>
+                <tbody>
+""")
+            
+            for i, repo in enumerate(sorted_by_lines, 1):
+                percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}"
+                lang_emoji = self.get_language_emoji(repo['language'])
+                
+                f.write(f"""
+                    <tr>
+                        <td>{medal}</td>
+                        <td><strong>{repo['name']}</strong></td>
+                        <td>{lang_emoji} {repo['language']}</td>
+                        <td>{repo['files']:,}</td>
+                        <td>{repo['lines']:,}</td>
+                        <td>{percentage:.1f}%</td>
+                    </tr>
+""")
+            
+            f.write("""
+                </tbody>
+            </table>
+        </div>
+""")
+            
+            # 仓库详细信息
+            f.write("""
+        <div class="table-container">
+            <h2>📁 所有仓库</h2>
+""")
+            
+            # 排序
+            sort_key = self.args.sort
+            if sort_key == 'lines':
+                sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
+            elif sort_key == 'files':
+                sorted_repos = sorted(all_repos, key=lambda x: x['files'], reverse=True)
+            else:  # name
+                sorted_repos = sorted(all_repos, key=lambda x: x['name'])
+            
+            # 应用top限制
+            if self.args.top:
+                sorted_repos = sorted_repos[:self.args.top]
+            
+            for repo in sorted_repos:
+                lang_emoji = self.get_language_emoji(repo['language'])
+                percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+                
+                f.write(f"""
+            <div class="repo-card">
+                <h3>{lang_emoji} {repo['name']}</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div><strong>主要语言:</strong> {repo['language']}</div>
+                    <div><strong>文件数:</strong> {repo['files']:,}</div>
+                    <div><strong>代码行数:</strong> {repo['lines']:,}</div>
+                    <div><strong>占比:</strong> {percentage:.1f}%</div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {percentage}%"></div>
+                </div>
+""")
+                
+                # 显示文件类型分布
+                if repo.get('details'):
+                    sorted_exts = sorted(repo['details'].items(), 
+                                       key=lambda x: x[1]['lines'], reverse=True)[:5]
+                    f.write("<div style='margin-top: 10px; color: #718096;'>")
+                    f.write("<strong>主要文件类型:</strong> ")
+                    ext_info = []
+                    for ext, data in sorted_exts:
+                        ext_info.append(f"{ext} ({data['files']} 文件, {data['lines']:,} 行)")
+                    f.write(" | ".join(ext_info))
+                    f.write("</div>")
+                
+                f.write("</div>")
+            
+            f.write("</div>")
+            
+            # 页脚
+            f.write("""
+        <div class="footer">
+            <p>Generated by code_statistics.py</p>
+        </div>
+    </div>
+    
+    <script>
+        // 语言分布图表
+        const ctx = document.getElementById('languageChart').getContext('2d');
+        const languageData = {
+            labels: [""" + ", ".join([f"'{lang}'" for lang, _ in sorted_languages]) + """],
+            datasets: [{
+                data: [""" + ", ".join([str(data['lines']) for _, data in sorted_languages]) + """],
+                backgroundColor: [
+                    '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+                    '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
+                ]
+            }]
+        };
+        
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: languageData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            padding: 20,
+                            font: {
+                                size: 14
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                return context.label + ': ' + context.parsed.toLocaleString() + ' 行 (' + percentage + '%)';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+""")
+        
+        if not self.args.summary:
+            print(f"\n统计结果已保存到: {output_file}")
+    
+    def output_console(self, all_repos, summary):
+        """输出到控制台"""
+        if not self.args.summary:
+            print(f"\n扫描目录: {self.current_dir}")
+            print("=" * 80)
+            
+            for repo in sorted(all_repos, key=lambda x: x['name']):
+                print(f"\n仓库: {repo['name']}")
+                print(f"  主要语言: {repo['language']}")
+                print(f"  文件数: {repo['files']:,}")
+                print(f"  代码行数: {repo['lines']:,}")
+                
+                # 显示前5个文件类型
+                sorted_exts = sorted(repo['details'].items(), 
+                                   key=lambda x: x[1]['lines'], reverse=True)[:5]
+                if sorted_exts:
+                    print("  主要文件类型:")
+                    for ext, data in sorted_exts:
+                        print(f"    {ext}: {data['files']} 个文件, {data['lines']:,} 行")
+        
+        # 输出总体统计
+        print("\n" + "=" * 80)
+        print("总体统计")
+        print("=" * 80)
+        print(f"仓库总数: {summary['total_repos']}")
+        print(f"文件总数: {summary['total_files']:,}")
+        print(f"代码总行数: {summary['total_lines']:,}")
+        
+        # 按语言统计
+        print("\n按语言统计:")
+        sorted_languages = sorted(summary['by_language'].items(), 
+                                key=lambda x: x[1]['lines'], reverse=True)
+        for lang, data in sorted_languages:
+            percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
+            print(f"  {lang}:")
+            print(f"    仓库数: {data['repos']}")
+            print(f"    文件数: {data['files']:,}")
+            print(f"    代码行数: {data['lines']:,} ({percentage:.1f}%)")
+        
+        # 按仓库排序
+        print("\n仓库排行（按代码行数）:")
+        sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
+        
+        # 应用top限制
+        if self.args.top:
+            sorted_repos = sorted_repos[:self.args.top]
+        else:
+            sorted_repos = sorted_repos[:10]
+        
+        for i, repo in enumerate(sorted_repos, 1):
+            print(f"  {i}. {repo['name']} ({repo['language']}): {repo['lines']:,} 行")
+    
+    def run(self):
+        """运行统计"""
+        start_time = time.time()
+        
+        # 分析所有仓库
+        all_repos = self.analyze_all_repos()
+        
+        # 生成摘要
+        summary = self.generate_summary(all_repos)
+        
+        # 根据输出格式输出结果
+        if self.args.output == 'json':
+            self.output_json(all_repos, summary)
+        elif self.args.output == 'csv':
+            self.output_csv(all_repos, summary)
+        elif self.args.output == 'markdown':
+            self.output_markdown(all_repos, summary)
+        elif self.args.output == 'html':
+            self.output_html(all_repos, summary)
+        
+        # 始终输出到控制台（除非指定了其他格式且设置了quiet）
+        if not self.args.quiet:
+            self.output_console(all_repos, summary)
+        
+        elapsed_time = time.time() - start_time
+        if self.args.verbose:
+            print(f"\n统计完成，耗时: {elapsed_time:.2f} 秒")
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(
+        description='代码统计工具 - 统计仓库代码行数',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  %(prog)s                      # 基本统计
+  %(prog)s --all                # 统计所有文件
+  %(prog)s --lang python,go     # 只统计Python和Go代码
+  %(prog)s --excludes "*test*"  # 排除测试文件
+  %(prog)s --output markdown    # 输出Markdown格式
+  %(prog)s --repo api,gateway   # 只统计特定仓库
+  %(prog)s --top 20             # 只显示前20个结果
+  %(prog)s --dirs api admin     # 只统计指定目录
+  %(prog)s --exclude-files ".*_test\\.py$,.*\\.bak$"  # 排除测试文件和备份文件
+  %(prog)s --exclude-dirs ".*/test/.*,.*/docs/.*"   # 排除test和docs目录
+        """
+    )
+    
+    # 添加版本号参数
+    parser.add_argument('--version', '-V', action='version',
+                        version=f'%(prog)s {__version__}')
+    
+    # 基本参数
+    parser.add_argument('--all', '-a', action='store_true',
+                        help='统计所有文件（包括依赖和文档）')
+    parser.add_argument('--excludes', type=str,
+                        help='额外的排除模式，用逗号分隔（支持通配符）')
+    parser.add_argument('--exclude-files', type=str,
+                        help='排除文件的正则表达式模式，用逗号分隔（如: .*_test\\.py$,.*\\.bak$）')
+    parser.add_argument('--exclude-dirs', type=str,
+                        help='排除目录的正则表达式模式，用逗号分隔（如: .*/test/.*,.*/backup/.*）')
+    parser.add_argument('--lang', type=str,
+                        help='指定统计的编程语言，用逗号分隔（如: python,go,javascript）')
+    parser.add_argument('--dirs', '-d', type=str, action='append',
+                        help='指定要统计的目录（可多次使用，如: -d api -d admin）')
+    
+    # 输出格式
+    parser.add_argument('--output', '-o', choices=['json', 'csv', 'markdown', 'html'],
+                        help='输出格式（默认输出到控制台）')
+    parser.add_argument('--output-file', '-O', type=str,
+                        help='输出文件名（默认根据格式自动命名）')
+    
+    # 过滤选项
+    parser.add_argument('--repo', type=str,
+                        help='指定特定仓库，用逗号分隔')
+    parser.add_argument('--min-lines', type=int,
+                        help='只统计行数大于指定值的文件')
+    parser.add_argument('--max-lines', type=int,
+                        help='只统计行数小于指定值的文件')
+    
+    # 显示选项
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='显示详细信息')
+    parser.add_argument('--summary', '-s', action='store_true',
+                        help='只显示摘要信息')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                        help='安静模式（不输出到控制台）')
+    parser.add_argument('--sort', choices=['lines', 'files', 'name'],
+                        default='lines', help='排序方式（默认按行数）')
+    parser.add_argument('--top', type=int,
+                        help='只显示前N个结果')
+    
+    # 性能选项
+    parser.add_argument('--parallel', '-p', action='store_true',
+                        help='使用多线程并行处理')
+    
+    args = parser.parse_args()
+    
+    # 创建统计实例并运行
+    stats = CodeStatistics(args)
+    stats.run()
+
+if __name__ == "__main__":
+    main()
