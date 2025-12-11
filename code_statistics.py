@@ -4,7 +4,7 @@
 支持多种参数自定义统计行为
 """
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 import os
 import argparse
@@ -26,65 +26,213 @@ try:
 except ImportError:
     HAS_YAML = False
 
-# 需要排除的目录模式
-DEFAULT_EXCLUDE_DIRS = {
-    # Python
-    '__pycache__', '.venv', 'venv', 'env', '.env', 'virtualenv',
-    '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
-    '*.egg-info', '.eggs', 'site-packages', 'htmlcov',
-    '.hypothesis', '.coverage', '.ruff_cache',
-    
-    # JavaScript/Node
-    'node_modules', '.npm', 'bower_components', 'jspm_packages',
-    '.yarn', '.pnp', 'coverage', '.nyc_output', '.next',
-    '.nuxt', '.cache', 'dist', 'out', '.parcel-cache',
-    '.turbo', '.vercel', '.netlify', '.sveltekit',
-    
-    # Go
-    'vendor', 'pkg', '.go', 'bin',
-    
-    # Java/JVM
-    'target', '.gradle', '.mvn', 'out', 'classes',
-    '.m2', 'generated', 'generated-sources', 'generated-test-sources',
-    
-    # .NET
-    'bin', 'obj', '.vs', 'packages', '.nuget',
-    '_ReSharper*', '*.resharper*',
-    
-    # Ruby
-    '.bundle', 'gems', '.sass-cache', '_site',
-    
-    # PHP
-    'vendor', '.phpunit.result.cache', '.php_cs.cache',
-    '.phpstan', '.psalm',
-    
-    # Rust
-    'target', 'Cargo.lock',
-    
-    # Dart/Flutter
-    '.dart_tool', '.flutter-plugins', '.flutter-plugins-dependencies',
-    'build', '.pub-cache', '.pub',
-    
-    # iOS/macOS
-    'Pods', '.build', 'xcuserdata', '*.xcworkspace',
-    'DerivedData', '.swiftpm',
-    
-    # Android
-    '.gradle', 'gradle', 'build', '.android',
-    'local.properties', '*.iml',
-    
-    # Elixir
-    '_build', 'deps', '.fetch', 'erl_crash.dump',
-    '*.ez', 'priv/static',
-    
-    # General
+# 基础排除目录（所有项目通用）
+BASE_EXCLUDE_DIRS = {
+    # 版本控制
     '.git', '.svn', '.hg', '.bzr', '_darcs',
+
+    # IDE 和编辑器
     '.idea', '.vscode', '.vs', '.settings', '.project',
-    'logs', 'log', 'tmp', 'temp', 'cache', '.cache',
+
+    # 临时文件和日志
+    'logs', 'log', 'tmp', 'temp', '.cache',
     '.DS_Store', 'Thumbs.db', 'desktop.ini',
-    '*.pyc', '*.pyo', '*.swp', '*.swo', '*~',
+    '*.swp', '*.swo', '*~',
+
+    # 基础设施
     '.terraform', '.vagrant', '.docker'
 }
+
+# 按语言/框架的排除目录
+LANGUAGE_EXCLUDE_DIRS = {
+    'python': {
+        # 虚拟环境
+        '__pycache__', '.venv', 'venv', 'env', '.env', 'virtualenv',
+        '.conda', 'envs', '__pypackages__',
+        # 测试和类型检查缓存
+        '.pytest_cache', '.mypy_cache', '.pytype', '.pyre',
+        '.tox', '.nox', '.hypothesis',
+        # 打包和分发
+        '*.egg-info', '.eggs', 'site-packages', 'dist', 'build',
+        # 覆盖率报告
+        'htmlcov', '.coverage',
+        # 其他工具缓存
+        '.ruff_cache', '.pdm-build', '.pdm-python',
+    },
+    'javascript': {
+        # 包管理器
+        'node_modules', '.npm', 'bower_components', 'jspm_packages',
+        '.yarn', '.pnp', '.pnpm-store',
+        # 测试覆盖率
+        'coverage', '.nyc_output',
+        # 框架构建目录
+        '.next', '.nuxt', '.parcel-cache', '.gatsby',
+        '.turbo', '.vercel', '.netlify', '.sveltekit',
+        '.docusaurus', '.vuepress', '.vitepress',
+        # 构建输出
+        'dist', 'build', 'out', 'lib',
+    },
+    'typescript': {
+        # 包管理器
+        'node_modules', '.npm', 'bower_components',
+        '.yarn', '.pnp', '.pnpm-store',
+        # 测试覆盖率
+        'coverage', '.nyc_output',
+        # 框架构建目录
+        '.next', '.nuxt', '.parcel-cache', '.gatsby',
+        '.turbo', '.vercel', '.netlify', '.sveltekit',
+        # 构建输出
+        'dist', 'build', 'out', 'lib',
+    },
+    'go': {
+        'vendor',  # Go modules vendor 目录
+        'bin',     # 常见输出目录
+    },
+    'java': {
+        # Maven/Gradle 构建输出
+        'target', 'build', 'out', 'classes',
+        '.gradle', '.mvn', '.m2',
+        # 生成的代码
+        'generated', 'generated-sources', 'generated-test-sources',
+        # Eclipse
+        '.settings', 'bin',
+    },
+    'kotlin': {
+        'target', 'build', 'out', 'classes',
+        '.gradle', '.mvn', '.m2',
+        'generated', '.kotlin',
+    },
+    'scala': {
+        'target', 'project/target', 'project/project',
+        '.bloop', '.metals', '.bsp',
+        '.sbt', '.ivy2',
+    },
+    'csharp': {
+        'bin', 'obj', '.vs', 'packages', '.nuget',
+        'TestResults', '.fake', 'paket-files',
+        '_ReSharper*', '*.resharper*',
+    },
+    'fsharp': {
+        'bin', 'obj', '.vs', 'packages', '.nuget',
+        '.fake', 'paket-files',
+    },
+    'ruby': {
+        '.bundle', 'vendor/bundle', 'vendor/cache',
+        '.sass-cache', '_site',
+        'coverage', 'tmp', 'log',
+    },
+    'php': {
+        'vendor',  # Composer 依赖
+        # Laravel 框架
+        'storage/framework', 'bootstrap/cache',
+        # 测试和静态分析缓存
+        '.phpunit.result.cache', '.phpunit.cache',
+        '.php_cs.cache', '.php-cs-fixer.cache',
+        '.phpstan', '.psalm',
+    },
+    'rust': {
+        'target',  # Cargo 构建输出
+        '.cargo',  # Cargo 缓存
+    },
+    'dart': {
+        '.dart_tool', 'build',
+        # Flutter
+        '.flutter-plugins', '.flutter-plugins-dependencies',
+        '.pub-cache', '.pub',
+        'ios/Pods', 'android/.gradle',
+    },
+    'swift': {
+        'Pods', '.build', 'Build',
+        'xcuserdata', '*.xcworkspace',
+        'DerivedData', '.swiftpm',
+    },
+    'objc': {
+        'Pods', '.build', 'Build',
+        'xcuserdata', '*.xcworkspace',
+        'DerivedData',
+    },
+    'c': {
+        # 构建输出
+        'build', 'bin', 'obj', 'out', 'lib',
+        # CMake
+        'CMakeFiles', 'cmake-build-*',
+        # Make
+        '*.o', '*.a', '*.so', '*.dylib',
+    },
+    'cpp': {
+        # 构建输出
+        'build', 'bin', 'obj', 'out', 'lib',
+        # CMake
+        'CMakeFiles', 'cmake-build-*',
+        # Make
+        '*.o', '*.a', '*.so', '*.dylib',
+        # vcpkg
+        'vcpkg_installed',
+    },
+    'elixir': {
+        '_build', 'deps', '.fetch',
+        'cover', 'doc',
+    },
+    'erlang': {
+        '_build', 'deps', '.fetch',
+        '_rel', 'log',
+    },
+    'haskell': {
+        '.stack-work', 'dist', 'dist-newstyle',
+        '.cabal-sandbox', '.ghc.environment.*',
+    },
+    'lua': {
+        'lua_modules', '.luarocks',
+    },
+    'perl': {
+        'blib', '_build', 'Build',
+        'local', 'fatlib',
+    },
+    'r': {
+        'packrat', 'renv',
+        '.Rproj.user', 'rsconnect',
+    },
+    'julia': {
+        '.julia', 'deps/build',
+    },
+    'clojure': {
+        'target', '.cpcache', '.lsp', '.clj-kondo',
+    },
+}
+
+# 项目类型检测标记文件
+PROJECT_MARKERS = {
+    'python': ['requirements.txt', 'setup.py', 'pyproject.toml', 'Pipfile', 'setup.cfg', 'poetry.lock'],
+    'javascript': ['package.json', 'yarn.lock', 'package-lock.json', 'pnpm-lock.yaml'],
+    'typescript': ['tsconfig.json'],
+    'go': ['go.mod', 'go.sum'],
+    'java': ['pom.xml', 'build.gradle', 'build.gradle.kts'],
+    'kotlin': ['build.gradle.kts', '*.kt'],
+    'scala': ['build.sbt', '*.scala'],
+    'csharp': ['*.csproj', '*.sln', 'packages.config', 'global.json'],
+    'fsharp': ['*.fsproj', '*.sln'],
+    'ruby': ['Gemfile', 'Rakefile', '*.gemspec'],
+    'php': ['composer.json', 'composer.lock', 'artisan'],
+    'rust': ['Cargo.toml', 'Cargo.lock'],
+    'dart': ['pubspec.yaml', 'pubspec.lock'],
+    'swift': ['Package.swift', '*.xcodeproj', '*.xcworkspace'],
+    'objc': ['*.xcodeproj', '*.xcworkspace', 'Podfile'],
+    'c': ['CMakeLists.txt', 'Makefile', '*.c'],
+    'cpp': ['CMakeLists.txt', 'Makefile', '*.cpp', '*.cc', '*.cxx'],
+    'elixir': ['mix.exs', 'mix.lock'],
+    'erlang': ['rebar.config', 'rebar.lock'],
+    'haskell': ['stack.yaml', '*.cabal', 'cabal.project'],
+    'lua': ['*.lua', '.luacheckrc'],
+    'perl': ['Makefile.PL', 'Build.PL', 'cpanfile'],
+    'r': ['DESCRIPTION', '*.Rproj'],
+    'julia': ['Project.toml', 'Manifest.toml'],
+    'clojure': ['project.clj', 'deps.edn'],
+}
+
+# 为了向后兼容，保留 DEFAULT_EXCLUDE_DIRS（合并所有语言的排除目录）
+DEFAULT_EXCLUDE_DIRS = BASE_EXCLUDE_DIRS.copy()
+for lang_excludes in LANGUAGE_EXCLUDE_DIRS.values():
+    DEFAULT_EXCLUDE_DIRS.update(lang_excludes)
 
 # 文档文件扩展名
 DOC_EXTENSIONS = {
@@ -411,15 +559,18 @@ LANGUAGE_MAP = {
 class CodeStatistics:
     def __init__(self, args):
         self.args = args
-        self.exclude_dirs = set(DEFAULT_EXCLUDE_DIRS)
+        # 使用基础排除目录，完整排除列表将在 analyze_repository 中动态构建
+        self.base_exclude_dirs = set(BASE_EXCLUDE_DIRS)
+        self.user_exclude_dirs = set()  # 用户指定的额外排除目录
+        self.exclude_dirs = set()  # 运行时使用的排除目录（会在 analyze_repository 中更新）
         self.current_dir = os.getcwd()
         self.progress_count = 0
         self.total_repos = 0
-        
+
         # 处理额外的排除模式
         if args.excludes:
             for pattern in args.excludes.split(','):
-                self.exclude_dirs.add(pattern.strip())
+                self.user_exclude_dirs.add(pattern.strip())
         
         # 处理语言过滤
         self.target_languages = None
@@ -529,7 +680,135 @@ class CodeStatistics:
             'other': '📌'
         }
         return emoji_map.get(language.lower(), '📄')
-    
+
+    def detect_project_types(self, repo_path):
+        """检测仓库中存在的项目类型/语言
+
+        Args:
+            repo_path: 仓库路径
+
+        Returns:
+            set: 检测到的语言/框架类型集合
+        """
+        detected_types = set()
+
+        try:
+            # 检查根目录的标记文件
+            for lang, markers in PROJECT_MARKERS.items():
+                for marker in markers:
+                    if '*' in marker:
+                        # 通配符模式，检查匹配的文件
+                        for item in os.listdir(repo_path):
+                            if fnmatch.fnmatch(item, marker):
+                                detected_types.add(lang)
+                                break
+                    else:
+                        # 精确匹配
+                        marker_path = os.path.join(repo_path, marker)
+                        if os.path.exists(marker_path):
+                            detected_types.add(lang)
+                            break
+
+            # 如果没有检测到，扫描文件扩展名来推断
+            if not detected_types:
+                ext_count = defaultdict(int)
+                scan_limit = 100  # 只扫描前100个文件
+                file_count = 0
+
+                for root, dirs, files in os.walk(repo_path):
+                    # 跳过隐藏目录和基础排除目录
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in BASE_EXCLUDE_DIRS]
+
+                    for file in files:
+                        if file_count >= scan_limit:
+                            break
+                        ext = Path(file).suffix.lower()
+                        if ext and ext not in BINARY_EXTENSIONS and ext not in CONFIG_EXTENSIONS:
+                            ext_count[ext] += 1
+                        file_count += 1
+
+                    if file_count >= scan_limit:
+                        break
+
+                # 根据文件扩展名推断语言
+                ext_to_lang = {
+                    '.py': 'python', '.pyw': 'python', '.pyx': 'python',
+                    '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript',
+                    '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript',
+                    '.go': 'go',
+                    '.java': 'java',
+                    '.kt': 'kotlin', '.kts': 'kotlin',
+                    '.scala': 'scala', '.sc': 'scala',
+                    '.cs': 'csharp',
+                    '.fs': 'fsharp', '.fsx': 'fsharp',
+                    '.rb': 'ruby', '.rake': 'ruby',
+                    '.php': 'php',
+                    '.rs': 'rust',
+                    '.dart': 'dart',
+                    '.swift': 'swift',
+                    '.m': 'objc', '.mm': 'objc',
+                    '.c': 'c', '.h': 'c',
+                    '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hxx': 'cpp',
+                    '.ex': 'elixir', '.exs': 'elixir',
+                    '.erl': 'erlang', '.hrl': 'erlang',
+                    '.hs': 'haskell', '.lhs': 'haskell',
+                    '.lua': 'lua',
+                    '.pl': 'perl', '.pm': 'perl',
+                    '.r': 'r', '.R': 'r',
+                    '.jl': 'julia',
+                    '.clj': 'clojure', '.cljs': 'clojure', '.cljc': 'clojure',
+                }
+
+                for ext, count in ext_count.items():
+                    if count >= 3 and ext in ext_to_lang:  # 至少3个同类型文件
+                        detected_types.add(ext_to_lang[ext])
+
+        except OSError:
+            pass
+
+        return detected_types
+
+    def build_exclude_dirs(self, repo_path=None):
+        """根据项目类型动态构建排除目录列表
+
+        Args:
+            repo_path: 仓库路径，用于检测项目类型。如果为 None，则返回基础排除目录
+
+        Returns:
+            set: 排除目录集合
+        """
+        # 始终包含基础排除目录
+        exclude_dirs = BASE_EXCLUDE_DIRS.copy()
+        # 默认启用智能排除，除非用户指定 --no-smart-exclude
+        no_smart_exclude = getattr(self.args, 'no_smart_exclude', False)
+        smart_exclude = not no_smart_exclude
+        verbose = getattr(self.args, 'verbose', False)
+
+        if repo_path and smart_exclude:
+            # 检测项目类型
+            detected_types = self.detect_project_types(repo_path)
+
+            if detected_types:
+                if verbose:
+                    print(f"  检测到项目类型: {', '.join(sorted(detected_types))}")
+
+                # 添加检测到的语言对应的排除目录
+                for lang in detected_types:
+                    if lang in LANGUAGE_EXCLUDE_DIRS:
+                        exclude_dirs.update(LANGUAGE_EXCLUDE_DIRS[lang])
+            else:
+                # 未检测到特定类型，使用所有语言的排除目录
+                if verbose:
+                    print("  未检测到特定项目类型，使用完整排除列表")
+                for lang_excludes in LANGUAGE_EXCLUDE_DIRS.values():
+                    exclude_dirs.update(lang_excludes)
+        elif not smart_exclude:
+            # 不使用智能排除，使用完整排除列表
+            for lang_excludes in LANGUAGE_EXCLUDE_DIRS.values():
+                exclude_dirs.update(lang_excludes)
+
+        return exclude_dirs
+
     def should_exclude_dir(self, dir_path):
         """检查目录是否应该被排除"""
         if self.args.all:
@@ -781,8 +1060,13 @@ class CodeStatistics:
     
     def analyze_repository(self, repo_path):
         """分析单个仓库的代码统计"""
+        # 动态构建排除目录列表
+        self.exclude_dirs = self.build_exclude_dirs(repo_path)
+        # 添加用户指定的额外排除目录
+        self.exclude_dirs.update(self.user_exclude_dirs)
+
         stats = defaultdict(lambda: {
-            'files': 0, 'lines': 0, 'code_lines': 0, 
+            'files': 0, 'lines': 0, 'code_lines': 0,
             'comment_lines': 0, 'blank_lines': 0, 'size': 0
         })
         doc_stats = defaultdict(lambda: {
@@ -799,7 +1083,7 @@ class CodeStatistics:
         total_doc_size = 0
         total_all_size = 0  # 仓库总大小
         file_details = []
-        
+
         for root, dirs, files in os.walk(repo_path):
             # 计算当前深度
             current_depth = root.replace(repo_path, '').count(os.sep)
@@ -1120,6 +1404,25 @@ class CodeStatistics:
         total_all_doc_lines = sum(repo.get('doc_lines', 0) for repo in all_repos)
         total_all_doc_size = sum(repo.get('doc_size', 0) for repo in all_repos)
         total_all_total_size = sum(repo.get('total_size', repo.get('size', 0)) for repo in all_repos)
+
+        # 汇总代码详情（按扩展名）
+        code_details_summary = defaultdict(lambda: {'files': 0, 'lines': 0, 'code_lines': 0, 'comment_lines': 0, 'blank_lines': 0, 'size': 0})
+        for repo in all_repos:
+            for ext, details in repo.get('details', {}).items():
+                code_details_summary[ext]['files'] += details.get('files', 0)
+                code_details_summary[ext]['lines'] += details.get('lines', 0)
+                code_details_summary[ext]['code_lines'] += details.get('code_lines', 0)
+                code_details_summary[ext]['comment_lines'] += details.get('comment_lines', 0)
+                code_details_summary[ext]['blank_lines'] += details.get('blank_lines', 0)
+                code_details_summary[ext]['size'] += details.get('size', 0)
+
+        # 汇总文档详情（按扩展名）
+        doc_details_summary = defaultdict(lambda: {'files': 0, 'lines': 0, 'size': 0})
+        for repo in all_repos:
+            for ext, details in repo.get('doc_details', {}).items():
+                doc_details_summary[ext]['files'] += details.get('files', 0)
+                doc_details_summary[ext]['lines'] += details.get('lines', 0)
+                doc_details_summary[ext]['size'] += details.get('size', 0)
         
         language_summary = defaultdict(lambda: {
             'repos': 0, 'files': 0, 'lines': 0, 
@@ -1153,7 +1456,9 @@ class CodeStatistics:
             'total_doc_lines': total_all_doc_lines,
             'total_doc_size': total_all_doc_size,
             'total_all_size': total_all_total_size,
-            'by_language': dict(language_summary)
+            'by_language': dict(language_summary),
+            'code_details': dict(code_details_summary),
+            'doc_details': dict(doc_details_summary)
         }
     
     def output_json(self, all_repos, summary):
@@ -1991,7 +2296,15 @@ class CodeStatistics:
         print(f"仓库总数: {summary['total_repos']}")
         print(f"代码文件数: {summary['total_files']:,}")
         print(f"代码总行数: {summary['total_lines']:,}")
-        
+
+        # 显示代码类型分布
+        code_details = summary.get('code_details', {})
+        if code_details:
+            sorted_codes = sorted(code_details.items(), key=lambda x: x[1]['lines'], reverse=True)
+            print("  代码类型分布:")
+            for ext, details in sorted_codes:
+                print(f"    {ext}: {details['files']} 个文件, {details['lines']:,} 行")
+
         # 显示代码组成分析
         total_code_lines = summary.get('total_code_lines', 0)
         total_comment_lines = summary.get('total_comment_lines', 0)
@@ -2000,12 +2313,21 @@ class CodeStatistics:
             code_rate = (total_code_lines / summary['total_lines']) * 100
             comment_rate = (total_comment_lines / summary['total_lines']) * 100
             blank_rate = (total_blank_lines / summary['total_lines']) * 100
+            print(f"代码组成:")
             print(f"  - 纯代码行: {total_code_lines:,} ({code_rate:.1f}%)")
             print(f"  - 注释行: {total_comment_lines:,} ({comment_rate:.1f}%)")
             print(f"  - 空行: {total_blank_lines:,} ({blank_rate:.1f}%)")
         
         print(f"文档文件数: {summary.get('total_doc_files', 0):,}")
         print(f"文档总行数: {summary.get('total_doc_lines', 0):,}")
+
+        # 显示文档类型详情
+        doc_details = summary.get('doc_details', {})
+        if doc_details:
+            sorted_docs = sorted(doc_details.items(), key=lambda x: x[1]['lines'], reverse=True)
+            print("  文档类型分布:")
+            for ext, details in sorted_docs:
+                print(f"    {ext}: {details['files']} 个文件, {details['lines']:,} 行")
         print(f"\n大小统计:")
         print(f"  代码大小: {self.format_size(summary.get('total_size', 0))}")
         print(f"  文档大小: {self.format_size(summary.get('total_doc_size', 0))}")
@@ -2285,6 +2607,8 @@ def main():
                         help='目录扫描深度限制（0 表示无限制）')
     parser.add_argument('--git-info', action='store_true',
                         help='显示 Git 仓库信息（最后提交时间、作者等）')
+    parser.add_argument('--no-smart-exclude', action='store_true',
+                        help='禁用智能排除，使用完整的排除目录列表（默认启用智能排除）')
 
     args = parser.parse_args()
 
