@@ -4,7 +4,7 @@
 支持多种参数自定义统计行为
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import os
 import argparse
@@ -17,6 +17,14 @@ import concurrent.futures
 from datetime import datetime
 import time
 import re
+import subprocess
+
+# 尝试导入 yaml，如果不存在则提供降级方案
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 # 需要排除的目录模式
 DEFAULT_EXCLUDE_DIRS = {
@@ -434,6 +442,21 @@ class CodeStatistics:
                     self.exclude_dir_patterns.append(re.compile(pattern.strip()))
                 except re.error as e:
                     print(f"警告：无效的目录排除正则表达式 '{pattern}': {e}")
+
+        # 处理文件包含模式
+        self.include_file_patterns = []
+        if getattr(args, 'include_files', None):
+            for pattern in args.include_files.split(','):
+                try:
+                    self.include_file_patterns.append(re.compile(pattern.strip()))
+                except re.error as e:
+                    print(f"警告：无效的文件包含正则表达式 '{pattern}': {e}")
+
+        # 处理深度限制
+        self.max_depth = getattr(args, 'depth', None) or 0  # 0 表示无限制
+
+        # Git 信息选项
+        self.git_info = getattr(args, 'git_info', False)
     
     def format_size(self, size_in_bytes):
         """格式化文件大小"""
@@ -535,16 +558,26 @@ class CodeStatistics:
         """检查文件是否是代码文件"""
         file_name = os.path.basename(file_path)
         file_ext = Path(file_path).suffix.lower()
-        
+
         # 排除二进制文件
         if file_ext in BINARY_EXTENSIONS:
             return False
-        
+
         # 检查文件排除正则表达式
         for regex in self.exclude_file_patterns:
             if regex.search(file_path):
                 return False
-        
+
+        # 如果指定了包含模式，则只处理匹配的文件
+        if self.include_file_patterns:
+            matched = False
+            for regex in self.include_file_patterns:
+                if regex.search(file_path):
+                    matched = True
+                    break
+            if not matched:
+                return False
+
         # 如果指定了统计所有文件（但仍排除二进制）
         if self.args.all:
             return True
@@ -761,9 +794,17 @@ class CodeStatistics:
         file_details = []
         
         for root, dirs, files in os.walk(repo_path):
+            # 计算当前深度
+            current_depth = root.replace(repo_path, '').count(os.sep)
+
+            # 检查深度限制
+            if self.max_depth > 0 and current_depth >= self.max_depth:
+                dirs[:] = []  # 不再进入子目录
+                continue
+
             # 过滤掉需要排除的目录
             dirs[:] = [d for d in dirs if not self.should_exclude_dir(os.path.join(root, d))]
-            
+
             for file in files:
                 file_path = os.path.join(root, file)
                 
@@ -843,6 +884,76 @@ class CodeStatistics:
             'file_details': file_details if self.args.verbose else []
         }
     
+    def get_git_info(self, repo_path):
+        """获取 Git 仓库信息"""
+        git_info = {
+            'branch': None,
+            'last_commit_date': None,
+            'last_commit_author': None,
+            'last_commit_message': None,
+            'total_commits': None,
+            'contributors': None,
+            'remote_url': None
+        }
+
+        git_dir = os.path.join(repo_path, '.git')
+        if not os.path.exists(git_dir):
+            return git_info
+
+        try:
+            # 获取当前分支
+            result = subprocess.run(
+                ['git', '-C', repo_path, 'rev-parse', '--abbrev-ref', 'HEAD'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                git_info['branch'] = result.stdout.strip()
+
+            # 获取最后一次提交信息
+            result = subprocess.run(
+                ['git', '-C', repo_path, 'log', '-1', '--format=%ai|%an|%s'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split('|', 2)
+                if len(parts) >= 3:
+                    git_info['last_commit_date'] = parts[0]
+                    git_info['last_commit_author'] = parts[1]
+                    git_info['last_commit_message'] = parts[2][:80]  # 截断过长的消息
+
+            # 获取提交总数
+            result = subprocess.run(
+                ['git', '-C', repo_path, 'rev-list', '--count', 'HEAD'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                git_info['total_commits'] = int(result.stdout.strip())
+
+            # 获取贡献者数量
+            result = subprocess.run(
+                ['git', '-C', repo_path, 'shortlog', '-sn', 'HEAD'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                git_info['contributors'] = len(result.stdout.strip().split('\n'))
+
+            # 获取远程仓库 URL
+            result = subprocess.run(
+                ['git', '-C', repo_path, 'remote', 'get-url', 'origin'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                git_info['remote_url'] = result.stdout.strip()
+
+        except subprocess.TimeoutExpired:
+            if self.args.verbose:
+                print(f"警告：获取 {repo_path} 的 Git 信息超时")
+        except Exception as e:
+            if self.args.verbose:
+                print(f"警告：获取 {repo_path} 的 Git 信息失败: {e}")
+
+        return git_info
+
     def detect_language(self, repo_stats):
         """根据文件扩展名检测主要编程语言"""
         # 统计各语言的代码行数
@@ -939,6 +1050,9 @@ class CodeStatistics:
                                 'doc_details': stats.get('doc_details', {}),
                                 'file_details': stats.get('file_details', [])
                             }
+                            # 添加 Git 信息
+                            if self.git_info:
+                                repo_info['git'] = self.get_git_info(path)
                             all_repos.append(repo_info)
                     except Exception as e:
                         print(f"Error analyzing {name}: {e}")
@@ -952,6 +1066,7 @@ class CodeStatistics:
                     main_language = self.detect_language(stats)
                     repo_info = {
                         'name': name,
+                        'path': path,
                         'language': main_language,
                         'files': stats['total_files'],
                         'lines': stats['total_lines'],
@@ -967,6 +1082,9 @@ class CodeStatistics:
                         'doc_details': stats.get('doc_details', {}),
                         'file_details': stats.get('file_details', [])
                     }
+                    # 添加 Git 信息
+                    if self.git_info:
+                        repo_info['git'] = self.get_git_info(path)
                     all_repos.append(repo_info)
         
         return all_repos
@@ -1065,7 +1183,7 @@ class CodeStatistics:
             writer.writerow(['Total Code Lines', summary['total_lines']])
             writer.writerow(['Total Doc Files', summary.get('total_doc_files', 0)])
             writer.writerow(['Total Doc Lines', summary.get('total_doc_lines', 0)])
-            writer.writerow(['Total Code Size (MB)', round(summary.get('total_code_size', 0) / (1024 * 1024), 2)])
+            writer.writerow(['Total Code Size (MB)', round(summary.get('total_size', 0) / (1024 * 1024), 2)])
             writer.writerow(['Total Repository Size (MB)', round(summary.get('total_all_size', 0) / (1024 * 1024), 2)])
         
         if not self.args.summary:
@@ -1090,7 +1208,7 @@ class CodeStatistics:
             f.write(f"| 📝 **代码总行数** | {summary['total_lines']:,} |\n")
             f.write(f"| 📋 **文档文件总数** | {summary.get('total_doc_files', 0):,} |\n")
             f.write(f"| 📑 **文档总行数** | {summary.get('total_doc_lines', 0):,} |\n")
-            f.write(f"| 💾 **代码文件大小** | {self.format_size(summary.get('total_code_size', 0))} |\n")
+            f.write(f"| 💾 **代码文件大小** | {self.format_size(summary.get('total_size', 0))} |\n")
             f.write(f"| 📁 **仓库总大小** | {self.format_size(summary.get('total_all_size', 0))} |\n")
             f.write(f"| 📊 **平均每仓库代码行数** | {summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0:,} |\n")
             f.write(f"| 📈 **平均每文件代码行数** | {summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0} |\n\n")
@@ -1827,12 +1945,27 @@ class CodeStatistics:
                     print(f"    - 空行: {blank_lines:,} ({blank_rate:.1f}%)")
                 
                 # 显示前5个文件类型
-                sorted_exts = sorted(repo['details'].items(), 
+                sorted_exts = sorted(repo['details'].items(),
                                    key=lambda x: x[1]['lines'], reverse=True)[:5]
                 if sorted_exts:
                     print("  主要文件类型:")
                     for ext, data in sorted_exts:
                         print(f"    {ext}: {data['files']} 个文件, {data['lines']:,} 行")
+
+                # 显示 Git 信息
+                if 'git' in repo and repo['git']:
+                    git = repo['git']
+                    print("  Git 信息:")
+                    if git.get('branch'):
+                        print(f"    分支: {git['branch']}")
+                    if git.get('last_commit_date'):
+                        print(f"    最后提交: {git['last_commit_date']}")
+                    if git.get('last_commit_author'):
+                        print(f"    提交者: {git['last_commit_author']}")
+                    if git.get('total_commits'):
+                        print(f"    提交总数: {git['total_commits']:,}")
+                    if git.get('contributors'):
+                        print(f"    贡献者数: {git['contributors']}")
         
         # 输出总体统计
         print("\n" + "=" * 80)
@@ -1913,6 +2046,130 @@ class CodeStatistics:
         if self.args.verbose:
             print(f"\n统计完成，耗时: {elapsed_time:.2f} 秒")
 
+def load_config_file(config_path=None):
+    """加载配置文件
+
+    配置文件搜索顺序:
+    1. 命令行指定的路径
+    2. 当前目录的 .code_stats.yaml 或 .code_stats.yml
+    3. 当前目录的 .code_stats.json
+    4. 用户目录的 ~/.code_stats.yaml
+
+    返回配置字典，如果没有找到配置文件则返回空字典
+    """
+    config = {}
+
+    # 确定配置文件路径
+    search_paths = []
+    if config_path:
+        search_paths.append(config_path)
+    else:
+        cwd = os.getcwd()
+        search_paths.extend([
+            os.path.join(cwd, '.code_stats.yaml'),
+            os.path.join(cwd, '.code_stats.yml'),
+            os.path.join(cwd, '.code_stats.json'),
+            os.path.expanduser('~/.code_stats.yaml'),
+            os.path.expanduser('~/.code_stats.yml'),
+        ])
+
+    config_file = None
+    for path in search_paths:
+        if os.path.exists(path):
+            config_file = path
+            break
+
+    if not config_file:
+        return config
+
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            if config_file.endswith('.json'):
+                config = json.load(f)
+            elif HAS_YAML and (config_file.endswith('.yaml') or config_file.endswith('.yml')):
+                config = yaml.safe_load(f) or {}
+            else:
+                # 如果没有 yaml 模块，尝试用 JSON 解析
+                print(f"警告：未安装 PyYAML，无法解析 {config_file}")
+                print("请运行: pip install pyyaml")
+                return config
+
+        print(f"已加载配置文件: {config_file}")
+    except Exception as e:
+        print(f"警告：读取配置文件失败 {config_file}: {e}")
+
+    return config
+
+
+def merge_args_with_config(args, config):
+    """将配置文件中的设置合并到参数中（命令行参数优先）"""
+    # 映射配置文件键到参数属性
+    config_mapping = {
+        'excludes': 'excludes',
+        'exclude_files': 'exclude_files',
+        'exclude_dirs': 'exclude_dirs',
+        'include_files': 'include_files',
+        'lang': 'lang',
+        'output': 'output',
+        'output_file': 'output_file',
+        'min_lines': 'min_lines',
+        'max_lines': 'max_lines',
+        'sort': 'sort',
+        'top': 'top',
+        'parallel': 'parallel',
+        'verbose': 'verbose',
+        'summary': 'summary',
+        'quiet': 'quiet',
+        'all': 'all',
+        'depth': 'depth',
+        'git_info': 'git_info',
+    }
+
+    for config_key, arg_attr in config_mapping.items():
+        if config_key in config:
+            # 只在命令行没有指定时使用配置文件的值
+            current_value = getattr(args, arg_attr, None)
+            if current_value is None or current_value == False or current_value == []:
+                setattr(args, arg_attr, config[config_key])
+
+    # 处理特殊的 dirs 参数（列表类型）
+    if 'dirs' in config and not args.dirs:
+        args.dirs = config['dirs']
+
+    # 处理特殊的 repo 参数
+    if 'repo' in config and not args.repo:
+        args.repo = config['repo']
+
+    return args
+
+
+def show_supported_languages():
+    """显示支持的编程语言列表"""
+    # 收集所有唯一的语言
+    languages = sorted(set(LANGUAGE_MAP.values()))
+
+    print("支持的编程语言列表:")
+    print("=" * 60)
+
+    # 按语言分组显示扩展名
+    lang_to_exts = {}
+    for ext, lang in LANGUAGE_MAP.items():
+        if lang not in lang_to_exts:
+            lang_to_exts[lang] = []
+        lang_to_exts[lang].append(ext)
+
+    for lang in languages:
+        exts = sorted(lang_to_exts.get(lang, []))
+        exts_str = ', '.join(exts[:8])
+        if len(lang_to_exts.get(lang, [])) > 8:
+            exts_str += f', ... (+{len(lang_to_exts[lang]) - 8})'
+        print(f"  {lang:18} : {exts_str}")
+
+    print("\n" + "=" * 60)
+    print(f"共支持 {len(languages)} 种编程语言")
+    print("\n使用方法: --lang python,go,javascript")
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -1930,12 +2187,29 @@ def main():
   %(prog)s --dirs api admin     # 只统计指定目录
   %(prog)s --exclude-files ".*_test\\.py$,.*\\.bak$"  # 排除测试文件和备份文件
   %(prog)s --exclude-dirs ".*/test/.*,.*/docs/.*"   # 排除test和docs目录
+  %(prog)s --help-lang          # 显示支持的编程语言列表
+  %(prog)s --config my.yaml     # 使用指定配置文件
+  %(prog)s --depth 3            # 限制扫描深度为3层
+  %(prog)s --git-info           # 显示Git仓库信息
+  %(prog)s --include-files ".*\\.py$"  # 只包含Python文件
+
+配置文件示例 (.code_stats.yaml):
+  excludes: "*test*,*mock*"
+  lang: python,go,javascript
+  output: html
+  parallel: true
+  depth: 5
+  git_info: true
         """
     )
     
     # 添加版本号参数
     parser.add_argument('--version', '-V', action='version',
                         version=f'%(prog)s {__version__}')
+
+    # 显示支持的语言
+    parser.add_argument('--help-lang', action='store_true',
+                        help='显示支持的编程语言列表')
     
     # 基本参数
     parser.add_argument('--all', '-a', action='store_true',
@@ -1980,9 +2254,33 @@ def main():
     # 性能选项
     parser.add_argument('--parallel', '-p', action='store_true',
                         help='使用多线程并行处理')
-    
+
+    # 配置文件选项
+    parser.add_argument('--config', '-c', type=str,
+                        help='指定配置文件路径（支持 .yaml/.yml/.json）')
+    parser.add_argument('--no-config', action='store_true',
+                        help='不加载配置文件')
+
+    # 高级选项
+    parser.add_argument('--include-files', type=str,
+                        help='包含文件的正则表达式模式，用逗号分隔')
+    parser.add_argument('--depth', type=int,
+                        help='目录扫描深度限制（0 表示无限制）')
+    parser.add_argument('--git-info', action='store_true',
+                        help='显示 Git 仓库信息（最后提交时间、作者等）')
+
     args = parser.parse_args()
-    
+
+    # 如果请求显示支持的语言列表
+    if args.help_lang:
+        show_supported_languages()
+        return
+
+    # 加载配置文件（除非指定 --no-config）
+    if not args.no_config:
+        config = load_config_file(args.config)
+        args = merge_args_with_config(args, config)
+
     # 创建统计实例并运行
     stats = CodeStatistics(args)
     stats.run()
