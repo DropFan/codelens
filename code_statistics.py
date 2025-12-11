@@ -1845,9 +1845,79 @@ class CodeStatistics:
                 code_rate, code_rate, summary.get('total_code_lines', summary['total_lines']),
                 blank_rate, blank_rate, summary.get('total_blank_lines', 0)
             ))
-            
+
+            # 代码类型分布和文档类型分布
+            code_details = summary.get('code_details', {})
+            doc_details = summary.get('doc_details', {})
+            sorted_code_types = sorted(code_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+            sorted_doc_types = sorted(doc_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+
+            f.write("""
+        <!-- 文件类型分布 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- 代码类型分布 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.75s">
+                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">💻 代码类型分布</h3>
+                <div class="space-y-3">
+""")
+            total_code_lines = summary['total_lines']
+            for ext, details in sorted_code_types:
+                pct = (details['lines'] / total_code_lines * 100) if total_code_lines > 0 else 0
+                f.write(f"""
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <span class="font-mono text-sm bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded">{ext}</span>
+                            <span class="ml-3 text-sm text-gray-600 dark:text-gray-400">{details['files']} 个文件</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-3">{details['lines']:,} 行</span>
+                            <div class="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div class="bg-blue-600 h-2 rounded-full" style="width: {min(pct, 100):.1f}%"></div>
+                            </div>
+                            <span class="ml-2 text-xs text-gray-500 w-12 text-right">{pct:.1f}%</span>
+                        </div>
+                    </div>
+""")
+            f.write("""
+                </div>
+            </div>
+
+            <!-- 文档类型分布 -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.8s">
+                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📚 文档类型分布</h3>
+                <div class="space-y-3">
+""")
+            total_doc_lines = summary.get('total_doc_lines', 0)
+            if sorted_doc_types:
+                for ext, details in sorted_doc_types:
+                    pct = (details['lines'] / total_doc_lines * 100) if total_doc_lines > 0 else 0
+                    f.write(f"""
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <span class="font-mono text-sm bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded">{ext}</span>
+                            <span class="ml-3 text-sm text-gray-600 dark:text-gray-400">{details['files']} 个文件</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-3">{details['lines']:,} 行</span>
+                            <div class="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div class="bg-purple-600 h-2 rounded-full" style="width: {min(pct, 100):.1f}%"></div>
+                            </div>
+                            <span class="ml-2 text-xs text-gray-500 w-12 text-right">{pct:.1f}%</span>
+                        </div>
+                    </div>
+""")
+            else:
+                f.write("""
+                    <div class="text-gray-500 dark:text-gray-400 text-center py-8">暂无文档文件</div>
+""")
+            f.write("""
+                </div>
+            </div>
+        </div>
+""")
+
             # 图表部分
-            sorted_languages = sorted(summary['by_language'].items(), 
+            sorted_languages = sorted(summary['by_language'].items(),
                                     key=lambda x: x[1]['lines'], reverse=True)[:10]
             
             f.write("""
@@ -2012,17 +2082,85 @@ class CodeStatistics:
             </table>
         </div>
 """)
-            
-            # 仓库详细信息部分（现在不需要，信息已足够）
-            # 如果需要可以添加更详细的仓库卡片
-            
+
+            # 大小统计卡片
+            f.write(f"""
+        <!-- 大小统计 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.3s">
+            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">💾 存储统计</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <div class="text-3xl font-bold text-blue-600 dark:text-blue-400">{self.format_size(summary.get('total_size', 0))}</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">代码大小</div>
+                </div>
+                <div class="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                    <div class="text-3xl font-bold text-purple-600 dark:text-purple-400">{self.format_size(summary.get('total_doc_size', 0))}</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">文档大小</div>
+                </div>
+                <div class="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div class="text-3xl font-bold text-green-600 dark:text-green-400">{self.format_size(summary.get('total_all_size', 0))}</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">仓库总大小</div>
+                </div>
+            </div>
+        </div>
+""")
+
+            # Git 信息展示（如果有）
+            repos_with_git = [r for r in all_repos if r.get('git_info')]
+            if repos_with_git:
+                f.write("""
+        <!-- Git 信息 -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.4s">
+            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🔀 Git 仓库信息</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+""")
+                for repo in repos_with_git:
+                    git = repo.get('git_info', {})
+                    f.write(f"""
+                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <div class="font-semibold text-gray-900 dark:text-gray-100 mb-2">{repo['name']}</div>
+                    <div class="space-y-1 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">分支</span>
+                            <span class="font-mono text-gray-900 dark:text-gray-100">{git.get('branch', 'N/A')}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">最后提交</span>
+                            <span class="text-gray-900 dark:text-gray-100">{git.get('last_commit_date', 'N/A')[:10] if git.get('last_commit_date') else 'N/A'}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">提交者</span>
+                            <span class="text-gray-900 dark:text-gray-100">{git.get('last_author', 'N/A')}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">提交总数</span>
+                            <span class="font-semibold text-blue-600 dark:text-blue-400">{git.get('commit_count', 'N/A')}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">贡献者</span>
+                            <span class="font-semibold text-green-600 dark:text-green-400">{git.get('contributors', 'N/A')}</span>
+                        </div>
+                    </div>
+                </div>
+""")
+                f.write("""
+            </div>
+        </div>
+""")
+
             # 页脚
-            f.write("""
-        <div class="footer">
-            <p>Generated by code_statistics.py</p>
+            version = __version__
+            gen_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            f.write(f"""
+        <!-- 页脚 -->
+        <div class="text-center text-gray-500 dark:text-gray-400 text-sm py-8 border-t border-gray-200 dark:border-gray-700 mt-8">
+            <p>📊 Generated by code_statistics.py v{version}</p>
+            <p class="mt-1">统计时间: {gen_time}</p>
         </div>
     </div>
-    
+""")
+
+            f.write("""
     <script>
         // 配置 Chart.js 默认字体
         Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
