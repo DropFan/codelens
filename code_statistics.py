@@ -4,7 +4,7 @@
 支持多种参数自定义统计行为
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 import os
 import argparse
@@ -569,6 +569,7 @@ class CodeStatistics:
                 return False
 
         # 如果指定了包含模式，则只处理匹配的文件
+        # 注意：如果指定了 include_file_patterns，匹配的文件会直接被包含
         if self.include_file_patterns:
             matched = False
             for regex in self.include_file_patterns:
@@ -577,21 +578,27 @@ class CodeStatistics:
                     break
             if not matched:
                 return False
+            # 如果匹配了包含模式，且没有指定语言过滤，直接返回 True
+            if not self.target_languages:
+                return True
+            # 如果同时指定了语言过滤，需要检查语言
+            lang = LANGUAGE_MAP.get(file_ext, 'other')
+            return lang in self.target_languages
 
         # 如果指定了统计所有文件（但仍排除二进制）
         if self.args.all:
             return True
-        
+
         # 排除文档文件
         if file_ext in DOC_EXTENSIONS or file_name.lower() in DOC_EXTENSIONS:
             return False
-        
+
         # 如果指定了语言过滤
         if self.target_languages:
             lang = LANGUAGE_MAP.get(file_ext, 'other')
             if lang not in self.target_languages:
                 return False
-        
+
         # 包含代码文件
         if file_ext in CODE_EXTENSIONS:
             return True
@@ -818,25 +825,35 @@ class CodeStatistics:
                 # 判断是否是文档文件
                 file_ext = Path(file_path).suffix.lower()
                 file_name = os.path.basename(file_path).lower()
-                
-                if file_ext in DOC_EXTENSIONS or file_name in DOC_EXTENSIONS:
+
+                # 如果用户指定了 include_file_patterns，优先检查是否匹配
+                # 匹配的文件应该作为代码文件处理，而不是文档文件
+                is_explicit_include = False
+                if self.include_file_patterns:
+                    for regex in self.include_file_patterns:
+                        if regex.search(file_path):
+                            is_explicit_include = True
+                            break
+
+                # 如果不是显式包含的文件，且是文档扩展名，则作为文档统计
+                if not is_explicit_include and (file_ext in DOC_EXTENSIONS or file_name in DOC_EXTENSIONS):
                     # 统计文档文件
                     try:
                         file_size = os.path.getsize(file_path)
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                             lines = len(f.readlines())
-                        
+
                         ext = file_ext or file_name
                         doc_stats[ext]['files'] += 1
                         doc_stats[ext]['lines'] += lines
                         doc_stats[ext]['size'] += file_size
-                        
+
                         total_doc_files += 1
                         total_doc_lines += lines
                         total_doc_size += file_size
                     except:
                         pass
-                        
+
                 elif self.is_code_file(file_path):
                     # 统计代码文件
                     file_stats = self.analyze_file_content(file_path)
