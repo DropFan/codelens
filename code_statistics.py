@@ -4,7 +4,7 @@
 支持多种参数自定义统计行为
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 import os
 import argparse
@@ -940,24 +940,61 @@ class CodeStatistics:
             return True  # 读取出错时假定为二进制文件
 
     def analyze_file_content(self, file_path):
-        """分析文件内容，返回详细的行数统计"""
+        """分析文件内容，返回详细的行数统计和复杂度信息"""
         # 先检测是否为二进制文件
         if self.is_binary_file(file_path):
-            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
-            
+            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0,
+                    'functions': 0, 'complexity': 0, 'max_depth': 0}
+
         try:
             file_size = os.path.getsize(file_path)
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-                
+                content = f.read()
+                lines = content.split('\n')
+
             total_lines = len(lines)
             code_lines = 0
             comment_lines = 0
             blank_lines = 0
-            
+
+            # 复杂度分析变量
+            functions = 0
+            complexity = 1  # 基础复杂度为1
+            max_depth = 0
+            current_depth = 0
+
             # 获取文件扩展名以确定注释风格
             ext = Path(file_path).suffix.lower()
             lang = LANGUAGE_MAP.get(ext, 'other')
+
+            # 复杂度分析的关键字（按语言）
+            complexity_keywords = {
+                'python': ['if ', 'elif ', 'for ', 'while ', 'except ', 'with ', 'and ', 'or ', 'case '],
+                'javascript': ['if ', 'else if ', 'for ', 'while ', 'catch ', 'case ', '&&', '||', '\\?'],
+                'typescript': ['if ', 'else if ', 'for ', 'while ', 'catch ', 'case ', '&&', '||', '\\?'],
+                'go': ['if ', 'else if ', 'for ', 'switch ', 'case ', 'select ', '&&', '||'],
+                'java': ['if ', 'else if ', 'for ', 'while ', 'catch ', 'case ', '&&', '||', '\\?'],
+                'cpp': ['if ', 'else if ', 'for ', 'while ', 'catch ', 'case ', '&&', '||', '\\?'],
+                'c': ['if ', 'else if ', 'for ', 'while ', 'case ', '&&', '||', '\\?'],
+                'rust': ['if ', 'else if ', 'for ', 'while ', 'match ', '=>', '&&', '||'],
+                'php': ['if ', 'elseif ', 'for ', 'foreach ', 'while ', 'catch ', 'case ', '&&', '||', '\\?'],
+            }
+
+            # 函数定义模式
+            function_patterns = {
+                'python': r'^\s*def\s+\w+|^\s*async\s+def\s+\w+|^\s*class\s+\w+',
+                'javascript': r'function\s+\w+|^\s*\w+\s*[=:]\s*(?:async\s*)?\(|^\s*(?:async\s+)?(?:function|\w+)\s*\(',
+                'typescript': r'function\s+\w+|^\s*\w+\s*[=:]\s*(?:async\s*)?\(|^\s*(?:async\s+)?(?:function|\w+)\s*\(',
+                'go': r'func\s+(?:\(\w+\s+\*?\w+\)\s*)?\w+',
+                'java': r'(?:public|private|protected|static|\s)+[\w<>\[\]]+\s+\w+\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{',
+                'cpp': r'(?:\w+\s+)+\w+::\w+\s*\(|(?:\w+\s+)+\w+\s*\([^)]*\)\s*\{',
+                'c': r'(?:\w+\s+)+\w+\s*\([^)]*\)\s*\{',
+                'rust': r'fn\s+\w+|impl\s+\w+',
+                'php': r'function\s+\w+|public\s+function|private\s+function|protected\s+function',
+            }
+
+            func_pattern = function_patterns.get(lang)
+            keywords = complexity_keywords.get(lang, [])
             
             # 定义各语言的注释模式
             single_line_comment = {
@@ -1032,26 +1069,46 @@ class CodeStatistics:
                     comment_lines += 1
                 else:
                     code_lines += 1
-            
+                    # 复杂度分析（仅对代码行）
+                    if func_pattern and re.search(func_pattern, line):
+                        functions += 1
+                    for kw in keywords:
+                        if kw in line:
+                            complexity += 1
+                    # 嵌套深度分析（基于缩进或大括号）
+                    if lang == 'python':
+                        indent = len(line) - len(line.lstrip())
+                        depth = indent // 4  # 假设4空格缩进
+                        max_depth = max(max_depth, depth)
+                    else:
+                        current_depth += line.count('{') - line.count('}')
+                        max_depth = max(max_depth, current_depth)
+
             # 应用行数过滤
             if self.args.min_lines and total_lines < self.args.min_lines:
-                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
-            
+                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0,
+                        'functions': 0, 'complexity': 0, 'max_depth': 0}
+
             if self.args.max_lines and total_lines > self.args.max_lines:
-                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
-            
+                return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0,
+                        'functions': 0, 'complexity': 0, 'max_depth': 0}
+
             return {
                 'total': total_lines,
                 'code': code_lines,
                 'comment': comment_lines,
                 'blank': blank_lines,
-                'size': file_size
+                'size': file_size,
+                'functions': functions,
+                'complexity': complexity,
+                'max_depth': max_depth
             }
-            
+
         except Exception as e:
             if self.args.verbose:
                 print(f"Error reading {file_path}: {e}")
-            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0}
+            return {'total': 0, 'code': 0, 'comment': 0, 'blank': 0, 'size': 0,
+                    'functions': 0, 'complexity': 0, 'max_depth': 0}
     
     def count_lines(self, file_path):
         """统计文件行数（向后兼容）"""
@@ -1083,6 +1140,20 @@ class CodeStatistics:
         total_doc_size = 0
         total_all_size = 0  # 仓库总大小
         file_details = []
+
+        # 文件大小分布统计
+        size_distribution = {
+            'tiny': 0,      # < 1KB
+            'small': 0,     # 1KB - 10KB
+            'medium': 0,    # 10KB - 100KB
+            'large': 0,     # 100KB - 1MB
+            'huge': 0       # > 1MB
+        }
+
+        # 代码复杂度统计
+        total_functions = 0
+        total_complexity = 0
+        max_depth = 0
 
         for root, dirs, files in os.walk(repo_path):
             # 计算当前深度
@@ -1156,7 +1227,25 @@ class CodeStatistics:
                         total_comment_lines += file_stats['comment']
                         total_blank_lines += file_stats['blank']
                         total_size += file_stats['size']
-                        
+
+                        # 更新文件大小分布
+                        fsize = file_stats['size']
+                        if fsize < 1024:
+                            size_distribution['tiny'] += 1
+                        elif fsize < 10 * 1024:
+                            size_distribution['small'] += 1
+                        elif fsize < 100 * 1024:
+                            size_distribution['medium'] += 1
+                        elif fsize < 1024 * 1024:
+                            size_distribution['large'] += 1
+                        else:
+                            size_distribution['huge'] += 1
+
+                        # 更新复杂度统计
+                        total_functions += file_stats.get('functions', 0)
+                        total_complexity += file_stats.get('complexity', 0)
+                        max_depth = max(max_depth, file_stats.get('max_depth', 0))
+
                         if self.args.verbose:
                             relative_path = os.path.relpath(file_path, repo_path)
                             file_details.append({
@@ -1169,6 +1258,10 @@ class CodeStatistics:
                                 'extension': ext
                             })
         
+        # 计算平均复杂度
+        avg_complexity = total_complexity / total_files if total_files > 0 else 0
+        avg_func_lines = total_code_lines / total_functions if total_functions > 0 else 0
+
         return {
             'total_files': total_files,
             'total_lines': total_lines,
@@ -1182,7 +1275,15 @@ class CodeStatistics:
             'total_all_size': total_all_size,  # 仓库总大小
             'by_extension': dict(stats),
             'doc_details': dict(doc_stats),
-            'file_details': file_details if self.args.verbose else []
+            'file_details': file_details if self.args.verbose else [],
+            'size_distribution': size_distribution,
+            'complexity': {
+                'functions': total_functions,
+                'total_complexity': total_complexity,
+                'avg_complexity': round(avg_complexity, 2),
+                'max_depth': max_depth,
+                'avg_func_lines': round(avg_func_lines, 1)
+            }
         }
     
     def get_git_info(self, repo_path):
@@ -1349,7 +1450,9 @@ class CodeStatistics:
                                 'total_size': stats.get('total_all_size', stats['total_size']),
                                 'details': stats['by_extension'],
                                 'doc_details': stats.get('doc_details', {}),
-                                'file_details': stats.get('file_details', [])
+                                'file_details': stats.get('file_details', []),
+                                'size_distribution': stats.get('size_distribution', {}),
+                                'complexity': stats.get('complexity', {})
                             }
                             # 添加 Git 信息
                             if self.git_info:
@@ -1381,7 +1484,9 @@ class CodeStatistics:
                         'total_size': stats.get('total_all_size', stats['total_size']),
                         'details': stats['by_extension'],
                         'doc_details': stats.get('doc_details', {}),
-                        'file_details': stats.get('file_details', [])
+                        'file_details': stats.get('file_details', []),
+                        'size_distribution': stats.get('size_distribution', {}),
+                        'complexity': stats.get('complexity', {})
                     }
                     # 添加 Git 信息
                     if self.git_info:
@@ -1423,7 +1528,29 @@ class CodeStatistics:
                 doc_details_summary[ext]['files'] += details.get('files', 0)
                 doc_details_summary[ext]['lines'] += details.get('lines', 0)
                 doc_details_summary[ext]['size'] += details.get('size', 0)
-        
+
+        # 汇总文件大小分布
+        size_distribution_summary = {'tiny': 0, 'small': 0, 'medium': 0, 'large': 0, 'huge': 0}
+        for repo in all_repos:
+            repo_dist = repo.get('size_distribution', {})
+            for key in size_distribution_summary:
+                size_distribution_summary[key] += repo_dist.get(key, 0)
+
+        # 汇总复杂度数据
+        total_functions = sum(repo.get('complexity', {}).get('functions', 0) for repo in all_repos)
+        total_complexity = sum(repo.get('complexity', {}).get('total_complexity', 0) for repo in all_repos)
+        max_depth = max((repo.get('complexity', {}).get('max_depth', 0) for repo in all_repos), default=0)
+        avg_complexity = total_complexity / total_all_files if total_all_files > 0 else 0
+        avg_func_lines = total_all_code_lines / total_functions if total_functions > 0 else 0
+
+        complexity_summary = {
+            'functions': total_functions,
+            'total_complexity': total_complexity,
+            'avg_complexity': round(avg_complexity, 2),
+            'max_depth': max_depth,
+            'avg_func_lines': round(avg_func_lines, 1)
+        }
+
         language_summary = defaultdict(lambda: {
             'repos': 0, 'files': 0, 'lines': 0, 
             'code_lines': 0, 'comment_lines': 0, 
@@ -1458,7 +1585,9 @@ class CodeStatistics:
             'total_all_size': total_all_total_size,
             'by_language': dict(language_summary),
             'code_details': dict(code_details_summary),
-            'doc_details': dict(doc_details_summary)
+            'doc_details': dict(doc_details_summary),
+            'size_distribution': size_distribution_summary,
+            'complexity': complexity_summary
         }
     
     def output_json(self, all_repos, summary):
@@ -1643,15 +1772,30 @@ class CodeStatistics:
         gen_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         code_details = summary.get('code_details', {})
         doc_details = summary.get('doc_details', {})
+        # 类型分布显示前10个，语言和仓库显示全部
         sorted_code_types = sorted(code_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
         sorted_doc_types = sorted(doc_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
-        sorted_languages = sorted(summary['by_language'].items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
-        sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)[:10]
+        sorted_languages = sorted(summary['by_language'].items(), key=lambda x: x[1]['lines'], reverse=True)
+        sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)
 
         total_lines = summary['total_lines']
+        total_files = summary['total_files']
         code_rate = (summary.get('total_code_lines', 0) / total_lines * 100) if total_lines > 0 else 0
         comment_rate = (summary.get('total_comment_lines', 0) / total_lines * 100) if total_lines > 0 else 0
         blank_rate = (summary.get('total_blank_lines', 0) / total_lines * 100) if total_lines > 0 else 0
+
+        # 文件大小分布数据
+        size_dist = summary.get('size_distribution', {})
+        size_labels = {
+            'tiny': '< 1KB',
+            'small': '1-10KB',
+            'medium': '10-100KB',
+            'large': '100KB-1MB',
+            'huge': '> 1MB'
+        }
+
+        # 复杂度数据
+        complexity = summary.get('complexity', {})
 
         # 生成代码类型分布 HTML
         code_types_html = ''
@@ -1979,15 +2123,42 @@ class CodeStatistics:
             </div>
         </div>
 
+        <div class="card">
+            <div class="card-title">代码复杂度分析</div>
+            <div class="metric-bars">
+                <div class="metric-bar">
+                    <div class="value blue">{complexity.get('functions', 0):,}</div>
+                    <div class="label">函数/方法</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value green">{complexity.get('avg_complexity', 0)}</div>
+                    <div class="label">平均圈复杂度</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value purple">{complexity.get('max_depth', 0)}</div>
+                    <div class="label">最大嵌套深度</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value" style="color:#f59e0b">{complexity.get('avg_func_lines', 0)}</div>
+                    <div class="label">平均函数行数</div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid-2">
+            <div class="card">
+                <div class="card-title">文件大小分布</div>
+                <div class="chart-wrap"><canvas id="sizeChart"></canvas></div>
+            </div>
             <div class="card">
                 <div class="card-title">语言分布</div>
                 <div class="chart-wrap"><canvas id="langChart"></canvas></div>
             </div>
-            <div class="card">
-                <div class="card-title">仓库规模</div>
-                <div class="chart-wrap"><canvas id="repoChart"></canvas></div>
-            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">仓库规模</div>
+            <div class="chart-wrap"><canvas id="repoChart"></canvas></div>
         </div>
 
         <div class="card">
@@ -2031,6 +2202,28 @@ class CodeStatistics:
     <script>
         Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
         const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
+
+        new Chart(document.getElementById('sizeChart'), {{
+            type: 'bar',
+            data: {{
+                labels: ['{size_labels["tiny"]}', '{size_labels["small"]}', '{size_labels["medium"]}', '{size_labels["large"]}', '{size_labels["huge"]}'],
+                datasets: [{{
+                    data: [{size_dist.get('tiny', 0)}, {size_dist.get('small', 0)}, {size_dist.get('medium', 0)}, {size_dist.get('large', 0)}, {size_dist.get('huge', 0)}],
+                    backgroundColor: ['#06b6d4', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'],
+                    borderRadius: 6,
+                    barThickness: 36
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{ legend: {{ display: false }} }},
+                scales: {{
+                    y: {{ grid: {{ color: '#f1f5f9' }}, ticks: {{ font: {{ size: 11 }} }} }},
+                    x: {{ grid: {{ display: false }}, ticks: {{ font: {{ size: 12 }} }} }}
+                }}
+            }}
+        }});
 
         new Chart(document.getElementById('langChart'), {{
             type: 'doughnut',
