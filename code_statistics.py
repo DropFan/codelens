@@ -1636,748 +1636,439 @@ class CodeStatistics:
             print(f"\n统计结果已保存到: {output_file}")
     
     def output_html(self, all_repos, summary):
-        """输出HTML格式"""
+        """输出HTML格式 - 现代简洁风格"""
         output_file = self.args.output_file or 'code_statistics.html'
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            # HTML头部
-            f.write("""<!DOCTYPE html>
+
+        # 准备数据
+        gen_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        code_details = summary.get('code_details', {})
+        doc_details = summary.get('doc_details', {})
+        sorted_code_types = sorted(code_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+        sorted_doc_types = sorted(doc_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+        sorted_languages = sorted(summary['by_language'].items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+        sorted_repos = sorted(all_repos, key=lambda x: x['lines'], reverse=True)[:10]
+
+        total_lines = summary['total_lines']
+        code_rate = (summary.get('total_code_lines', 0) / total_lines * 100) if total_lines > 0 else 0
+        comment_rate = (summary.get('total_comment_lines', 0) / total_lines * 100) if total_lines > 0 else 0
+        blank_rate = (summary.get('total_blank_lines', 0) / total_lines * 100) if total_lines > 0 else 0
+
+        # 生成代码类型分布 HTML
+        code_types_html = ''
+        for ext, details in sorted_code_types:
+            pct = (details['lines'] / total_lines * 100) if total_lines > 0 else 0
+            code_types_html += f'''<div class="type-item">
+                    <span class="type-ext">{ext}</span>
+                    <div class="type-bar"><div class="type-bar-fill" style="width:{min(pct*2,100):.1f}%"></div></div>
+                    <span class="type-stats"><strong>{details['lines']:,}</strong> 行 · {details['files']} 文件</span>
+                </div>'''
+
+        # 生成文档类型分布 HTML
+        doc_types_html = ''
+        total_doc_lines = summary.get('total_doc_lines', 0)
+        if sorted_doc_types:
+            for ext, details in sorted_doc_types:
+                pct = (details['lines'] / total_doc_lines * 100) if total_doc_lines > 0 else 0
+                doc_types_html += f'''<div class="type-item">
+                    <span class="type-ext">{ext}</span>
+                    <div class="type-bar"><div class="type-bar-fill doc" style="width:{min(pct,100):.1f}%"></div></div>
+                    <span class="type-stats"><strong>{details['lines']:,}</strong> 行 · {details['files']} 文件</span>
+                </div>'''
+        else:
+            doc_types_html = '<div style="color:#94a3b8;text-align:center;padding:32px;">暂无文档文件</div>'
+
+        # 生成语言统计表格行
+        lang_table_rows = ''
+        for idx, (lang, data) in enumerate(sorted_languages, 1):
+            pct = (data['lines'] / total_lines * 100) if total_lines > 0 else 0
+            c_rate = (data.get('comment_lines', 0) / data['lines'] * 100) if data['lines'] > 0 else 0
+            emoji = self.get_language_emoji(lang)
+            lang_table_rows += f'''
+                        <tr>
+                            <td class="rank">{idx}</td>
+                            <td><span class="lang-badge">{emoji} {lang}</span></td>
+                            <td style="text-align:right" class="number">{data['repos']}</td>
+                            <td style="text-align:right" class="number">{data['files']:,}</td>
+                            <td style="text-align:right" class="number">{data['lines']:,}</td>
+                            <td style="text-align:right">{c_rate:.1f}%</td>
+                            <td style="text-align:right">{pct:.1f}%</td>
+                        </tr>'''
+
+        # 生成仓库排行表格行
+        repo_table_rows = ''
+        medals = ['🥇', '🥈', '🥉']
+        for idx, repo in enumerate(sorted_repos, 1):
+            c_rate = (repo.get('comment_lines', 0) / repo['lines'] * 100) if repo['lines'] > 0 else 0
+            emoji = self.get_language_emoji(repo['language'])
+            medal = medals[idx-1] if idx <= 3 else str(idx)
+            repo_table_rows += f'''
+                        <tr>
+                            <td class="rank">{medal}</td>
+                            <td><strong>{repo['name']}</strong></td>
+                            <td><span class="lang-badge">{emoji} {repo['language']}</span></td>
+                            <td style="text-align:right" class="number">{repo['files']:,}</td>
+                            <td style="text-align:right" class="number">{repo['lines']:,}</td>
+                            <td style="text-align:right" class="number">{repo.get('doc_lines', 0):,}</td>
+                            <td style="text-align:right">{c_rate:.1f}%</td>
+                            <td style="text-align:right">{self.format_size(repo.get('size', 0))}</td>
+                        </tr>'''
+
+        # Git 信息区块
+        git_section = ''
+        repos_with_git = [r for r in all_repos if r.get('git')]
+        if repos_with_git:
+            git_items = ''
+            for repo in repos_with_git:
+                git = repo.get('git', {})
+                git_items += f'''
+                    <div class="git-item">
+                        <div class="name">{repo['name']}</div>
+                        <div class="git-row"><span class="key">分支</span><span class="val">{git.get('branch', 'N/A')}</span></div>
+                        <div class="git-row"><span class="key">最后提交</span><span class="val">{git.get('last_commit_date', 'N/A')[:10] if git.get('last_commit_date') else 'N/A'}</span></div>
+                        <div class="git-row"><span class="key">提交者</span><span class="val">{git.get('last_commit_author', 'N/A')}</span></div>
+                        <div class="git-row"><span class="key">提交数</span><span class="val" style="color:#3b82f6">{git.get('total_commits', 'N/A')}</span></div>
+                        <div class="git-row"><span class="key">贡献者</span><span class="val" style="color:#22c55e">{git.get('contributors', 'N/A')}</span></div>
+                    </div>'''
+            git_section = f'''
+        <div class="card">
+            <div class="card-title">Git 仓库信息</div>
+            <div class="git-grid">{git_items}</div>
+        </div>'''
+
+        # 图表数据
+        lang_labels = json.dumps([lang for lang, _ in sorted_languages])
+        lang_data = json.dumps([data['lines'] for _, data in sorted_languages])
+        repo_labels = json.dumps([repo['name'] for repo in sorted_repos])
+        repo_data = json.dumps([repo['lines'] for repo in sorted_repos])
+
+        # HTML 模板 - 白色简洁专业风格
+        html = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>代码统计报告</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-        /* 自定义样式 */
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-        
-        /* 暗色模式支持 */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --primary-gradient: linear-gradient(135deg, #4c1d95 0%, #5b21b6 100%);
-            }
-        }
-        
-        /* 图表动画 */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .animate-fade-in {
-            animation: fadeIn 0.6s ease-out;
-        }
-        
-        /* 进度条动画 */
-        @keyframes progressAnimation {
-            from { width: 0; }
-        }
-        
-        .progress-animation {
-            animation: progressAnimation 1s ease-out;
-        }
-        
-        /* 数字动画 */
-        @property --num {
-            syntax: '<integer>';
-            initial-value: 0;
-            inherits: false;
-        }
-        
-        .counter-animation {
-            counter-reset: num var(--num);
-            animation: counter 2s ease-out;
-        }
-        
-        .counter-animation::after {
-            content: counter(num);
-        }
-        
-        @keyframes counter {
-            from { --num: 0; }
-        }
-        
-        /* 打印样式 */
-        @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
-            .shadow-lg { box-shadow: none !important; }
-        }
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f8fafc;
+            color: #1e293b;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }}
+        .container {{ max-width: 1200px; margin: 0 auto; padding: 40px 24px; }}
+
+        /* 头部 */
+        .header {{ margin-bottom: 48px; }}
+        .header h1 {{ font-size: 28px; font-weight: 600; color: #0f172a; margin-bottom: 8px; }}
+        .header .meta {{ color: #64748b; font-size: 14px; }}
+        .header .meta span {{ margin-right: 16px; }}
+
+        /* 概览卡片 */
+        .overview {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 32px; }}
+        .overview-card {{
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+        }}
+        .overview-card .number {{ font-size: 28px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }}
+        .overview-card .label {{ font-size: 13px; color: #64748b; margin-top: 4px; }}
+
+        /* 区块 */
+        .card {{
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }}
+        .card-title {{
+            font-size: 15px;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .card-title::before {{
+            content: '';
+            width: 4px;
+            height: 16px;
+            background: #3b82f6;
+            border-radius: 2px;
+        }}
+
+        /* 双栏 */
+        .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
+
+        /* 指标条 */
+        .metric-bars {{ display: flex; gap: 24px; }}
+        .metric-bar {{ flex: 1; text-align: center; }}
+        .metric-bar .value {{ font-size: 32px; font-weight: 700; }}
+        .metric-bar .label {{ font-size: 12px; color: #64748b; margin-top: 4px; }}
+        .metric-bar .bar {{ height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 12px; overflow: hidden; }}
+        .metric-bar .bar-fill {{ height: 100%; border-radius: 2px; }}
+        .blue {{ color: #3b82f6; }}
+        .green {{ color: #22c55e; }}
+        .purple {{ color: #8b5cf6; }}
+        .bar-fill.blue {{ background: #3b82f6; }}
+        .bar-fill.green {{ background: #22c55e; }}
+        .bar-fill.purple {{ background: #8b5cf6; }}
+
+        /* 文件类型列表 */
+        .type-list {{ }}
+        .type-item {{
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }}
+        .type-item:last-child {{ border-bottom: none; }}
+        .type-ext {{
+            font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+            font-size: 13px;
+            color: #0f172a;
+            background: #f1f5f9;
+            padding: 4px 10px;
+            border-radius: 6px;
+            min-width: 70px;
+            text-align: center;
+        }}
+        .type-bar {{
+            flex: 1;
+            height: 8px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            margin: 0 16px;
+            overflow: hidden;
+        }}
+        .type-bar-fill {{
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 4px;
+        }}
+        .type-bar-fill.doc {{
+            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+        }}
+        .type-stats {{
+            font-size: 13px;
+            color: #64748b;
+            min-width: 140px;
+            text-align: right;
+        }}
+        .type-stats strong {{ color: #0f172a; }}
+
+        /* 表格 */
+        table {{ width: 100%; border-collapse: collapse; }}
+        th {{
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }}
+        td {{
+            padding: 14px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #f1f5f9;
+        }}
+        tr:hover td {{ background: #f8fafc; }}
+        .text-right {{ text-align: right; }}
+        .mono {{ font-family: 'SF Mono', Monaco, monospace; font-variant-numeric: tabular-nums; }}
+        .rank {{ font-weight: 700; color: #f59e0b; font-size: 16px; }}
+        .lang-tag {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #475569;
+        }}
+
+        /* 图表 */
+        .chart-wrap {{ height: 260px; position: relative; }}
+
+        /* Git 卡片 */
+        .git-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }}
+        .git-item {{
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 16px;
+        }}
+        .git-item .name {{ font-weight: 600; color: #0f172a; margin-bottom: 12px; }}
+        .git-row {{ display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }}
+        .git-row .key {{ color: #64748b; }}
+        .git-row .val {{ color: #0f172a; }}
+
+        /* 页脚 */
+        .footer {{
+            text-align: center;
+            padding: 32px 0;
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 24px;
+        }}
+
+        /* 响应式 */
+        @media (max-width: 1024px) {{
+            .overview {{ grid-template-columns: repeat(3, 1fr); }}
+        }}
+        @media (max-width: 768px) {{
+            .container {{ padding: 24px 16px; }}
+            .overview {{ grid-template-columns: repeat(2, 1fr); }}
+            .grid-2 {{ grid-template-columns: 1fr; }}
+            .metric-bars {{ flex-direction: column; gap: 16px; }}
+        }}
     </style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-    <div class="container mx-auto px-4 py-8 max-w-7xl">
-""")
-            
-            # 头部信息
-            f.write(f"""
-        <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-xl p-8 mb-8 text-white animate-fade-in">
-            <h1 class="text-4xl font-bold mb-4 flex items-center justify-center">
-                <span class="mr-3">📊</span> 代码统计报告
-            </h1>
-            <div class="flex flex-wrap justify-center gap-4 text-sm opacity-90">
-                <div class="flex items-center">
-                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                </div>
-                <div class="flex items-center">
-                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-                    </svg>
-                    {self.current_dir}
-                </div>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>代码统计报告</h1>
+            <div class="meta">
+                <span>📅 {gen_time}</span>
+                <span>📁 {self.current_dir}</span>
             </div>
         </div>
-""")
-            
-            # 统计卡片
-            avg_lines_per_repo = summary['total_lines'] // summary['total_repos'] if summary['total_repos'] > 0 else 0
-            avg_lines_per_file = summary['total_lines'] // summary['total_files'] if summary['total_files'] > 0 else 0
-            
-            # 计算新的统计数据
-            comment_rate = (summary.get('total_comment_lines', 0) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-            blank_rate = (summary.get('total_blank_lines', 0) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-            code_rate = (summary.get('total_code_lines', summary['total_lines']) / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-            
-            f.write("""
-        <!-- 统计卡片 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <!-- 仓库总数 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.1s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-5xl">🗂️</div>
-                    <div class="text-right">
-                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
-                        <div class="text-sm text-gray-600 dark:text-gray-400">仓库总数</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 文件总数 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.2s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-5xl">📄</div>
-                    <div class="text-right">
-                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
-                        <div class="text-sm text-gray-600 dark:text-gray-400">文件总数</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 代码总行数 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.3s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-5xl">📝</div>
-                    <div class="text-right">
-                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{:,}</div>
-                        <div class="text-sm text-gray-600 dark:text-gray-400">代码总行数</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 总大小 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow animate-fade-in" style="animation-delay: 0.4s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-5xl">💾</div>
-                    <div class="text-right">
-                        <div class="text-3xl font-bold text-gray-800 dark:text-gray-200">{}</div>
-                        <div class="text-sm text-gray-600 dark:text-gray-400">总大小</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 代码质量指标 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <!-- 注释率 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.5s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">💬 注释率</div>
-                    <div class="text-2xl font-bold text-green-600">{:.1f}%</div>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                    <div class="bg-green-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
-                </div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 注释行</div>
-            </div>
-            
-            <!-- 代码率 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.6s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">⌨️ 代码率</div>
-                    <div class="text-2xl font-bold text-blue-600">{:.1f}%</div>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                    <div class="bg-blue-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
-                </div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 实际代码行</div>
-            </div>
-            
-            <!-- 空行率 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.7s">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="text-lg font-semibold text-gray-700 dark:text-gray-300">📏 空行率</div>
-                    <div class="text-2xl font-bold text-purple-600">{:.1f}%</div>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                    <div class="bg-purple-600 h-2.5 rounded-full progress-animation" style="width: {:.1f}%"></div>
-                </div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">{:,} 空行</div>
-            </div>
-        </div>
-""".format(
-                summary['total_repos'], 
-                summary['total_files'], 
-                summary['total_lines'],
-                self.format_size(summary.get('total_size', 0)),
-                comment_rate, comment_rate, summary.get('total_comment_lines', 0),
-                code_rate, code_rate, summary.get('total_code_lines', summary['total_lines']),
-                blank_rate, blank_rate, summary.get('total_blank_lines', 0)
-            ))
 
-            # 代码类型分布和文档类型分布
-            code_details = summary.get('code_details', {})
-            doc_details = summary.get('doc_details', {})
-            sorted_code_types = sorted(code_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
-            sorted_doc_types = sorted(doc_details.items(), key=lambda x: x[1]['lines'], reverse=True)[:10]
+        <div class="overview">
+            <div class="overview-card"><div class="number">{summary['total_repos']}</div><div class="label">仓库</div></div>
+            <div class="overview-card"><div class="number">{summary['total_files']:,}</div><div class="label">代码文件</div></div>
+            <div class="overview-card"><div class="number">{summary['total_lines']:,}</div><div class="label">代码行</div></div>
+            <div class="overview-card"><div class="number">{summary.get('total_doc_files', 0)}</div><div class="label">文档文件</div></div>
+            <div class="overview-card"><div class="number">{summary.get('total_doc_lines', 0):,}</div><div class="label">文档行</div></div>
+            <div class="overview-card"><div class="number">{self.format_size(summary.get('total_all_size', 0))}</div><div class="label">总大小</div></div>
+        </div>
 
-            f.write("""
-        <!-- 文件类型分布 -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <!-- 代码类型分布 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.75s">
-                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">💻 代码类型分布</h3>
-                <div class="space-y-3">
-""")
-            total_code_lines = summary['total_lines']
-            for ext, details in sorted_code_types:
-                pct = (details['lines'] / total_code_lines * 100) if total_code_lines > 0 else 0
-                f.write(f"""
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center">
-                            <span class="font-mono text-sm bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded">{ext}</span>
-                            <span class="ml-3 text-sm text-gray-600 dark:text-gray-400">{details['files']} 个文件</span>
-                        </div>
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-3">{details['lines']:,} 行</span>
-                            <div class="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div class="bg-blue-600 h-2 rounded-full" style="width: {min(pct, 100):.1f}%"></div>
-                            </div>
-                            <span class="ml-2 text-xs text-gray-500 w-12 text-right">{pct:.1f}%</span>
-                        </div>
-                    </div>
-""")
-            f.write("""
+        <div class="card">
+            <div class="card-title">代码组成</div>
+            <div class="metric-bars">
+                <div class="metric-bar">
+                    <div class="value blue">{code_rate:.1f}%</div>
+                    <div class="label">代码行 · {summary.get('total_code_lines', 0):,}</div>
+                    <div class="bar"><div class="bar-fill blue" style="width:{code_rate:.1f}%"></div></div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value green">{comment_rate:.1f}%</div>
+                    <div class="label">注释行 · {summary.get('total_comment_lines', 0):,}</div>
+                    <div class="bar"><div class="bar-fill green" style="width:{comment_rate:.1f}%"></div></div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value purple">{blank_rate:.1f}%</div>
+                    <div class="label">空行 · {summary.get('total_blank_lines', 0):,}</div>
+                    <div class="bar"><div class="bar-fill purple" style="width:{blank_rate:.1f}%"></div></div>
                 </div>
             </div>
+        </div>
 
-            <!-- 文档类型分布 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.8s">
-                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📚 文档类型分布</h3>
-                <div class="space-y-3">
-""")
-            total_doc_lines = summary.get('total_doc_lines', 0)
-            if sorted_doc_types:
-                for ext, details in sorted_doc_types:
-                    pct = (details['lines'] / total_doc_lines * 100) if total_doc_lines > 0 else 0
-                    f.write(f"""
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center">
-                            <span class="font-mono text-sm bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded">{ext}</span>
-                            <span class="ml-3 text-sm text-gray-600 dark:text-gray-400">{details['files']} 个文件</span>
-                        </div>
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-3">{details['lines']:,} 行</span>
-                            <div class="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div class="bg-purple-600 h-2 rounded-full" style="width: {min(pct, 100):.1f}%"></div>
-                            </div>
-                            <span class="ml-2 text-xs text-gray-500 w-12 text-right">{pct:.1f}%</span>
-                        </div>
-                    </div>
-""")
-            else:
-                f.write("""
-                    <div class="text-gray-500 dark:text-gray-400 text-center py-8">暂无文档文件</div>
-""")
-            f.write("""
-                </div>
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">代码文件类型</div>
+                <div class="type-list">{code_types_html}</div>
+            </div>
+            <div class="card">
+                <div class="card-title">文档文件类型</div>
+                <div class="type-list">{doc_types_html}</div>
             </div>
         </div>
-""")
 
-            # 图表部分
-            sorted_languages = sorted(summary['by_language'].items(),
-                                    key=lambda x: x[1]['lines'], reverse=True)[:10]
-            
-            f.write("""
-        <!-- 图表部分 -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <!-- 语言分布饼图 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.8s">
-                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🌐 语言分布</h3>
-                <div style="position: relative; height: 300px;">
-                    <canvas id="languageChart"></canvas>
-                </div>
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">语言分布</div>
+                <div class="chart-wrap"><canvas id="langChart"></canvas></div>
             </div>
-            
-            <!-- 仓库大小柱状图 -->
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-fade-in" style="animation-delay: 0.9s">
-                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📊 仓库大小对比 (TOP 10)</h3>
-                <div style="position: relative; height: 300px;">
-                    <canvas id="repoChart"></canvas>
-                </div>
+            <div class="card">
+                <div class="card-title">仓库规模</div>
+                <div class="chart-wrap"><canvas id="repoChart"></canvas></div>
             </div>
         </div>
-        
-        <!-- 代码组成分析 -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.0s">
-            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📋 代码组成分析</h3>
-            <div style="position: relative; height: 400px;">
-                <canvas id="compositionChart"></canvas>
-            </div>
-        </div>
-""")
-            
-            # 语言统计表
-            f.write("""
-        <!-- 语言统计表 -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.1s">
-            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">📊 语言详细统计</h3>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-900">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">排名</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">语言</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">仓库数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文件数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码行数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">注释率</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">占比</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">大小</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-""")
-            
-            for idx, (lang, data) in enumerate(sorted_languages, 1):
-                percentage = (data['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-                comment_rate = (data.get('comment_lines', 0) / data['lines'] * 100) if data['lines'] > 0 else 0
-                lang_emoji = self.get_language_emoji(lang)
-                
-                f.write(f"""
-                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">{idx}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                                <span class="text-lg mr-2">{lang_emoji}</span>{lang}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['repos']}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['files']:,}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{data['lines']:,}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                <span class="text-green-600 dark:text-green-400">{comment_rate:.1f}%</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                <div class="flex items-center justify-end">
-                                    <span class="mr-2">{percentage:.1f}%</span>
-                                    <div class="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: {percentage:.1f}%"></div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                {self.format_size(data.get('size', 0))}
-                            </td>
-                        </tr>
-""")
-            
-            f.write("""
-                    </tbody>
-                </table>
-            </div>
-        </div>
-""")
-            
-            # 仓库排行榜
-            sorted_by_lines = sorted(all_repos, key=lambda x: x['lines'], reverse=True)[:10]
-            
-            f.write("""
-        <!-- 仓库排行榜 -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.2s">
-            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🏆 仓库排行榜 (TOP 10)</h3>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-900">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">排名</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">仓库名</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">主要语言</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文件数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码行数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">文档行数</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">注释率</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">占比</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">代码大小</th>
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">总大小</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-""")
-            
-            for i, repo in enumerate(sorted_by_lines, 1):
-                percentage = (repo['lines'] / summary['total_lines'] * 100) if summary['total_lines'] > 0 else 0
-                comment_rate = (repo.get('comment_lines', 0) / repo['lines'] * 100) if repo['lines'] > 0 else 0
-                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}"
-                lang_emoji = self.get_language_emoji(repo['language'])
-                
-                f.write(f"""
-                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-                                <span class="text-2xl">{medal}</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                {repo['name']}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                                <span class="text-lg mr-2">{lang_emoji}</span>{repo['language']}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{repo['files']:,}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">{repo['lines']:,}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                <span class="text-purple-600 dark:text-purple-400">{repo.get('doc_lines', 0):,}</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                <span class="text-green-600 dark:text-green-400">{comment_rate:.1f}%</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                <div class="flex items-center justify-end">
-                                    <span class="mr-2">{percentage:.1f}%</span>
-                                    <div class="w-16 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                                        <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {percentage:.1f}%"></div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                {self.format_size(repo.get('size', 0))}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 text-right">
-                                {self.format_size(repo.get('total_size', repo.get('size', 0)))}
-                            </td>
-                        </tr>
-""")
-            
-            f.write("""
-                </tbody>
+
+        <div class="card">
+            <div class="card-title">语言统计</div>
+            <table>
+                <thead><tr>
+                    <th style="width:50px">#</th>
+                    <th>语言</th>
+                    <th class="text-right">仓库</th>
+                    <th class="text-right">文件</th>
+                    <th class="text-right">代码行</th>
+                    <th class="text-right">注释率</th>
+                    <th class="text-right">占比</th>
+                </tr></thead>
+                <tbody>{lang_table_rows}</tbody>
             </table>
         </div>
-""")
 
-            # 大小统计卡片
-            f.write(f"""
-        <!-- 大小统计 -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.3s">
-            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">💾 存储统计</h3>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                    <div class="text-3xl font-bold text-blue-600 dark:text-blue-400">{self.format_size(summary.get('total_size', 0))}</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">代码大小</div>
-                </div>
-                <div class="text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                    <div class="text-3xl font-bold text-purple-600 dark:text-purple-400">{self.format_size(summary.get('total_doc_size', 0))}</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">文档大小</div>
-                </div>
-                <div class="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div class="text-3xl font-bold text-green-600 dark:text-green-400">{self.format_size(summary.get('total_all_size', 0))}</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">仓库总大小</div>
-                </div>
-            </div>
+        <div class="card">
+            <div class="card-title">仓库排行</div>
+            <table>
+                <thead><tr>
+                    <th style="width:50px">#</th>
+                    <th>仓库</th>
+                    <th>语言</th>
+                    <th class="text-right">文件</th>
+                    <th class="text-right">代码行</th>
+                    <th class="text-right">文档行</th>
+                    <th class="text-right">注释率</th>
+                    <th class="text-right">大小</th>
+                </tr></thead>
+                <tbody>{repo_table_rows}</tbody>
+            </table>
         </div>
-""")
 
-            # Git 信息展示（如果有）
-            repos_with_git = [r for r in all_repos if r.get('git_info')]
-            if repos_with_git:
-                f.write("""
-        <!-- Git 信息 -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8 animate-fade-in" style="animation-delay: 1.4s">
-            <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">🔀 Git 仓库信息</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-""")
-                for repo in repos_with_git:
-                    git = repo.get('git_info', {})
-                    f.write(f"""
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                    <div class="font-semibold text-gray-900 dark:text-gray-100 mb-2">{repo['name']}</div>
-                    <div class="space-y-1 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-500 dark:text-gray-400">分支</span>
-                            <span class="font-mono text-gray-900 dark:text-gray-100">{git.get('branch', 'N/A')}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500 dark:text-gray-400">最后提交</span>
-                            <span class="text-gray-900 dark:text-gray-100">{git.get('last_commit_date', 'N/A')[:10] if git.get('last_commit_date') else 'N/A'}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500 dark:text-gray-400">提交者</span>
-                            <span class="text-gray-900 dark:text-gray-100">{git.get('last_author', 'N/A')}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500 dark:text-gray-400">提交总数</span>
-                            <span class="font-semibold text-blue-600 dark:text-blue-400">{git.get('commit_count', 'N/A')}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500 dark:text-gray-400">贡献者</span>
-                            <span class="font-semibold text-green-600 dark:text-green-400">{git.get('contributors', 'N/A')}</span>
-                        </div>
-                    </div>
-                </div>
-""")
-                f.write("""
-            </div>
-        </div>
-""")
+        {git_section}
 
-            # 页脚
-            version = __version__
-            gen_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"""
-        <!-- 页脚 -->
-        <div class="text-center text-gray-500 dark:text-gray-400 text-sm py-8 border-t border-gray-200 dark:border-gray-700 mt-8">
-            <p>📊 Generated by code_statistics.py v{version}</p>
-            <p class="mt-1">统计时间: {gen_time}</p>
-        </div>
+        <div class="footer">Generated by code_statistics.py v{__version__}</div>
     </div>
-""")
 
-            f.write("""
     <script>
-        // 配置 Chart.js 默认字体
-        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-        
-        // 语言分布饼图
-        const languageCtx = document.getElementById('languageChart').getContext('2d');
-        const languageData = {
-            labels: [""" + ", ".join([f"'{lang}'" for lang, _ in sorted_languages]) + """],
-            datasets: [{
-                data: [""" + ", ".join([str(data['lines']) for _, data in sorted_languages]) + """],
-                backgroundColor: [
-                    '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-                    '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16'
-                ],
-                borderWidth: 2,
-                borderColor: '#fff'
-            }]
-        };
-        
-        new Chart(languageCtx, {
+        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
+
+        new Chart(document.getElementById('langChart'), {{
             type: 'doughnut',
-            data: languageData,
-            options: {
+            data: {{ labels: {lang_labels}, datasets: [{{ data: {lang_data}, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }}] }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: {
-                            padding: 15,
-                            font: { size: 13 },
-                            generateLabels: function(chart) {
-                                const data = chart.data;
-                                const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
-                                return data.labels.map((label, i) => ({
-                                    text: `${label} (${((data.datasets[0].data[i] / total) * 100).toFixed(1)}%)`,
-                                    fillStyle: data.datasets[0].backgroundColor[i],
-                                    hidden: false,
-                                    index: i
-                                }));
-                            }
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                return context.label + ': ' + context.parsed.toLocaleString() + ' 行 (' + percentage + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        // 仓库大小对比柱状图
-        const repoCtx = document.getElementById('repoChart').getContext('2d');
-        const repoLabels = [""" + ", ".join([f"'{repo['name']}'" for repo in sorted_by_lines]) + """];
-        const repoData = [""" + ", ".join([str(repo['lines']) for repo in sorted_by_lines]) + """];
-        
-        new Chart(repoCtx, {
+                cutout: '60%',
+                plugins: {{
+                    legend: {{ position: 'right', labels: {{ padding: 16, usePointStyle: true, pointStyle: 'circle', font: {{ size: 12 }} }} }}
+                }}
+            }}
+        }});
+
+        new Chart(document.getElementById('repoChart'), {{
             type: 'bar',
-            data: {
-                labels: repoLabels.slice(0, 10),  // Top 10
-                datasets: [{
-                    label: '代码行数',
-                    data: repoData.slice(0, 10),
-                    backgroundColor: '#3B82F6',
-                    borderColor: '#2563EB',
-                    borderWidth: 1
-                }]
-            },
-            options: {
+            data: {{ labels: {repo_labels}, datasets: [{{ data: {repo_data}, backgroundColor: '#3b82f6', borderRadius: 6, barThickness: 24 }}] }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return value.toLocaleString();
-                            }
-                        }
-                    },
-                    x: {
-                        ticks: {
-                            maxRotation: 45,
-                            minRotation: 45
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return '代码行数: ' + context.parsed.y.toLocaleString();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        // 代码组成分析（堆叠柱状图）
-        const compositionCtx = document.getElementById('compositionChart').getContext('2d');
-        const compositionData = {
-            labels: [""" + ", ".join([f"'{repo['name']}'" for repo in sorted_by_lines[:10]]) + """],
-            code: [""" + ", ".join([str(repo.get('code_lines', repo['lines'])) for repo in sorted_by_lines[:10]]) + """],
-            comment: [""" + ", ".join([str(repo.get('comment_lines', 0)) for repo in sorted_by_lines[:10]]) + """],
-            blank: [""" + ", ".join([str(repo.get('blank_lines', 0)) for repo in sorted_by_lines[:10]]) + """],
-            doc: [""" + ", ".join([str(repo.get('doc_lines', 0)) for repo in sorted_by_lines[:10]]) + """]
-        };
-        
-        new Chart(compositionCtx, {
-            type: 'bar',
-            data: {
-                labels: compositionData.labels,
-                datasets: [
-                    {
-                        label: '代码行',
-                        data: compositionData.code,
-                        backgroundColor: '#3B82F6',
-                        borderColor: '#2563EB',
-                        borderWidth: 1
-                    },
-                    {
-                        label: '注释行',
-                        data: compositionData.comment,
-                        backgroundColor: '#10B981',
-                        borderColor: '#059669',
-                        borderWidth: 1
-                    },
-                    {
-                        label: '空行',
-                        data: compositionData.blank,
-                        backgroundColor: '#F59E0B',
-                        borderColor: '#D97706',
-                        borderWidth: 1
-                    },
-                    {
-                        label: '文档行',
-                        data: compositionData.doc,
-                        backgroundColor: '#8B5CF6',
-                        borderColor: '#7C3AED',
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        stacked: true,
-                        ticks: {
-                            maxRotation: 45,
-                            minRotation: 45
-                        }
-                    },
-                    y: {
-                        stacked: true,
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return value.toLocaleString();
-                            }
-                        }
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' 行';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        // 暗色模式切换
-        const darkModeToggle = document.getElementById('darkModeToggle');
-        const htmlElement = document.documentElement;
-        
-        // 检查本地存储的主题设置
-        const currentTheme = localStorage.getItem('theme') || 'light';
-        if (currentTheme === 'dark') {
-            htmlElement.classList.add('dark');
-        }
-        
-        darkModeToggle.addEventListener('click', () => {
-            htmlElement.classList.toggle('dark');
-            const theme = htmlElement.classList.contains('dark') ? 'dark' : 'light';
-            localStorage.setItem('theme', theme);
-            
-            // 更新图表颜色
-            const isDark = theme === 'dark';
-            Chart.defaults.color = isDark ? '#E5E7EB' : '#374151';
-            Chart.defaults.borderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-            Chart.defaults.plugins.legend.labels.color = isDark ? '#E5E7EB' : '#374151';
-            
-            // 重新渲染图表
-            window.location.reload();
-        });
+                indexAxis: 'y',
+                plugins: {{ legend: {{ display: false }} }},
+                scales: {{
+                    x: {{ grid: {{ color: '#f1f5f9' }}, ticks: {{ font: {{ size: 11 }} }} }},
+                    y: {{ grid: {{ display: false }}, ticks: {{ font: {{ size: 12 }} }} }}
+                }}
+            }}
+        }});
     </script>
 </body>
-</html>
-""")
-        
+</html>'''
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(html)
+
         if not self.args.summary:
             print(f"\n统计结果已保存到: {output_file}")
-    
+
     def output_console(self, all_repos, summary):
         """输出到控制台"""
         if not self.args.summary:
