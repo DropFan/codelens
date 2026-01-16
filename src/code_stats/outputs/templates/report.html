@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码统计报告</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f8fafc;
+            color: #1e293b;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+
+        /* 头部 */
+        .header { margin-bottom: 48px; }
+        .header h1 { font-size: 28px; font-weight: 600; color: #0f172a; margin-bottom: 8px; }
+        .header .meta { color: #64748b; font-size: 14px; }
+        .header .meta span { margin-right: 16px; }
+
+        /* 概览卡片 */
+        .overview { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 32px; }
+        .overview-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .overview-card .number { font-size: 28px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+        .overview-card .label { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+        /* 区块 */
+        .card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-title::before {
+            content: '';
+            width: 4px;
+            height: 16px;
+            background: #3b82f6;
+            border-radius: 2px;
+        }
+
+        /* 双栏 */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+        /* 指标条 */
+        .metric-bars { display: flex; gap: 24px; }
+        .metric-bar { flex: 1; text-align: center; }
+        .metric-bar .value { font-size: 32px; font-weight: 700; }
+        .metric-bar .label { font-size: 12px; color: #64748b; margin-top: 4px; }
+        .metric-bar .bar { height: 4px; background: #e2e8f0; border-radius: 2px; margin-top: 12px; overflow: hidden; }
+        .metric-bar .bar-fill { height: 100%; border-radius: 2px; }
+        .blue { color: #3b82f6; }
+        .green { color: #22c55e; }
+        .purple { color: #8b5cf6; }
+        .bar-fill.blue { background: #3b82f6; }
+        .bar-fill.green { background: #22c55e; }
+        .bar-fill.purple { background: #8b5cf6; }
+
+        /* 文件类型列表 */
+        .type-list { }
+        .type-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .type-item:last-child { border-bottom: none; }
+        .type-ext {
+            font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+            font-size: 13px;
+            color: #0f172a;
+            background: #f1f5f9;
+            padding: 4px 10px;
+            border-radius: 6px;
+            min-width: 70px;
+            text-align: center;
+        }
+        .type-bar {
+            flex: 1;
+            height: 8px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            margin: 0 16px;
+            overflow: hidden;
+        }
+        .type-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 4px;
+        }
+        .type-bar-fill.doc {
+            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+        }
+        .type-stats {
+            font-size: 13px;
+            color: #64748b;
+            min-width: 140px;
+            text-align: right;
+        }
+        .type-stats strong { color: #0f172a; }
+
+        /* 表格 */
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+        td {
+            padding: 14px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        tr:hover td { background: #f8fafc; }
+        .text-right { text-align: right; }
+        .mono { font-family: 'SF Mono', Monaco, monospace; font-variant-numeric: tabular-nums; }
+        .rank { font-weight: 700; color: #f59e0b; font-size: 16px; }
+        .lang-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #475569;
+        }
+
+        /* 图表 */
+        .chart-wrap { height: 260px; position: relative; }
+
+        /* Git 卡片 */
+        .git-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .git-item {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .git-item .name { font-weight: 600; color: #0f172a; margin-bottom: 12px; }
+        .git-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+        .git-row .key { color: #64748b; }
+        .git-row .val { color: #0f172a; }
+
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 32px 0;
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 24px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 1024px) {
+            .overview { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .container { padding: 24px 16px; }
+            .overview { grid-template-columns: repeat(2, 1fr); }
+            .grid-2 { grid-template-columns: 1fr; }
+            .metric-bars { flex-direction: column; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>代码统计报告</h1>
+            <div class="meta">
+                <span>{{ gen_time }}</span>
+                <span>{{ current_dir }}</span>
+            </div>
+        </div>
+
+        <div class="overview">
+            <div class="overview-card"><div class="number">{{ summary.total_repos }}</div><div class="label">仓库</div></div>
+            <div class="overview-card"><div class="number">{{ "{:,}".format(summary.total_files) }}</div><div class="label">代码文件</div></div>
+            <div class="overview-card"><div class="number">{{ "{:,}".format(summary.total_lines) }}</div><div class="label">代码行</div></div>
+            <div class="overview-card"><div class="number">{{ summary.total_doc_files }}</div><div class="label">文档文件</div></div>
+            <div class="overview-card"><div class="number">{{ "{:,}".format(summary.total_doc_lines) }}</div><div class="label">文档行</div></div>
+            <div class="overview-card"><div class="number">{{ total_size_formatted }}</div><div class="label">总大小</div></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">代码组成</div>
+            <div class="metric-bars">
+                <div class="metric-bar">
+                    <div class="value blue">{{ "%.1f"|format(code_rate) }}%</div>
+                    <div class="label">代码行 · {{ "{:,}".format(summary.total_code_lines) }}</div>
+                    <div class="bar"><div class="bar-fill blue" style="width:{{ "%.1f"|format(code_rate) }}%"></div></div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value green">{{ "%.1f"|format(comment_rate) }}%</div>
+                    <div class="label">注释行 · {{ "{:,}".format(summary.total_comment_lines) }}</div>
+                    <div class="bar"><div class="bar-fill green" style="width:{{ "%.1f"|format(comment_rate) }}%"></div></div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value purple">{{ "%.1f"|format(blank_rate) }}%</div>
+                    <div class="label">空行 · {{ "{:,}".format(summary.total_blank_lines) }}</div>
+                    <div class="bar"><div class="bar-fill purple" style="width:{{ "%.1f"|format(blank_rate) }}%"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">代码文件类型</div>
+                <div class="type-list">
+                {% for ext, details in code_types %}
+                    <div class="type-item">
+                        <span class="type-ext">{{ ext }}</span>
+                        <div class="type-bar"><div class="type-bar-fill" style="width:{{ "%.1f"|format((details.lines / summary.total_lines * 200) if summary.total_lines > 0 else 0) }}%"></div></div>
+                        <span class="type-stats"><strong>{{ "{:,}".format(details.lines) }}</strong> 行 · {{ details.files }} 文件</span>
+                    </div>
+                {% endfor %}
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">文档文件类型</div>
+                <div class="type-list">
+                {% if doc_types %}
+                    {% for ext, details in doc_types %}
+                    <div class="type-item">
+                        <span class="type-ext">{{ ext }}</span>
+                        <div class="type-bar"><div class="type-bar-fill doc" style="width:{{ "%.1f"|format((details.lines / summary.total_doc_lines * 100) if summary.total_doc_lines > 0 else 0) }}%"></div></div>
+                        <span class="type-stats"><strong>{{ "{:,}".format(details.lines) }}</strong> 行 · {{ details.files }} 文件</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="color:#94a3b8;text-align:center;padding:32px;">暂无文档文件</div>
+                {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">代码复杂度分析</div>
+            <div class="metric-bars">
+                <div class="metric-bar">
+                    <div class="value blue">{{ "{:,}".format(complexity.functions) }}</div>
+                    <div class="label">函数/方法</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value green">{{ complexity.avg_complexity }}</div>
+                    <div class="label">平均圈复杂度</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value purple">{{ complexity.max_depth }}</div>
+                    <div class="label">最大嵌套深度</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="value" style="color:#f59e0b">{{ complexity.avg_func_lines }}</div>
+                    <div class="label">平均函数行数</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">文件大小分布</div>
+                <div class="chart-wrap"><canvas id="sizeChart"></canvas></div>
+            </div>
+            <div class="card">
+                <div class="card-title">语言分布</div>
+                <div class="chart-wrap"><canvas id="langChart"></canvas></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">仓库规模</div>
+            <div class="chart-wrap"><canvas id="repoChart"></canvas></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">语言统计</div>
+            <table>
+                <thead><tr>
+                    <th style="width:50px">#</th>
+                    <th>语言</th>
+                    <th class="text-right">仓库</th>
+                    <th class="text-right">文件</th>
+                    <th class="text-right">代码行</th>
+                    <th class="text-right">注释率</th>
+                    <th class="text-right">占比</th>
+                </tr></thead>
+                <tbody>
+                {% for lang, data in languages %}
+                    <tr>
+                        <td class="rank">{{ loop.index }}</td>
+                        <td><span class="lang-badge">{{ get_emoji(lang) }} {{ lang }}</span></td>
+                        <td style="text-align:right" class="number">{{ data.repos }}</td>
+                        <td style="text-align:right" class="number">{{ "{:,}".format(data.files) }}</td>
+                        <td style="text-align:right" class="number">{{ "{:,}".format(data.lines) }}</td>
+                        <td style="text-align:right">{{ "%.1f"|format((data.comment_lines / data.lines * 100) if data.lines > 0 else 0) }}%</td>
+                        <td style="text-align:right">{{ "%.1f"|format((data.lines / summary.total_lines * 100) if summary.total_lines > 0 else 0) }}%</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-title">仓库排行</div>
+            <table>
+                <thead><tr>
+                    <th style="width:50px">#</th>
+                    <th>仓库</th>
+                    <th>语言</th>
+                    <th class="text-right">文件</th>
+                    <th class="text-right">代码行</th>
+                    <th class="text-right">文档行</th>
+                    <th class="text-right">注释率</th>
+                    <th class="text-right">大小</th>
+                </tr></thead>
+                <tbody>
+                {% for repo in repos %}
+                    <tr>
+                        <td class="rank">{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}</td>
+                        <td><strong>{{ repo.name }}</strong></td>
+                        <td><span class="lang-badge">{{ get_emoji(repo.language) }} {{ repo.language }}</span></td>
+                        <td style="text-align:right" class="number">{{ "{:,}".format(repo.files) }}</td>
+                        <td style="text-align:right" class="number">{{ "{:,}".format(repo.lines) }}</td>
+                        <td style="text-align:right" class="number">{{ "{:,}".format(repo.doc_lines|default(0)) }}</td>
+                        <td style="text-align:right">{{ "%.1f"|format((repo.comment_lines / repo.lines * 100) if repo.lines > 0 else 0) }}%</td>
+                        <td style="text-align:right">{{ format_size(repo.size|default(0)) }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if git_repos %}
+        <div class="card">
+            <div class="card-title">Git 仓库信息</div>
+            <div class="git-grid">
+            {% for repo in git_repos %}
+                <div class="git-item">
+                    <div class="name">{{ repo.name }}</div>
+                    <div class="git-row"><span class="key">分支</span><span class="val">{{ repo.git.branch|default('N/A') }}</span></div>
+                    <div class="git-row"><span class="key">最后提交</span><span class="val">{{ repo.git.last_commit_date[:10] if repo.git.last_commit_date else 'N/A' }}</span></div>
+                    <div class="git-row"><span class="key">提交者</span><span class="val">{{ repo.git.last_commit_author|default('N/A') }}</span></div>
+                    <div class="git-row"><span class="key">提交数</span><span class="val" style="color:#3b82f6">{{ repo.git.total_commits|default('N/A') }}</span></div>
+                    <div class="git-row"><span class="key">贡献者</span><span class="val" style="color:#22c55e">{{ repo.git.contributors|default('N/A') }}</span></div>
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="footer">Generated by code-stats v{{ version }}</div>
+    </div>
+
+    <script>
+        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
+
+        new Chart(document.getElementById('sizeChart'), {
+            type: 'bar',
+            data: {
+                labels: {{ size_labels|tojson }},
+                datasets: [{
+                    data: {{ size_data|tojson }},
+                    backgroundColor: ['#06b6d4', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'],
+                    borderRadius: 6,
+                    barThickness: 36
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
+                    x: { grid: { display: false }, ticks: { font: { size: 12 } } }
+                }
+            }
+        });
+
+        new Chart(document.getElementById('langChart'), {
+            type: 'doughnut',
+            data: { labels: {{ lang_labels|tojson }}, datasets: [{ data: {{ lang_data|tojson }}, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '60%',
+                plugins: {
+                    legend: { position: 'right', labels: { padding: 16, usePointStyle: true, pointStyle: 'circle', font: { size: 12 } } }
+                }
+            }
+        });
+
+        new Chart(document.getElementById('repoChart'), {
+            type: 'bar',
+            data: { labels: {{ repo_labels|tojson }}, datasets: [{ data: {{ repo_data|tojson }}, backgroundColor: '#3b82f6', borderRadius: 6, barThickness: 24 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
+                    y: { grid: { display: false }, ticks: { font: { size: 12 } } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

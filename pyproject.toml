@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-stats"
+version = "2.0.0"
+description = "代码统计工具 - 统计仓库代码行数"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "Author"}]
+keywords = ["code", "statistics", "loc", "lines of code"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "jinja2>=3.0",
+]
+
+[project.optional-dependencies]
+gitignore = ["pathspec>=0.11"]
+yaml = ["pyyaml>=6.0"]
+all = ["pathspec>=0.11", "pyyaml>=6.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pathspec>=0.11",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+code-stats = "code_stats.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/user/code-stats"
+Repository = "https://github.com/user/code-stats"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_stats"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
