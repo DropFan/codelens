@@ -11,23 +11,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # 开发环境
 pip install -e ".[dev]"          # 安装开发依赖
-pip install -e ".[all]"          # 安装所有可选依赖
 
 # 运行
 python code_statistics.py        # 直接运行
 code-stats                       # 安装后命令
-python -m code_stats             # 模块运行
 
 # 测试
 pytest                           # 运行所有测试
 pytest tests/test_analyzers/     # 运行特定模块
 pytest -v tests/test_filters/test_gitignore.py::test_function_name  # 单个测试
+
+# 代码检查 (配置: line-length=100, target-version=py38)
+ruff check .
 ```
 
 ## 依赖
 
 - **必需**: `jinja2>=3.0`
-- **可选**: `pathspec` (gitignore 解析), `pyyaml` (配置文件)
+- **可选**: `pathspec` (gitignore), `pyyaml` (配置), `argcomplete` (补全)
+- **Python**: >=3.8
 
 ## 代码架构
 
@@ -38,6 +40,7 @@ src/code_stats/
 ├── cli.py              # 命令行解析 (argparse)
 ├── core.py             # CodeStatistics 主类，协调各模块
 ├── config.py           # 配置文件加载 (yaml/json)
+├── completion.py       # Shell 补全 (argcomplete)
 ├── analyzers/          # 代码分析
 │   ├── file.py         # FileContentAnalyzer: 单文件分析
 │   ├── repository.py   # RepositoryAnalyzer: 仓库扫描

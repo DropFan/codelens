@@ -1,6 +1,7 @@
 """命令行接口"""
 
 import argparse
+import sys
 from typing import List, Optional
 
 from code_stats import __version__
@@ -201,6 +202,20 @@ def create_parser() -> argparse.ArgumentParser:
         help='禁用 .gitignore 规则过滤（默认启用）'
     )
 
+    # Shell 补全
+    parser.add_argument(
+        '--install-completion',
+        action='store_true',
+        help='安装 Shell 自动补全脚本'
+    )
+
+    # 尝试加载补全器（argcomplete 可选）
+    try:
+        from code_stats.completion import setup_completers
+        setup_completers(parser)
+    except ImportError:
+        pass
+
     return parser
 
 
@@ -211,7 +226,27 @@ def main(argv: Optional[List[str]] = None) -> None:
         argv: 命令行参数列表（用于测试），默认为 None 使用 sys.argv
     """
     parser = create_parser()
+
+    # 启用 argcomplete 自动补全（必须在 parse_args 之前）
+    try:
+        import argcomplete
+        argcomplete.autocomplete(parser)
+    except ImportError:
+        pass
+
     args = parser.parse_args(argv)
+
+    # 处理 --install-completion 参数
+    if args.install_completion:
+        try:
+            from code_stats.completion import install_completion
+            success, message = install_completion()
+            print(message)
+            sys.exit(0 if success else 1)
+        except ImportError:
+            print("错误: 需要安装 argcomplete (pip install code-stats[completion])",
+                  file=sys.stderr)
+            sys.exit(1)
 
     # 如果请求显示支持的语言列表
     if args.help_lang:

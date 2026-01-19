@@ -31,12 +31,14 @@ dependencies = [
 [project.optional-dependencies]
 gitignore = ["pathspec>=0.11"]
 yaml = ["pyyaml>=6.0"]
-all = ["pathspec>=0.11", "pyyaml>=6.0"]
+completion = ["argcomplete>=3.0"]
+all = ["pathspec>=0.11", "pyyaml>=6.0", "argcomplete>=3.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pathspec>=0.11",
     "pyyaml>=6.0",
+    "argcomplete>=3.0",
 ]
 
 [project.scripts]

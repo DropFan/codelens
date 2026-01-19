@@ -33,6 +33,7 @@ pip install -e ".[all]"
 - **可选**:
   - `pathspec`: 高效的 .gitignore 规则解析（推荐）
   - `pyyaml`: YAML 配置文件支持
+  - `argcomplete`: Shell 自动补全
 
 ## 快速开始
 
@@ -211,6 +212,7 @@ src/code_stats/
 ├── cli.py              # 命令行解析
 ├── core.py             # 核心协调类
 ├── config.py           # 配置加载
+├── completion.py       # Shell 自动补全
 ├── analyzers/          # 代码分析模块
 │   ├── file.py         # 单文件分析
 │   ├── repository.py   # 仓库扫描
@@ -249,6 +251,35 @@ src/code_stats/
 | `--config FILE` | 使用配置文件 |
 | `--verbose, -v` | 详细输出模式 |
 | `--help-lang` | 显示支持的语言列表 |
+| `--install-completion` | 安装 Shell 自动补全脚本 |
+
+## Shell 自动补全
+
+支持 Bash、Zsh、Fish 的命令行自动补全。
+
+### 安装
+
+```bash
+# 1. 安装补全依赖
+pip install code-stats[completion]
+
+# 2. 安装补全脚本（自动检测当前 Shell）
+code-stats --install-completion
+```
+
+安装后重启终端即可生效。
+
+### 补全功能
+
+| 参数 | 补全内容 |
+|------|---------|
+| `--<Tab>` | 所有命令行选项 |
+| `--lang` | 70+ 种编程语言名称 |
+| `--output` | html/json/markdown/csv |
+| `--sort` | lines/files/name |
+| `--dirs` | 当前目录下的子目录 |
+| `--config` | .yaml/.json 配置文件 |
+| `--repo` | 当前目录下的 Git 仓库 |
 
 ## 开发
 
