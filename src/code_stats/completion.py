@@ -162,8 +162,8 @@ def install_completion() -> tuple[bool, str]:
     # 获取安装路径
     install_path, display_path = get_completion_install_path(shell)
 
-    # 生成补全脚本
-    script = argcomplete.shellcode('code-stats', shell=shell)
+    # 生成补全脚本（executables 参数需要传入列表）
+    script = argcomplete.shellcode(['code-stats'], shell=shell)
 
     # 确保目录存在
     install_dir = os.path.dirname(install_path)
