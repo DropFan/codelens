@@ -75,7 +75,8 @@ class GitInfoProvider:
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
-                git_info['contributors'] = len(result.stdout.strip().split('\n'))
+                output = result.stdout.strip()
+                git_info['contributors'] = len(output.split('\n')) if output else 0
 
             # 获取远程仓库 URL
             result = subprocess.run(

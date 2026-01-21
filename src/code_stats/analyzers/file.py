@@ -123,8 +123,8 @@ class FileContentAnalyzer:
                             comment_lines += 1
                             continue
 
-                # 单行注释
-                if stripped.startswith(single_comment):
+                # 单行注释（确保 single_comment 非空，避免空字符串匹配所有行）
+                if single_comment and stripped.startswith(single_comment):
                     comment_lines += 1
                 else:
                     code_lines += 1

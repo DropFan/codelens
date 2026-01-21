@@ -5,7 +5,7 @@
 """
 
 import os
-from typing import Iterator, Any
+from typing import Iterator, Any, Optional, Tuple
 
 
 def LanguageCompleter(prefix: str, **kwargs: Any) -> Iterator[str]:
@@ -108,7 +108,7 @@ def setup_completers(parser) -> None:
             action.completer = completer_map[action.dest]
 
 
-def detect_shell() -> str | None:
+def detect_shell() -> Optional[str]:
     """检测当前使用的 Shell 类型
 
     Returns:
@@ -122,7 +122,7 @@ def detect_shell() -> str | None:
     return None
 
 
-def get_completion_install_path(shell: str) -> tuple[str, str]:
+def get_completion_install_path(shell: str) -> Tuple[str, str]:
     """获取补全脚本的安装路径
 
     Args:
@@ -143,7 +143,7 @@ def get_completion_install_path(shell: str) -> tuple[str, str]:
         raise ValueError(f"Unsupported shell: {shell}")
 
 
-def install_completion() -> tuple[bool, str]:
+def install_completion() -> Tuple[bool, str]:
     """安装补全脚本到当前 Shell 的配置目录
 
     Returns:
