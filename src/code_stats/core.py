@@ -134,26 +134,32 @@ class CodeStatistics:
                 else:
                     print(f"警告：目录不存在或不是目录: {dir_path}")
         else:
-            # 原有逻辑：扫描当前目录下的所有仓库
-            items = os.listdir(self.current_dir)
+            # 检查当前目录本身是否是 git 仓库
+            if os.path.exists(os.path.join(self.current_dir, '.git')):
+                # 当前目录是 git 仓库，统计本项目
+                repo_name = os.path.basename(self.current_dir)
+                repo_paths.append((repo_name, self.current_dir))
+            else:
+                # 当前目录不是 git 仓库，扫描子目录中的仓库
+                items = os.listdir(self.current_dir)
 
-            # 如果指定了特定仓库
-            if self.args.repo:
-                target_repos = set(repo.strip() for repo in self.args.repo.split(','))
-                items = [item for item in items if item in target_repos]
+                # 如果指定了特定仓库
+                if self.args.repo:
+                    target_repos = set(repo.strip() for repo in self.args.repo.split(','))
+                    items = [item for item in items if item in target_repos]
 
-            for item in sorted(items):
-                item_path = os.path.join(self.current_dir, item)
+                for item in sorted(items):
+                    item_path = os.path.join(self.current_dir, item)
 
-                # 跳过非目录和以.开头的隐藏目录
-                if not os.path.isdir(item_path) or item.startswith('.'):
-                    continue
+                    # 跳过非目录和以.开头的隐藏目录
+                    if not os.path.isdir(item_path) or item.startswith('.'):
+                        continue
 
-                # 跳过非仓库目录
-                if not os.path.exists(os.path.join(item_path, '.git')):
-                    continue
+                    # 跳过非仓库目录
+                    if not os.path.exists(os.path.join(item_path, '.git')):
+                        continue
 
-                repo_paths.append((item, item_path))
+                    repo_paths.append((item, item_path))
 
         self.total_repos = len(repo_paths)
 
