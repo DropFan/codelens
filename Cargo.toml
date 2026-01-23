@@ -7,7 +7,11 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
+authors = ["Tiger <DropFan@Gmail.com>"]
 repository = "https://github.com/DropFan/codelens.git"
+homepage = "https://github.com/DropFan/codelens"
+documentation = "https://docs.rs/codelens"
+readme = "README.md"
 keywords = ["code", "statistics", "lines", "count", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 

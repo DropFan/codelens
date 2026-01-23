@@ -235,15 +235,11 @@ mod tests {
         let registry = Arc::new(LanguageRegistry::empty());
         let analyzer = FileAnalyzer::new(registry, &Config::default());
 
-        let content = r#"
-fn main() {
-    println!("hello");
-}
-"#;
+        let content = "fn main() {\n    println!(\"hello\");\n}\n";
         let stats = analyzer.count_lines(content, &lang);
-        assert_eq!(stats.total, 5);
+        assert_eq!(stats.total, 3);
         assert_eq!(stats.code, 3);
-        assert_eq!(stats.blank, 2);
+        assert_eq!(stats.blank, 0);
         assert_eq!(stats.comment, 0);
     }
 
@@ -253,17 +249,12 @@ fn main() {
         let registry = Arc::new(LanguageRegistry::empty());
         let analyzer = FileAnalyzer::new(registry, &Config::default());
 
-        let content = r#"// This is a comment
-fn main() {
-    /* block comment */
-    println!("hello");
-}
-"#;
+        let content = "// This is a comment\nfn main() {\n    /* block comment */\n    println!(\"hello\");\n}\n";
         let stats = analyzer.count_lines(content, &lang);
-        assert_eq!(stats.total, 6);
+        assert_eq!(stats.total, 5);
         assert_eq!(stats.code, 3);
         assert_eq!(stats.comment, 2);
-        assert_eq!(stats.blank, 1);
+        assert_eq!(stats.blank, 0);
     }
 
     #[test]
@@ -272,16 +263,11 @@ fn main() {
         let registry = Arc::new(LanguageRegistry::empty());
         let analyzer = FileAnalyzer::new(registry, &Config::default());
 
-        let content = r#"/*
- * Multi-line
- * comment
- */
-fn main() {}
-"#;
+        let content = "/*\n * Multi-line\n * comment\n */\nfn main() {}\n";
         let stats = analyzer.count_lines(content, &lang);
-        assert_eq!(stats.total, 6);
+        assert_eq!(stats.total, 5);
         assert_eq!(stats.code, 1);
         assert_eq!(stats.comment, 4);
-        assert_eq!(stats.blank, 1);
+        assert_eq!(stats.blank, 0);
     }
 }

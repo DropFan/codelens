@@ -1,6 +1,6 @@
 # Rust
 /target/
-Cargo.lock
+**/*.rs.bk
 
 # IDE
 .idea/
@@ -17,7 +17,19 @@ Thumbs.db
 *.profraw
 *.profdata
 coverage/
+tarpaulin-report.html
 
 # Temporary files
 *.tmp
 *.bak
+
+# Release artifacts
+*.tar.gz
+*.zip
+dist/
+
+# Benchmark results
+criterion/
+
+# Documentation build
+/target/doc/

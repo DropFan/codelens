@@ -92,7 +92,7 @@ mod tests {
             line_comments: vec!["//".to_string()],
             block_comments: vec![("/*".to_string(), "*/".to_string())],
             string_delimiters: vec![],
-            function_pattern: Some(r"^\s*(pub\s+)?(async\s+)?fn\s+\w+".to_string()),
+            function_pattern: Some(r"(?m)^\s*(pub\s+)?(async\s+)?fn\s+\w+".to_string()),
             complexity_keywords: vec![
                 "if".to_string(),
                 "else".to_string(),

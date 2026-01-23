@@ -1,0 +1,34 @@
+# cargo-release configuration
+# https://github.com/crate-ci/cargo-release
+
+[workspace]
+# 发布前是否允许未提交的更改
+allow-branch = ["rust"]
+# 是否为 workspace 所有成员统一版本
+consolidate-commits = true
+# 发布顺序（先核心库，后 CLI）
+release = false
+
+[[package]]
+name = "codelens-core"
+release = true
+
+[[package]]
+name = "codelens"
+release = true
+
+# 预发布检查
+pre-release-commit-message = "chore: release v{{version}}"
+pre-release-replacements = [
+    { file = "CHANGELOG.md", search = "\\[Unreleased\\]", replace = "[{{version}}] - {{date}}" },
+]
+
+# Tag 配置
+tag-name = "v{{version}}-rust"
+tag-message = "Release v{{version}} (Rust)"
+tag = true
+sign-tag = false
+sign-commit = false
+
+# 发布后动作
+post-release-commit-message = "chore: start next development iteration"
