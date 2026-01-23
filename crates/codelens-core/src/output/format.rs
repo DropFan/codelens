@@ -49,3 +49,34 @@ impl Default for OutputOptions {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_output_options_default() {
+        let options = OutputOptions::default();
+        assert!(!options.summary_only);
+        assert!(matches!(options.sort_by, SortBy::Lines));
+        assert!(options.top_n.is_none());
+        assert!(options.colorize);
+        assert!(!options.show_git_info);
+    }
+
+    #[test]
+    fn test_output_options_custom() {
+        let options = OutputOptions {
+            summary_only: true,
+            sort_by: SortBy::Code,
+            top_n: Some(10),
+            colorize: false,
+            show_git_info: true,
+        };
+        assert!(options.summary_only);
+        assert!(matches!(options.sort_by, SortBy::Code));
+        assert_eq!(options.top_n, Some(10));
+        assert!(!options.colorize);
+        assert!(options.show_git_info);
+    }
+}

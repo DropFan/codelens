@@ -59,3 +59,103 @@ impl OutputFormat for CsvOutput {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::stats::{FileStats, LineStats, Summary};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn make_test_result() -> AnalysisResult {
+        let files = vec![
+            FileStats {
+                path: PathBuf::from("main.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 100,
+                    code: 80,
+                    comment: 10,
+                    blank: 10,
+                },
+                size: 2000,
+                complexity: Default::default(),
+            },
+            FileStats {
+                path: PathBuf::from("test.py"),
+                language: "Python".to_string(),
+                lines: LineStats {
+                    total: 50,
+                    code: 40,
+                    comment: 5,
+                    blank: 5,
+                },
+                size: 1000,
+                complexity: Default::default(),
+            },
+        ];
+        AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::from_millis(100),
+            scanned_files: 2,
+            skipped_files: 0,
+        }
+    }
+
+    #[test]
+    fn test_csv_output_name() {
+        let output = CsvOutput::new();
+        assert_eq!(output.name(), "csv");
+        assert_eq!(output.extension(), "csv");
+    }
+
+    #[test]
+    fn test_csv_output_header() {
+        let output = CsvOutput::default();
+        let result = make_test_result();
+        let options = OutputOptions::default();
+
+        let mut buffer = Vec::new();
+        output.write(&result, &options, &mut buffer).unwrap();
+
+        let csv_str = String::from_utf8(buffer).unwrap();
+        let lines: Vec<&str> = csv_str.lines().collect();
+
+        assert_eq!(lines[0], "Language,Files,Code,Comment,Blank,Total,Size");
+    }
+
+    #[test]
+    fn test_csv_output_data() {
+        let output = CsvOutput::default();
+        let result = make_test_result();
+        let options = OutputOptions::default();
+
+        let mut buffer = Vec::new();
+        output.write(&result, &options, &mut buffer).unwrap();
+
+        let csv_str = String::from_utf8(buffer).unwrap();
+
+        // Should contain language data
+        assert!(csv_str.contains("Rust"));
+        assert!(csv_str.contains("Python"));
+        assert!(csv_str.contains(",80,")); // Rust code lines
+        assert!(csv_str.contains(",40,")); // Python code lines
+    }
+
+    #[test]
+    fn test_csv_output_line_count() {
+        let output = CsvOutput::default();
+        let result = make_test_result();
+        let options = OutputOptions::default();
+
+        let mut buffer = Vec::new();
+        output.write(&result, &options, &mut buffer).unwrap();
+
+        let csv_str = String::from_utf8(buffer).unwrap();
+        let lines: Vec<&str> = csv_str.lines().collect();
+
+        // 1 header + 2 languages = 3 lines
+        assert_eq!(lines.len(), 3);
+    }
+}

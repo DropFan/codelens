@@ -257,11 +257,222 @@ mod duration_serde {
         duration.as_secs_f64().serialize(serializer)
     }
 
+    #[allow(dead_code)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
     where
         D: Deserializer<'de>,
     {
         let secs = f64::deserialize(deserializer)?;
         Ok(Duration::from_secs_f64(secs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_line_stats_default() {
+        let stats = LineStats::default();
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.code, 0);
+        assert_eq!(stats.comment, 0);
+        assert_eq!(stats.blank, 0);
+    }
+
+    #[test]
+    fn test_line_stats_add() {
+        let mut stats1 = LineStats {
+            total: 100,
+            code: 80,
+            comment: 10,
+            blank: 10,
+        };
+        let stats2 = LineStats {
+            total: 50,
+            code: 40,
+            comment: 5,
+            blank: 5,
+        };
+
+        stats1.add(&stats2);
+
+        assert_eq!(stats1.total, 150);
+        assert_eq!(stats1.code, 120);
+        assert_eq!(stats1.comment, 15);
+        assert_eq!(stats1.blank, 15);
+    }
+
+    #[test]
+    fn test_line_stats_add_trait() {
+        let stats1 = LineStats {
+            total: 100,
+            code: 80,
+            comment: 10,
+            blank: 10,
+        };
+        let stats2 = LineStats {
+            total: 50,
+            code: 40,
+            comment: 5,
+            blank: 5,
+        };
+
+        let result = stats1 + stats2;
+
+        assert_eq!(result.total, 150);
+        assert_eq!(result.code, 120);
+    }
+
+    #[test]
+    fn test_line_stats_add_assign() {
+        let mut stats1 = LineStats {
+            total: 100,
+            code: 80,
+            comment: 10,
+            blank: 10,
+        };
+        let stats2 = LineStats {
+            total: 50,
+            code: 40,
+            comment: 5,
+            blank: 5,
+        };
+
+        stats1 += stats2;
+
+        assert_eq!(stats1.total, 150);
+        assert_eq!(stats1.code, 120);
+    }
+
+    #[test]
+    fn test_complexity_add() {
+        let mut c1 = Complexity {
+            functions: 10,
+            cyclomatic: 20,
+            max_depth: 5,
+            avg_func_lines: 0.0,
+        };
+        let c2 = Complexity {
+            functions: 5,
+            cyclomatic: 10,
+            max_depth: 8,
+            avg_func_lines: 0.0,
+        };
+
+        c1.add(&c2);
+
+        assert_eq!(c1.functions, 15);
+        assert_eq!(c1.cyclomatic, 30);
+        assert_eq!(c1.max_depth, 8); // max of 5 and 8
+    }
+
+    #[test]
+    fn test_size_distribution() {
+        let mut dist = SizeDistribution::default();
+
+        dist.add(500);        // tiny: < 1KB
+        dist.add(1024);       // small: 1KB - 10KB
+        dist.add(5000);       // small
+        dist.add(15000);      // medium: 10KB - 100KB
+        dist.add(500_000);    // large: 100KB - 1MB
+        dist.add(2_000_000);  // huge: > 1MB
+
+        assert_eq!(dist.tiny, 1);
+        assert_eq!(dist.small, 2);
+        assert_eq!(dist.medium, 1);
+        assert_eq!(dist.large, 1);
+        assert_eq!(dist.huge, 1);
+    }
+
+    #[test]
+    fn test_summary_from_file_stats() {
+        let files = vec![
+            FileStats {
+                path: PathBuf::from("src/main.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 100,
+                    code: 80,
+                    comment: 10,
+                    blank: 10,
+                },
+                size: 2000,
+                complexity: Complexity {
+                    functions: 5,
+                    cyclomatic: 10,
+                    max_depth: 3,
+                    avg_func_lines: 16.0,
+                },
+            },
+            FileStats {
+                path: PathBuf::from("src/lib.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 50,
+                    code: 40,
+                    comment: 5,
+                    blank: 5,
+                },
+                size: 1000,
+                complexity: Complexity {
+                    functions: 3,
+                    cyclomatic: 6,
+                    max_depth: 2,
+                    avg_func_lines: 13.3,
+                },
+            },
+            FileStats {
+                path: PathBuf::from("test.py"),
+                language: "Python".to_string(),
+                lines: LineStats {
+                    total: 30,
+                    code: 20,
+                    comment: 5,
+                    blank: 5,
+                },
+                size: 500,
+                complexity: Complexity {
+                    functions: 2,
+                    cyclomatic: 4,
+                    max_depth: 2,
+                    avg_func_lines: 10.0,
+                },
+            },
+        ];
+
+        let summary = Summary::from_file_stats(&files);
+
+        assert_eq!(summary.total_files, 3);
+        assert_eq!(summary.lines.total, 180);
+        assert_eq!(summary.lines.code, 140);
+        assert_eq!(summary.total_size, 3500);
+        assert_eq!(summary.by_language.len(), 2);
+        assert_eq!(summary.complexity.functions, 10);
+
+        // Rust should be first (more code lines)
+        let first_lang = summary.by_language.keys().next().unwrap();
+        assert_eq!(first_lang, "Rust");
+
+        let rust_stats = summary.by_language.get("Rust").unwrap();
+        assert_eq!(rust_stats.files, 2);
+        assert_eq!(rust_stats.lines.code, 120);
+    }
+
+    #[test]
+    fn test_summary_empty() {
+        let summary = Summary::from_file_stats(&[]);
+
+        assert_eq!(summary.total_files, 0);
+        assert_eq!(summary.lines.total, 0);
+        assert!(summary.by_language.is_empty());
+    }
+
+    #[test]
+    fn test_file_stats_default() {
+        let stats = FileStats::default();
+        assert!(stats.path.as_os_str().is_empty());
+        assert!(stats.language.is_empty());
+        assert_eq!(stats.size, 0);
     }
 }
