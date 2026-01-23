@@ -144,11 +144,96 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
     steps:
-      - name: Update Homebrew formula
-        uses: dawidd6/action-homebrew-bump-formula@v3
-        continue-on-error: true
+      - name: Download release assets and compute checksums
+        id: checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          BASE_URL="https://github.com/DropFan/codelens/releases/download/v${VERSION}-rust"
+
+          # Download and compute SHA256 for each platform
+          SHA_MACOS_X86=$(curl -sL "${BASE_URL}/codelens-${VERSION}-x86_64-apple-darwin.tar.gz" | sha256sum | cut -d' ' -f1)
+          SHA_MACOS_ARM=$(curl -sL "${BASE_URL}/codelens-${VERSION}-aarch64-apple-darwin.tar.gz" | sha256sum | cut -d' ' -f1)
+          SHA_LINUX_X86=$(curl -sL "${BASE_URL}/codelens-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
+          SHA_LINUX_ARM=$(curl -sL "${BASE_URL}/codelens-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
+
+          echo "sha_macos_x86=${SHA_MACOS_X86}" >> $GITHUB_OUTPUT
+          echo "sha_macos_arm=${SHA_MACOS_ARM}" >> $GITHUB_OUTPUT
+          echo "sha_linux_x86=${SHA_LINUX_X86}" >> $GITHUB_OUTPUT
+          echo "sha_linux_arm=${SHA_LINUX_ARM}" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
         with:
+          repository: DropFan/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: DropFan/homebrew-tap
-          formula: codelens
-          tag: v${{ needs.create-release.outputs.version }}-rust
+          path: homebrew-tap
+
+      - name: Update formula
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          SHA_MACOS_X86: ${{ steps.checksums.outputs.sha_macos_x86 }}
+          SHA_MACOS_ARM: ${{ steps.checksums.outputs.sha_macos_arm }}
+          SHA_LINUX_X86: ${{ steps.checksums.outputs.sha_linux_x86 }}
+          SHA_LINUX_ARM: ${{ steps.checksums.outputs.sha_linux_arm }}
+        run: |
+          cat > homebrew-tap/Formula/codelens.rb << 'FORMULA'
+          class Codelens < Formula
+            desc "High performance code statistics tool written in Rust"
+            homepage "https://github.com/DropFan/codelens"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/DropFan/codelens/releases/download/vVERSION_PLACEHOLDER-rust/codelens-VERSION_PLACEHOLDER-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA_MACOS_X86_PLACEHOLDER"
+              end
+              on_arm do
+                url "https://github.com/DropFan/codelens/releases/download/vVERSION_PLACEHOLDER-rust/codelens-VERSION_PLACEHOLDER-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA_MACOS_ARM_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/DropFan/codelens/releases/download/vVERSION_PLACEHOLDER-rust/codelens-VERSION_PLACEHOLDER-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_LINUX_X86_PLACEHOLDER"
+              end
+              on_arm do
+                url "https://github.com/DropFan/codelens/releases/download/vVERSION_PLACEHOLDER-rust/codelens-VERSION_PLACEHOLDER-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_LINUX_ARM_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "codelens"
+            end
+
+            test do
+              assert_match "codelens", shell_output("#{bin}/codelens --version")
+            end
+          end
+          FORMULA
+
+          # Replace placeholders with actual values
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" homebrew-tap/Formula/codelens.rb
+          sed -i "s/SHA_MACOS_X86_PLACEHOLDER/${SHA_MACOS_X86}/g" homebrew-tap/Formula/codelens.rb
+          sed -i "s/SHA_MACOS_ARM_PLACEHOLDER/${SHA_MACOS_ARM}/g" homebrew-tap/Formula/codelens.rb
+          sed -i "s/SHA_LINUX_X86_PLACEHOLDER/${SHA_LINUX_X86}/g" homebrew-tap/Formula/codelens.rb
+          sed -i "s/SHA_LINUX_ARM_PLACEHOLDER/${SHA_LINUX_ARM}/g" homebrew-tap/Formula/codelens.rb
+
+          # Remove leading spaces from heredoc
+          sed -i 's/^          //' homebrew-tap/Formula/codelens.rb
+
+      - name: Commit and push
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/codelens.rb
+          git commit -m "codelens ${VERSION}" || echo "No changes to commit"
+          git push

@@ -13,11 +13,19 @@ High performance code statistics tool written in Rust.
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install DropFan/tap/codelens
+```
+
+### Cargo
+
 ```bash
 cargo install codelens
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/DropFan/codelens
