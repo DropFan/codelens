@@ -47,7 +47,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Output formatting
 colored = "2"
-comfy-table = "7"
+comfy-table = ">=7, <7.2"
 indicatif = "0.17"
 
 # Utilities
