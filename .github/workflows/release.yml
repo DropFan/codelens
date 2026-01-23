@@ -124,6 +124,7 @@ jobs:
     name: Publish to crates.io
     needs: [create-release, build]
     runs-on: ubuntu-latest
+    continue-on-error: true  # Allow failure if already published
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

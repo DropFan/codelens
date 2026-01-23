@@ -5,7 +5,7 @@ High performance code statistics tool written in Rust.
 ## Features
 
 - **Fast**: Parallel file traversal, 30-50x faster than Python alternatives
-- **70+ Languages**: Built-in support for popular programming languages
+- **65+ Languages**: Built-in support for popular programming languages
 - **Smart Filtering**: Respects `.gitignore`, auto-excludes build directories
 - **Multiple Outputs**: Console, JSON, CSV, Markdown, HTML with charts
 - **Complexity Analysis**: Function count, cyclomatic complexity, nesting depth
@@ -87,9 +87,11 @@ depth = 10
 git_info = true
 ```
 
-## Custom Languages
+## Custom Languages (Planned)
 
-Add custom language definitions in `~/.config/codelens/languages.toml`:
+> **Note**: This feature is planned but not yet implemented.
+
+Custom language definitions will be supported in `~/.config/codelens/languages.toml`:
 
 ```toml
 [mylang]
