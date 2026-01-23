@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/DropFan/codelens.git"
+keywords = ["code", "statistics", "lines", "count", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env", "string"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# File traversal
+ignore = "0.4"
+walkdir = "2"
+globset = "0.4"
+
+# Parallelism
+rayon = "1.10"
+crossbeam-channel = "0.5"
+num_cpus = "1"
+
+# Template
+askama = "0.12"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Output formatting
+colored = "2"
+comfy-table = "7"
+indicatif = "0.17"
+
+# Utilities
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+indexmap = { version = "2", features = ["serde"] }
+regex = "1"
+once_cell = "1"
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+lto = true
+codegen-units = 1

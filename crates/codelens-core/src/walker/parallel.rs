@@ -1,0 +1,216 @@
+//! Parallel directory walker using the `ignore` crate.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use crossbeam_channel::bounded;
+use ignore::{DirEntry, WalkBuilder, WalkState};
+
+use crate::analyzer::stats::FileStats;
+use crate::analyzer::FileAnalyzer;
+use crate::error::Result;
+use crate::filter::Filter;
+
+/// Configuration for the parallel walker.
+#[derive(Debug, Clone)]
+pub struct WalkerConfig {
+    /// Number of threads to use.
+    pub threads: usize,
+    /// Whether to follow symbolic links.
+    pub follow_symlinks: bool,
+    /// Whether to respect .gitignore files.
+    pub use_gitignore: bool,
+    /// Maximum directory depth (None = unlimited).
+    pub max_depth: Option<usize>,
+    /// Additional ignore patterns.
+    pub custom_ignores: Vec<String>,
+}
+
+impl Default for WalkerConfig {
+    fn default() -> Self {
+        Self {
+            threads: num_cpus::get(),
+            follow_symlinks: false,
+            use_gitignore: true,
+            max_depth: None,
+            custom_ignores: Vec::new(),
+        }
+    }
+}
+
+/// Parallel directory walker.
+pub struct ParallelWalker {
+    config: WalkerConfig,
+}
+
+impl ParallelWalker {
+    /// Create a new parallel walker.
+    pub fn new(config: WalkerConfig) -> Self {
+        Self { config }
+    }
+
+    /// Walk directories and analyze files in parallel.
+    ///
+    /// Calls `on_file` for each successfully analyzed file,
+    /// and `on_skip` for each skipped file.
+    pub fn walk_and_analyze<F, S>(
+        &self,
+        root: &Path,
+        analyzer: Arc<FileAnalyzer>,
+        filter: Arc<dyn Filter>,
+        mut on_file: F,
+        mut on_skip: S,
+    ) -> Result<()>
+    where
+        F: FnMut(FileStats) + Send,
+        S: FnMut(&Path) + Send,
+    {
+        let (tx, rx) = bounded::<WalkResult>(1000);
+
+        // Build the walker
+        let mut builder = WalkBuilder::new(root);
+        builder
+            .hidden(false) // Don't skip hidden files by default
+            .git_ignore(self.config.use_gitignore)
+            .git_global(self.config.use_gitignore)
+            .git_exclude(self.config.use_gitignore)
+            .follow_links(self.config.follow_symlinks)
+            .threads(self.config.threads);
+
+        if let Some(depth) = self.config.max_depth {
+            builder.max_depth(Some(depth));
+        }
+
+        // Add custom ignore patterns
+        for pattern in &self.config.custom_ignores {
+            builder.add_custom_ignore_filename(pattern);
+        }
+
+        // Start parallel walk
+        let filter_clone = Arc::clone(&filter);
+        let analyzer_clone = Arc::clone(&analyzer);
+
+        builder.build_parallel().run(|| {
+            let tx = tx.clone();
+            let filter = Arc::clone(&filter_clone);
+            let analyzer = Arc::clone(&analyzer_clone);
+
+            Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => return WalkState::Continue,
+                };
+
+                let path = entry.path();
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+                // Apply custom filter
+                if !filter.should_include(path, is_dir) {
+                    if is_dir {
+                        return WalkState::Skip;
+                    }
+                    let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                    return WalkState::Continue;
+                }
+
+                // Skip directories (they're handled by the walker)
+                if is_dir {
+                    return WalkState::Continue;
+                }
+
+                // Skip non-files
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    return WalkState::Continue;
+                }
+
+                // Analyze the file
+                match analyzer.analyze(path) {
+                    Ok(Some(stats)) => {
+                        let _ = tx.send(WalkResult::File(stats));
+                    }
+                    Ok(None) => {
+                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                    }
+                    Err(_) => {
+                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                    }
+                }
+
+                WalkState::Continue
+            })
+        });
+
+        // Close the sender
+        drop(tx);
+
+        // Collect results
+        for result in rx {
+            match result {
+                WalkResult::File(stats) => on_file(stats),
+                WalkResult::Skipped(path) => on_skip(&path),
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for ParallelWalker {
+    fn default() -> Self {
+        Self::new(WalkerConfig::default())
+    }
+}
+
+/// Result from walking a single entry.
+enum WalkResult {
+    /// Successfully analyzed file.
+    File(FileStats),
+    /// Skipped file.
+    Skipped(std::path::PathBuf),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::TempDir;
+
+    struct AllowAll;
+    impl Filter for AllowAll {
+        fn should_include(&self, _path: &Path, _is_dir: bool) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn test_walker_config_default() {
+        let config = WalkerConfig::default();
+        assert!(config.threads > 0);
+        assert!(config.use_gitignore);
+        assert!(!config.follow_symlinks);
+    }
+
+    #[test]
+    fn test_walk_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        let walker = ParallelWalker::default();
+        let registry = Arc::new(crate::language::LanguageRegistry::empty());
+        let analyzer = Arc::new(FileAnalyzer::new(registry, &crate::config::Config::default()));
+        let filter = Arc::new(AllowAll);
+
+        let count = AtomicUsize::new(0);
+        walker
+            .walk_and_analyze(
+                dir.path(),
+                analyzer,
+                filter,
+                |_| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+}

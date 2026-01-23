@@ -1,0 +1,36 @@
+[package]
+name = "codelens"
+description = "High performance code statistics tool written in Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "codelens"
+path = "src/main.rs"
+
+[dependencies]
+codelens-core = { path = "../codelens-core" }
+
+# CLI
+clap.workspace = true
+
+# Error handling
+anyhow.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Output
+colored.workspace = true
+indicatif.workspace = true
+
+# Utilities
+chrono.workspace = true
+num_cpus.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

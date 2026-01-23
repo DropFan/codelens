@@ -1,0 +1,523 @@
+# Built-in language definitions for codelens
+# Format: [language_id]
+#   name = "Display Name"
+#   extensions = [".ext"]
+#   filenames = ["SpecialFile"]
+#   line_comments = ["//"]
+#   block_comments = [["/*", "*/"]]
+#   function_pattern = "regex"
+#   complexity_keywords = ["if", "for"]
+#   nested_comments = false
+
+# ============================================================================
+# Systems Programming
+# ============================================================================
+
+[rust]
+name = "Rust"
+extensions = [".rs"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(pub\\s+)?(async\\s+)?fn\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "loop", "match", "?", "&&", "||"]
+nested_comments = true
+
+[c]
+name = "C"
+extensions = [".c", ".h"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*\\w+\\s+\\w+\\s*\\([^)]*\\)\\s*\\{"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "?", "&&", "||"]
+
+[cpp]
+name = "C++"
+extensions = [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".c++", ".h++"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(template\\s*<[^>]*>\\s*)?(\\w+\\s+)+\\w+\\s*\\([^)]*\\)\\s*(const)?\\s*\\{"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "&&", "||"]
+
+[zig]
+name = "Zig"
+extensions = [".zig"]
+line_comments = ["//"]
+function_pattern = "^\\s*(pub\\s+)?fn\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "switch", "orelse", "catch"]
+
+# ============================================================================
+# Go
+# ============================================================================
+
+[go]
+name = "Go"
+extensions = [".go"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*func\\s+"
+complexity_keywords = ["if", "else", "for", "switch", "select", "case", "&&", "||"]
+
+# ============================================================================
+# JVM Languages
+# ============================================================================
+
+[java]
+name = "Java"
+extensions = [".java"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(public|private|protected)?\\s*(static)?\\s*\\w+\\s+\\w+\\s*\\("
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "&&", "||"]
+
+[kotlin]
+name = "Kotlin"
+extensions = [".kt", ".kts"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(fun|suspend\\s+fun)\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "when", "catch", "?:", "&&", "||"]
+
+[scala]
+name = "Scala"
+extensions = [".scala", ".sc"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*def\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "match", "case", "catch", "&&", "||"]
+
+[groovy]
+name = "Groovy"
+extensions = [".groovy", ".gvy", ".gy", ".gsh"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*def\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?:", "&&", "||"]
+
+# ============================================================================
+# .NET Languages
+# ============================================================================
+
+[csharp]
+name = "C#"
+extensions = [".cs"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(public|private|protected|internal)?\\s*(static|async)?\\s*\\w+\\s+\\w+\\s*\\("
+complexity_keywords = ["if", "else", "for", "foreach", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+
+[fsharp]
+name = "F#"
+extensions = [".fs", ".fsx", ".fsi"]
+line_comments = ["//"]
+block_comments = [["(*", "*)"]]
+function_pattern = "^\\s*let\\s+(rec\\s+)?\\w+"
+complexity_keywords = ["if", "then", "else", "for", "while", "match", "with", "try", "&&", "||"]
+
+[vb]
+name = "Visual Basic"
+extensions = [".vb"]
+line_comments = ["'"]
+function_pattern = "^\\s*(Public|Private|Protected)?\\s*(Shared)?\\s*(Sub|Function)\\s+\\w+"
+complexity_keywords = ["If", "Else", "ElseIf", "For", "While", "Select", "Case", "Catch", "And", "Or"]
+
+# ============================================================================
+# Scripting Languages
+# ============================================================================
+
+[python]
+name = "Python"
+extensions = [".py", ".pyw", ".pyi", ".pyx", ".pxd"]
+filenames = ["SConstruct", "SConscript"]
+line_comments = ["#"]
+block_comments = [["\"\"\"", "\"\"\""], ["'''", "'''"]]
+function_pattern = "^\\s*(async\\s+)?def\\s+\\w+"
+complexity_keywords = ["if", "elif", "else", "for", "while", "except", "with", "and", "or", "not"]
+
+[ruby]
+name = "Ruby"
+extensions = [".rb", ".rake", ".gemspec"]
+filenames = ["Rakefile", "Gemfile", "Guardfile"]
+line_comments = ["#"]
+block_comments = [["=begin", "=end"]]
+function_pattern = "^\\s*def\\s+\\w+"
+complexity_keywords = ["if", "elsif", "else", "unless", "for", "while", "until", "case", "when", "rescue", "&&", "||"]
+
+[perl]
+name = "Perl"
+extensions = [".pl", ".pm", ".pod", ".t"]
+line_comments = ["#"]
+block_comments = [["=pod", "=cut"]]
+function_pattern = "^\\s*sub\\s+\\w+"
+complexity_keywords = ["if", "elsif", "else", "unless", "for", "foreach", "while", "until", "&&", "||"]
+
+[php]
+name = "PHP"
+extensions = [".php", ".phtml", ".php3", ".php4", ".php5", ".php7", ".phps"]
+line_comments = ["//", "#"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(public|private|protected)?\\s*(static)?\\s*function\\s+\\w+"
+complexity_keywords = ["if", "elseif", "else", "for", "foreach", "while", "switch", "case", "catch", "?", "&&", "||", "and", "or"]
+
+[lua]
+name = "Lua"
+extensions = [".lua"]
+line_comments = ["--"]
+block_comments = [["--[[", "]]"]]
+function_pattern = "^\\s*(local\\s+)?function\\s+\\w+"
+complexity_keywords = ["if", "elseif", "else", "for", "while", "repeat", "and", "or"]
+
+# ============================================================================
+# Shell Scripts
+# ============================================================================
+
+[bash]
+name = "Bash"
+extensions = [".sh", ".bash"]
+filenames = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout"]
+line_comments = ["#"]
+function_pattern = "^\\s*(function\\s+)?\\w+\\s*\\(\\s*\\)"
+complexity_keywords = ["if", "elif", "else", "for", "while", "until", "case", "&&", "||"]
+
+[zsh]
+name = "Zsh"
+extensions = [".zsh"]
+filenames = [".zshrc", ".zprofile", ".zlogin", ".zlogout"]
+line_comments = ["#"]
+function_pattern = "^\\s*(function\\s+)?\\w+\\s*\\(\\s*\\)"
+complexity_keywords = ["if", "elif", "else", "for", "while", "until", "case", "&&", "||"]
+
+[fish]
+name = "Fish"
+extensions = [".fish"]
+line_comments = ["#"]
+function_pattern = "^\\s*function\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "and", "or"]
+
+[powershell]
+name = "PowerShell"
+extensions = [".ps1", ".psm1", ".psd1"]
+line_comments = ["#"]
+block_comments = [["<#", "#>"]]
+function_pattern = "^\\s*function\\s+\\w+"
+complexity_keywords = ["if", "elseif", "else", "for", "foreach", "while", "switch", "catch", "-and", "-or"]
+
+# ============================================================================
+# Web Technologies
+# ============================================================================
+
+[javascript]
+name = "JavaScript"
+extensions = [".js", ".mjs", ".cjs", ".jsx"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+
+[typescript]
+name = "TypeScript"
+extensions = [".ts", ".tsx", ".mts", ".cts"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+
+[html]
+name = "HTML"
+extensions = [".html", ".htm", ".xhtml"]
+block_comments = [["<!--", "-->"]]
+
+[css]
+name = "CSS"
+extensions = [".css"]
+block_comments = [["/*", "*/"]]
+
+[scss]
+name = "SCSS"
+extensions = [".scss"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+
+[sass]
+name = "Sass"
+extensions = [".sass"]
+line_comments = ["//"]
+
+[less]
+name = "Less"
+extensions = [".less"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+
+[vue]
+name = "Vue"
+extensions = [".vue"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"], ["<!--", "-->"]]
+
+[svelte]
+name = "Svelte"
+extensions = [".svelte"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"], ["<!--", "-->"]]
+
+# ============================================================================
+# Data & Config
+# ============================================================================
+
+[json]
+name = "JSON"
+extensions = [".json", ".jsonc", ".json5"]
+
+[yaml]
+name = "YAML"
+extensions = [".yml", ".yaml"]
+line_comments = ["#"]
+
+[toml]
+name = "TOML"
+extensions = [".toml"]
+line_comments = ["#"]
+
+[xml]
+name = "XML"
+extensions = [".xml", ".xsl", ".xslt", ".xsd", ".wsdl"]
+block_comments = [["<!--", "-->"]]
+
+[ini]
+name = "INI"
+extensions = [".ini", ".cfg", ".conf"]
+line_comments = [";", "#"]
+
+[csv]
+name = "CSV"
+extensions = [".csv", ".tsv"]
+
+# ============================================================================
+# Database
+# ============================================================================
+
+[sql]
+name = "SQL"
+extensions = [".sql"]
+line_comments = ["--"]
+block_comments = [["/*", "*/"]]
+complexity_keywords = ["CASE", "WHEN", "IF", "ELSE", "AND", "OR"]
+
+[plsql]
+name = "PL/SQL"
+extensions = [".pls", ".pks", ".pkb"]
+line_comments = ["--"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(FUNCTION|PROCEDURE)\\s+\\w+"
+complexity_keywords = ["IF", "ELSIF", "ELSE", "FOR", "WHILE", "LOOP", "CASE", "WHEN", "AND", "OR"]
+
+# ============================================================================
+# Functional Languages
+# ============================================================================
+
+[haskell]
+name = "Haskell"
+extensions = [".hs", ".lhs"]
+line_comments = ["--"]
+block_comments = [["{-", "-}"]]
+function_pattern = "^\\w+\\s*::"
+complexity_keywords = ["if", "then", "else", "case", "of", "guard"]
+nested_comments = true
+
+[elixir]
+name = "Elixir"
+extensions = [".ex", ".exs"]
+line_comments = ["#"]
+block_comments = [["@doc \"\"\"", "\"\"\""], ["@moduledoc \"\"\"", "\"\"\""]]
+function_pattern = "^\\s*def(p)?\\s+\\w+"
+complexity_keywords = ["if", "else", "cond", "case", "with", "for", "and", "or"]
+
+[erlang]
+name = "Erlang"
+extensions = [".erl", ".hrl"]
+line_comments = ["%"]
+function_pattern = "^\\w+\\s*\\("
+complexity_keywords = ["if", "case", "of", "receive", "try", "catch", "andalso", "orelse"]
+
+[clojure]
+name = "Clojure"
+extensions = [".clj", ".cljs", ".cljc", ".edn"]
+line_comments = [";"]
+function_pattern = "\\(defn?-?\\s+\\w+"
+complexity_keywords = ["if", "when", "cond", "case", "for", "loop", "and", "or"]
+
+[ocaml]
+name = "OCaml"
+extensions = [".ml", ".mli"]
+block_comments = [["(*", "*)"]]
+function_pattern = "^\\s*let\\s+(rec\\s+)?\\w+"
+complexity_keywords = ["if", "then", "else", "match", "with", "for", "while", "&&", "||"]
+nested_comments = true
+
+# ============================================================================
+# Mobile Development
+# ============================================================================
+
+[swift]
+name = "Swift"
+extensions = [".swift"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(func|init)\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "guard", "catch", "?", "??", "&&", "||"]
+nested_comments = true
+
+[objectivec]
+name = "Objective-C"
+extensions = [".m", ".mm"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*[-+]\\s*\\([^)]+\\)\\s*\\w+"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "@catch", "?", "&&", "||"]
+
+[dart]
+name = "Dart"
+extensions = [".dart"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*(\\w+\\s+)?\\w+\\s*\\([^)]*\\)\\s*(async)?\\s*\\{"
+complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+
+# ============================================================================
+# Build & DevOps
+# ============================================================================
+
+[makefile]
+name = "Makefile"
+filenames = ["Makefile", "makefile", "GNUmakefile", "Makefile.am", "Makefile.in"]
+extensions = [".mk", ".mak"]
+line_comments = ["#"]
+
+[cmake]
+name = "CMake"
+extensions = [".cmake"]
+filenames = ["CMakeLists.txt"]
+line_comments = ["#"]
+block_comments = [["#[[", "]]"]]
+
+[dockerfile]
+name = "Dockerfile"
+filenames = ["Dockerfile", "Containerfile"]
+extensions = [".dockerfile"]
+line_comments = ["#"]
+
+[terraform]
+name = "Terraform"
+extensions = [".tf", ".tfvars"]
+line_comments = ["#", "//"]
+block_comments = [["/*", "*/"]]
+
+[nix]
+name = "Nix"
+extensions = [".nix"]
+line_comments = ["#"]
+block_comments = [["/*", "*/"]]
+
+# ============================================================================
+# Documentation
+# ============================================================================
+
+[markdown]
+name = "Markdown"
+extensions = [".md", ".markdown", ".mdown", ".mkdn"]
+
+[restructuredtext]
+name = "reStructuredText"
+extensions = [".rst", ".rest"]
+line_comments = [".."]
+
+[asciidoc]
+name = "AsciiDoc"
+extensions = [".adoc", ".asciidoc", ".asc"]
+line_comments = ["//"]
+block_comments = [["////", "////"]]
+
+[latex]
+name = "LaTeX"
+extensions = [".tex", ".sty", ".cls"]
+line_comments = ["%"]
+
+# ============================================================================
+# Other Languages
+# ============================================================================
+
+[r]
+name = "R"
+extensions = [".r", ".R", ".rdata", ".rds", ".rda"]
+line_comments = ["#"]
+function_pattern = "^\\s*\\w+\\s*<-\\s*function"
+complexity_keywords = ["if", "else", "for", "while", "repeat", "switch", "&&", "||"]
+
+[julia]
+name = "Julia"
+extensions = [".jl"]
+line_comments = ["#"]
+block_comments = [["#=", "=#"]]
+function_pattern = "^\\s*function\\s+\\w+"
+complexity_keywords = ["if", "elseif", "else", "for", "while", "try", "catch", "&&", "||"]
+nested_comments = true
+
+[matlab]
+name = "MATLAB"
+extensions = [".m", ".mat"]
+line_comments = ["%"]
+block_comments = [["%{", "%}"]]
+function_pattern = "^\\s*function\\s+"
+complexity_keywords = ["if", "elseif", "else", "for", "while", "switch", "case", "try", "catch", "&&", "||"]
+
+[fortran]
+name = "Fortran"
+extensions = [".f", ".for", ".f90", ".f95", ".f03", ".f08"]
+line_comments = ["!", "C", "c", "*"]
+function_pattern = "^\\s*(SUBROUTINE|FUNCTION)\\s+\\w+"
+complexity_keywords = ["IF", "ELSE", "ELSEIF", "DO", "WHILE", "SELECT", "CASE", ".AND.", ".OR."]
+
+[cobol]
+name = "COBOL"
+extensions = [".cob", ".cbl", ".cpy"]
+line_comments = ["*"]
+function_pattern = "^\\s*\\w+\\s+SECTION\\."
+complexity_keywords = ["IF", "ELSE", "PERFORM", "EVALUATE", "WHEN", "AND", "OR"]
+
+[assembly]
+name = "Assembly"
+extensions = [".asm", ".s", ".S"]
+line_comments = [";", "#", "//"]
+
+[vhdl]
+name = "VHDL"
+extensions = [".vhd", ".vhdl"]
+line_comments = ["--"]
+function_pattern = "^\\s*(function|procedure)\\s+\\w+"
+complexity_keywords = ["if", "elsif", "else", "for", "while", "case", "when", "and", "or"]
+
+[verilog]
+name = "Verilog"
+extensions = [".v", ".vh", ".sv", ".svh"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+complexity_keywords = ["if", "else", "for", "while", "case", "&&", "||"]
+
+[protobuf]
+name = "Protocol Buffers"
+extensions = [".proto"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+
+[graphql]
+name = "GraphQL"
+extensions = [".graphql", ".gql"]
+line_comments = ["#"]
+
+[solidity]
+name = "Solidity"
+extensions = [".sol"]
+line_comments = ["//"]
+block_comments = [["/*", "*/"]]
+function_pattern = "^\\s*function\\s+\\w+"
+complexity_keywords = ["if", "else", "for", "while", "do", "require", "assert", "&&", "||"]
