@@ -48,9 +48,7 @@ impl FilterChain {
 impl Filter for FilterChain {
     fn should_include(&self, path: &Path, is_dir: bool) -> bool {
         // All filters must pass
-        self.filters
-            .iter()
-            .all(|f| f.should_include(path, is_dir))
+        self.filters.iter().all(|f| f.should_include(path, is_dir))
     }
 }
 

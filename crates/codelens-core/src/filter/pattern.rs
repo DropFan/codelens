@@ -22,7 +22,8 @@ pub struct PatternFilter {
     include_file_regex: Vec<Regex>,
     /// Regex patterns to exclude directories.
     exclude_dir_regex: Vec<Regex>,
-    /// Target languages (empty = all).
+    /// Target languages (empty = all). Reserved for future use.
+    #[allow(dead_code)]
     target_languages: Vec<String>,
 }
 
@@ -86,8 +87,6 @@ impl PatternFilter {
 
 impl Filter for PatternFilter {
     fn should_include(&self, path: &Path, is_dir: bool) -> bool {
-        let path_str = path.to_string_lossy();
-
         // Check include patterns first (they take precedence)
         if let Some(ref include) = self.include_globs {
             if include.is_match(path) {
@@ -95,10 +94,11 @@ impl Filter for PatternFilter {
             }
         }
 
-        if !is_dir && !self.include_file_regex.is_empty() {
-            if Self::matches_any_regex(path, &self.include_file_regex) {
-                return true;
-            }
+        if !is_dir
+            && !self.include_file_regex.is_empty()
+            && Self::matches_any_regex(path, &self.include_file_regex)
+        {
+            return true;
         }
 
         // Check exclude patterns
@@ -112,10 +112,8 @@ impl Filter for PatternFilter {
             if Self::matches_any_regex(path, &self.exclude_dir_regex) {
                 return false;
             }
-        } else {
-            if Self::matches_any_regex(path, &self.exclude_file_regex) {
-                return false;
-            }
+        } else if Self::matches_any_regex(path, &self.exclude_file_regex) {
+            return false;
         }
 
         true

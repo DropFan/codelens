@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_csv_output_header() {
-        let output = CsvOutput::default();
+        let output = CsvOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_csv_output_data() {
-        let output = CsvOutput::default();
+        let output = CsvOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_csv_output_line_count() {
-        let output = CsvOutput::default();
+        let output = CsvOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 

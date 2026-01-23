@@ -80,10 +80,7 @@ mod tests {
         let err = Error::DirectoryNotFound {
             path: PathBuf::from("/nonexistent"),
         };
-        assert_eq!(
-            err.to_string(),
-            "directory not found: /nonexistent"
-        );
+        assert_eq!(err.to_string(), "directory not found: /nonexistent");
     }
 
     #[test]
@@ -99,6 +96,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::invalid_regex)]
     fn test_error_display_invalid_regex() {
         let regex_err = regex::Regex::new("[invalid").unwrap_err();
         let err = Error::InvalidRegex {
@@ -117,8 +115,10 @@ mod tests {
 
     #[test]
     fn test_result_type() {
-        let ok: Result<i32> = Ok(42);
-        assert_eq!(ok.unwrap(), 42);
+        fn returns_ok() -> Result<i32> {
+            Ok(42)
+        }
+        assert_eq!(returns_ok().unwrap(), 42);
 
         let err: Result<i32> = Err(Error::DirectoryNotFound {
             path: PathBuf::from("/test"),

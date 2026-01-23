@@ -371,12 +371,12 @@ mod tests {
     fn test_size_distribution() {
         let mut dist = SizeDistribution::default();
 
-        dist.add(500);        // tiny: < 1KB
-        dist.add(1024);       // small: 1KB - 10KB
-        dist.add(5000);       // small
-        dist.add(15000);      // medium: 10KB - 100KB
-        dist.add(500_000);    // large: 100KB - 1MB
-        dist.add(2_000_000);  // huge: > 1MB
+        dist.add(500); // tiny: < 1KB
+        dist.add(1024); // small: 1KB - 10KB
+        dist.add(5000); // small
+        dist.add(15000); // medium: 10KB - 100KB
+        dist.add(500_000); // large: 100KB - 1MB
+        dist.add(2_000_000); // huge: > 1MB
 
         assert_eq!(dist.tiny, 1);
         assert_eq!(dist.small, 2);

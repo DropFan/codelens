@@ -195,7 +195,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let walker = ParallelWalker::default();
         let registry = Arc::new(crate::language::LanguageRegistry::empty());
-        let analyzer = Arc::new(FileAnalyzer::new(registry, &crate::config::Config::default()));
+        let analyzer = Arc::new(FileAnalyzer::new(
+            registry,
+            &crate::config::Config::default(),
+        ));
         let filter = Arc::new(AllowAll);
 
         let count = AtomicUsize::new(0);

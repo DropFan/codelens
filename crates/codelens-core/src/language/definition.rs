@@ -115,7 +115,10 @@ mod tests {
         assert_eq!(lang.name, "Rust");
         assert_eq!(lang.extensions, vec![".rs"]);
         assert_eq!(lang.line_comments, vec!["//"]);
-        assert_eq!(lang.block_comments, vec![("/*".to_string(), "*/".to_string())]);
+        assert_eq!(
+            lang.block_comments,
+            vec![("/*".to_string(), "*/".to_string())]
+        );
         assert!(lang.nested_comments);
     }
 }

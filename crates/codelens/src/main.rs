@@ -73,10 +73,7 @@ fn run() -> Result<()> {
         let mut writer = BufWriter::new(file);
         formatter.write(&result, &output_options, &mut writer)?;
         writer.flush()?;
-        println!(
-            "Output written to: {}",
-            path.display().to_string().green()
-        );
+        println!("Output written to: {}", path.display().to_string().green());
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
@@ -132,16 +129,14 @@ fn build_config(cli: &Cli) -> Result<Config> {
         } else {
             // Try to load default config files
             let default_paths = [".codelens.toml", ".code_stats.yaml", ".code_stats.yml"];
-            default_paths
-                .iter()
-                .find_map(|p| {
-                    let path = PathBuf::from(p);
-                    if path.exists() {
-                        codelens_core::config::load_config_file(&path).ok()
-                    } else {
-                        None
-                    }
-                })
+            default_paths.iter().find_map(|p| {
+                let path = PathBuf::from(p);
+                if path.exists() {
+                    codelens_core::config::load_config_file(&path).ok()
+                } else {
+                    None
+                }
+            })
         }
     } else {
         None

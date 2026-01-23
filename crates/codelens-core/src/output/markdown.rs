@@ -64,7 +64,10 @@ impl OutputFormat for MarkdownOutput {
                 writer,
                 "| Language | Files | Code | Comment | Blank | Total |"
             )?;
-            writeln!(writer, "|----------|-------|------|---------|-------|-------|")?;
+            writeln!(
+                writer,
+                "|----------|-------|------|---------|-------|-------|"
+            )?;
 
             let mut langs: Vec<_> = summary.by_language.iter().collect();
             if let Some(n) = options.top_n {
@@ -149,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_title() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 
@@ -162,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_summary_table() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 
@@ -178,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_language_breakdown() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions {
             summary_only: false,
@@ -197,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_summary_only() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions {
             summary_only: true,
@@ -215,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_top_n() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions {
             top_n: Some(1),
@@ -238,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_markdown_output_footer() {
-        let output = MarkdownOutput::default();
+        let output = MarkdownOutput;
         let result = make_test_result();
         let options = OutputOptions::default();
 

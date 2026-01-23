@@ -57,9 +57,8 @@ impl SmartExclude {
     fn is_excluded_dir(&self, name: &str) -> bool {
         // Check always-exclude list
         for pattern in &self.always_exclude {
-            if pattern.starts_with('*') {
+            if let Some(suffix) = pattern.strip_prefix('*') {
                 // Glob pattern (e.g., "*.egg-info")
-                let suffix = &pattern[1..];
                 if name.ends_with(suffix) {
                     return true;
                 }

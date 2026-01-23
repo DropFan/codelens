@@ -130,8 +130,8 @@ fn parse_sort(s: &Option<String>) -> SortBy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_load_config_file() {
