@@ -231,9 +231,11 @@ jobs:
         working-directory: homebrew-tap
         env:
           VERSION: ${{ needs.create-release.outputs.version }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/DropFan/homebrew-tap.git"
           git add Formula/codelens.rb
           git commit -m "codelens ${VERSION}" || echo "No changes to commit"
           git push
