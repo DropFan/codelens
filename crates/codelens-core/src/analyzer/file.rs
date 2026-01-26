@@ -251,7 +251,7 @@ impl FileAnalyzer {
                     if !self.is_in_string(before, lang) {
                         let after = &line[pos + 3..];
                         // Check if it closes on the same line
-                        if after.find(pattern).is_none() {
+                        if !after.contains(pattern) {
                             // Docstring: no assignment before the triple quotes
                             let is_docstring = !before.contains('=');
                             return Some(StringDelimiter {
@@ -341,7 +341,7 @@ impl FileAnalyzer {
 
                         // Check if it closes on the same line
                         let after_quote = &line[i + 1..];
-                        if after_quote.find(&end_pattern).is_none() {
+                        if !after_quote.contains(&end_pattern) {
                             return Some(StringDelimiter {
                                 end_pattern,
                                 is_raw: true,
@@ -534,8 +534,14 @@ mod tests {
         let content = "let s = r#\"hello\n// not a comment\n/* also not */\nworld\"#;\n";
         let stats = analyzer.count_lines(content, &lang);
         assert_eq!(stats.total, 4);
-        assert_eq!(stats.code, 4, "All lines should be code (inside raw string)");
-        assert_eq!(stats.comment, 0, "No comments - everything is inside raw string");
+        assert_eq!(
+            stats.code, 4,
+            "All lines should be code (inside raw string)"
+        );
+        assert_eq!(
+            stats.comment, 0,
+            "No comments - everything is inside raw string"
+        );
         assert_eq!(stats.blank, 0);
     }
 }
