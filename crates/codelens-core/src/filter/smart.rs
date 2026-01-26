@@ -68,6 +68,8 @@ impl SmartExclude {
         }
 
         // Common build/dependency directories
+        // Note: "packages" is NOT excluded as it often contains source code
+        // in monorepos (Python, Rust, JS workspaces)
         matches!(
             name,
             "node_modules"
@@ -78,14 +80,11 @@ impl SmartExclude {
                 | "out"
                 | "bin"
                 | "obj"
-                | "packages"
                 | "bower_components"
                 | "jspm_packages"
                 | ".bundle"
                 | "venv"
                 | ".venv"
-                | "env"
-                | ".env"
                 | "virtualenv"
         )
     }

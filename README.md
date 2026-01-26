@@ -111,16 +111,6 @@ function_pattern = "^\\s*def\\s+\\w+"
 complexity_keywords = ["if", "for", "while"]
 ```
 
-## Performance
-
-Benchmarks on a large codebase (~100k files):
-
-| Tool | Time |
-|------|------|
-| cloc (Perl) | ~60s |
-| code-stats (Python) | ~45s |
-| **codelens (Rust)** | **~1.5s** |
-
 ## License
 
 MIT
