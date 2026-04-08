@@ -94,6 +94,8 @@ impl ParallelWalker {
             let tx = tx.clone();
             let filter = Arc::clone(&filter_clone);
             let analyzer = Arc::clone(&analyzer_clone);
+            // Per-thread reusable buffer (64KB initial capacity)
+            let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
 
             Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
                 let entry = match entry {
@@ -123,17 +125,35 @@ impl ParallelWalker {
                     return WalkState::Continue;
                 }
 
-                // Analyze the file
-                match analyzer.analyze(path) {
-                    Ok(Some(stats)) => {
-                        let _ = tx.send(WalkResult::File(stats));
+                // Read file into reusable buffer
+                buf.clear();
+                match std::fs::File::open(path).and_then(|mut f| {
+                    if let Ok(meta) = f.metadata() {
+                        buf.reserve(meta.len() as usize);
                     }
-                    Ok(None) => {
-                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                    std::io::Read::read_to_end(&mut f, &mut buf)
+                }) {
+                    Ok(_) => {
+                        match analyzer.analyze_from_bytes(path, &buf) {
+                            Ok(Some(stats)) => {
+                                let _ = tx.send(WalkResult::File(stats));
+                            }
+                            Ok(None) => {
+                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                            }
+                            Err(_) => {
+                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                            }
+                        }
                     }
                     Err(_) => {
                         let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
                     }
+                }
+
+                // Shrink buffer if it grew too large from a single file
+                if buf.capacity() > 1_048_576 {
+                    buf = Vec::with_capacity(64 * 1024);
                 }
 
                 WalkState::Continue
