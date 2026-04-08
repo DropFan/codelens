@@ -88,10 +88,8 @@ mod tests {
         Language {
             name: "Rust".to_string(),
             extensions: vec![".rs".to_string()],
-            filenames: vec![],
             line_comments: vec!["//".to_string()],
             block_comments: vec![("/*".to_string(), "*/".to_string())],
-            string_delimiters: vec![],
             function_pattern: Some(r"(?m)^\s*(pub\s+)?(async\s+)?fn\s+\w+".to_string()),
             complexity_keywords: vec![
                 "if".to_string(),
@@ -101,6 +99,7 @@ mod tests {
                 "match".to_string(),
             ],
             nested_comments: true,
+            ..Default::default()
         }
     }
 

@@ -457,13 +457,10 @@ mod tests {
         Language {
             name: "Rust".to_string(),
             extensions: vec![".rs".to_string()],
-            filenames: vec![],
             line_comments: vec!["//".to_string()],
             block_comments: vec![("/*".to_string(), "*/".to_string())],
-            string_delimiters: vec![],
-            function_pattern: None,
-            complexity_keywords: vec![],
             nested_comments: true,
+            ..Default::default()
         }
     }
 

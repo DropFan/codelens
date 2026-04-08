@@ -1,9 +1,13 @@
 //! Language definition structures.
 
+use std::sync::OnceLock;
+
 use serde::Deserialize;
 
+use crate::analyzer::trie::{self, TokenTrie};
+
 /// Definition of a programming language.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Language {
     /// Language display name (e.g., "Rust", "Python").
     pub name: String,
@@ -39,6 +43,35 @@ pub struct Language {
     /// Whether block comments can be nested (e.g., Rust allows /* /* */ */).
     #[serde(default)]
     pub nested_comments: bool,
+
+    /// Lazily-built token trie and process mask.
+    #[serde(skip)]
+    pub(crate) tokens_cache: OnceLock<(TokenTrie, u8)>,
+}
+
+impl Clone for Language {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            extensions: self.extensions.clone(),
+            filenames: self.filenames.clone(),
+            line_comments: self.line_comments.clone(),
+            block_comments: self.block_comments.clone(),
+            string_delimiters: self.string_delimiters.clone(),
+            function_pattern: self.function_pattern.clone(),
+            complexity_keywords: self.complexity_keywords.clone(),
+            nested_comments: self.nested_comments,
+            tokens_cache: OnceLock::new(),
+        }
+    }
+}
+
+impl Language {
+    /// Get the token trie and process mask, building them on first access.
+    pub fn tokens(&self) -> &(TokenTrie, u8) {
+        self.tokens_cache
+            .get_or_init(|| trie::build_from_language(self))
+    }
 }
 
 impl Default for Language {
@@ -53,6 +86,7 @@ impl Default for Language {
             function_pattern: None,
             complexity_keywords: vec![],
             nested_comments: false,
+            tokens_cache: OnceLock::new(),
         }
     }
 }

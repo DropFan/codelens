@@ -42,6 +42,8 @@ impl TrieNode {
 }
 
 /// Fast token lookup trie. All token types for a language are inserted into one trie.
+///
+/// `Debug` prints only the process mask (the full trie is too large to dump).
 pub struct TokenTrie {
     root: TrieNode,
     mask: u8,
@@ -103,6 +105,89 @@ impl Default for TokenTrie {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl std::fmt::Debug for TokenTrie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenTrie")
+            .field("mask", &self.mask)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Build a `TokenTrie` from a `Language` definition.
+///
+/// Inserts line comments, block comment starts (with close bytes),
+/// string delimiters (`"` and `'`), and for Python/Ruby also
+/// triple-quote doc-string delimiters (`"""` and `'''`).
+pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) {
+    let mut trie = TokenTrie::new();
+
+    // Line comments
+    for lc in &lang.line_comments {
+        trie.insert(
+            lc.as_bytes(),
+            TokenMatch {
+                token_type: TokenType::LineComment,
+                close: None,
+                advance: 0,
+            },
+        );
+    }
+
+    // Block comments
+    for (open, close) in &lang.block_comments {
+        trie.insert(
+            open.as_bytes(),
+            TokenMatch {
+                token_type: TokenType::BlockCommentStart,
+                close: Some(close.as_bytes().to_vec()),
+                advance: 0,
+            },
+        );
+    }
+
+    // String delimiters: always " and '
+    trie.insert(
+        b"\"",
+        TokenMatch {
+            token_type: TokenType::StringDelimiter,
+            close: Some(b"\"".to_vec()),
+            advance: 0,
+        },
+    );
+    trie.insert(
+        b"'",
+        TokenMatch {
+            token_type: TokenType::StringDelimiter,
+            close: Some(b"'".to_vec()),
+            advance: 0,
+        },
+    );
+
+    // Doc-string delimiters for Python and Ruby (longest-match wins over single quotes)
+    let name = lang.name.as_str();
+    if name == "Python" || name == "Ruby" {
+        trie.insert(
+            b"\"\"\"",
+            TokenMatch {
+                token_type: TokenType::DocStringDelimiter,
+                close: Some(b"\"\"\"".to_vec()),
+                advance: 0,
+            },
+        );
+        trie.insert(
+            b"'''",
+            TokenMatch {
+                token_type: TokenType::DocStringDelimiter,
+                close: Some(b"'''".to_vec()),
+                advance: 0,
+            },
+        );
+    }
+
+    let mask = trie.process_mask();
+    (trie, mask)
 }
 
 /// Fast check: could this byte possibly start a token?
@@ -216,5 +301,56 @@ mod tests {
         let m = trie.match_at(b"\"\"\"hello\"\"\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::DocStringDelimiter);
         assert_eq!(m.advance, 3);
+    }
+
+    #[test]
+    fn test_build_from_rust_language() {
+        use crate::language::Language;
+
+        let lang = Language {
+            name: "Rust".to_string(),
+            extensions: vec![".rs".to_string()],
+            line_comments: vec!["//".to_string()],
+            block_comments: vec![("/*".to_string(), "*/".to_string())],
+            nested_comments: true,
+            ..Default::default()
+        };
+        let (trie, mask) = build_from_language(&lang);
+
+        let m = trie.match_at(b"// comment", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::LineComment);
+
+        let m = trie.match_at(b"/* block */", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::BlockCommentStart);
+        assert_eq!(m.close.as_deref(), Some(b"*/".as_slice()));
+
+        let m = trie.match_at(b"\"hello\"", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+
+        assert_ne!(mask, 0);
+    }
+
+    #[test]
+    fn test_build_from_python_language() {
+        use crate::language::Language;
+
+        let lang = Language {
+            name: "Python".to_string(),
+            extensions: vec![".py".to_string()],
+            line_comments: vec!["#".to_string()],
+            ..Default::default()
+        };
+        let (trie, _mask) = build_from_language(&lang);
+
+        let m = trie.match_at(b"# comment", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::LineComment);
+
+        let m = trie.match_at(b"\"\"\"docstring\"\"\"", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::DocStringDelimiter);
+        assert_eq!(m.close.as_deref(), Some(b"\"\"\"".as_slice()));
+
+        let m = trie.match_at(b"'''docstring'''", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::DocStringDelimiter);
+        assert_eq!(m.close.as_deref(), Some(b"'''".as_slice()));
     }
 }
