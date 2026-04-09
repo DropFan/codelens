@@ -18,7 +18,7 @@ name = "codelens"
 path = "src/main.rs"
 
 [dependencies]
-codelens-core = { version = "0.0.2", path = "../codelens-core" }
+codelens-core = { version = "0.0.3", path = "../codelens-core" }
 
 # CLI
 clap.workspace = true
