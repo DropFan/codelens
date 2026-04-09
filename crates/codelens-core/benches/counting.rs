@@ -13,8 +13,7 @@ fn make_rust_lang() -> Language {
         block_comments = [["/*", "*/"]]
         nested_comments = true
     "#;
-    let langs: std::collections::HashMap<String, Language> =
-        toml::from_str(toml).unwrap();
+    let langs: std::collections::HashMap<String, Language> = toml::from_str(toml).unwrap();
     langs.into_values().next().unwrap()
 }
 
