@@ -50,3 +50,8 @@ once_cell.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "counting"
+harness = false
