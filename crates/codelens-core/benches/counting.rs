@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use codelens_core::analyzer::counter::count_stats;
@@ -15,7 +13,8 @@ fn make_rust_lang() -> Language {
         block_comments = [["/*", "*/"]]
         nested_comments = true
     "#;
-    let langs: std::collections::HashMap<String, Language> = toml::from_str(toml).unwrap();
+    let langs: std::collections::HashMap<String, Language> =
+        toml::from_str(toml).unwrap();
     langs.into_values().next().unwrap()
 }
 
@@ -27,12 +26,12 @@ fn generate_rust_code(lines: usize) -> String {
             1 => code.push_str("fn some_function() {\n"),
             2 => code.push_str("    let x = \"hello world\";\n"),
             3 => code.push_str("    /* inline block comment */\n"),
-            4 => code.push_str("\n"),
+            4 => code.push('\n'),
             5 => code.push_str("    if x > 0 {\n"),
             6 => code.push_str("        println!(\"value: {}\", x);\n"),
             7 => code.push_str("    }\n"),
             8 => code.push_str("}\n"),
-            _ => code.push_str("\n"),
+            _ => code.push('\n'),
         }
     }
     code

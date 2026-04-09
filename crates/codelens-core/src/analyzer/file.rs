@@ -261,7 +261,7 @@ mod tests {
         let analyzer = FileAnalyzer::new(registry, &Config::default());
 
         let mut tmp = NamedTempFile::with_suffix(".rs").unwrap();
-        write!(tmp, "fn main() {{}}\n").unwrap();
+        writeln!(tmp, "fn main() {{}}").unwrap();
 
         let result = analyzer.analyze(tmp.path()).unwrap().unwrap();
         assert_eq!(result.lines.total, 1);
