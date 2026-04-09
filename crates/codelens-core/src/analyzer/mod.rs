@@ -1,7 +1,7 @@
 //! Code analysis modules.
 
-pub mod counter;
 mod complexity;
+pub mod counter;
 mod file;
 pub mod stats;
 pub mod trie;

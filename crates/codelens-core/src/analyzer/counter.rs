@@ -317,7 +317,10 @@ mod tests {
 
     #[test]
     fn test_python_docstring_single_line() {
-        let stats = count("def foo():\n    \"\"\"docstring\"\"\"\n    pass\n", &python_lang());
+        let stats = count(
+            "def foo():\n    \"\"\"docstring\"\"\"\n    pass\n",
+            &python_lang(),
+        );
         assert_eq!(stats.total, 3);
         assert_eq!(stats.code, 2);
         assert_eq!(stats.comment, 1);

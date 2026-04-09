@@ -213,11 +213,14 @@ mod tests {
     #[test]
     fn test_single_line_comment() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"//", TokenMatch {
-            token_type: TokenType::LineComment,
-            close: None,
-            advance: 0,
-        });
+        trie.insert(
+            b"//",
+            TokenMatch {
+                token_type: TokenType::LineComment,
+                close: None,
+                advance: 0,
+            },
+        );
         let m = trie.match_at(b"// comment", 0).unwrap();
         assert_eq!(m.token_type, TokenType::LineComment);
         assert_eq!(m.advance, 2);
@@ -227,11 +230,14 @@ mod tests {
     #[test]
     fn test_block_comment() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"/*", TokenMatch {
-            token_type: TokenType::BlockCommentStart,
-            close: Some(b"*/".to_vec()),
-            advance: 0,
-        });
+        trie.insert(
+            b"/*",
+            TokenMatch {
+                token_type: TokenType::BlockCommentStart,
+                close: Some(b"*/".to_vec()),
+                advance: 0,
+            },
+        );
         let m = trie.match_at(b"/* block */", 0).unwrap();
         assert_eq!(m.token_type, TokenType::BlockCommentStart);
         assert_eq!(m.advance, 2);
@@ -241,11 +247,14 @@ mod tests {
     #[test]
     fn test_no_match_at_wrong_position() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"//", TokenMatch {
-            token_type: TokenType::LineComment,
-            close: None,
-            advance: 0,
-        });
+        trie.insert(
+            b"//",
+            TokenMatch {
+                token_type: TokenType::LineComment,
+                close: None,
+                advance: 0,
+            },
+        );
         assert_eq!(trie.match_at(b"x // y", 0), None);
         let m = trie.match_at(b"x // y", 2).unwrap();
         assert_eq!(m.token_type, TokenType::LineComment);
@@ -254,11 +263,14 @@ mod tests {
     #[test]
     fn test_string_delimiter() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"\"", TokenMatch {
-            token_type: TokenType::StringDelimiter,
-            close: Some(b"\"".to_vec()),
-            advance: 0,
-        });
+        trie.insert(
+            b"\"",
+            TokenMatch {
+                token_type: TokenType::StringDelimiter,
+                close: Some(b"\"".to_vec()),
+                advance: 0,
+            },
+        );
         let m = trie.match_at(b"\"hello\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::StringDelimiter);
         assert_eq!(m.close.as_deref(), Some(b"\"".as_slice()));
@@ -267,16 +279,22 @@ mod tests {
     #[test]
     fn test_process_mask_filters_correctly() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"//", TokenMatch {
-            token_type: TokenType::LineComment,
-            close: None,
-            advance: 0,
-        });
-        trie.insert(b"\"", TokenMatch {
-            token_type: TokenType::StringDelimiter,
-            close: Some(b"\"".to_vec()),
-            advance: 0,
-        });
+        trie.insert(
+            b"//",
+            TokenMatch {
+                token_type: TokenType::LineComment,
+                close: None,
+                advance: 0,
+            },
+        );
+        trie.insert(
+            b"\"",
+            TokenMatch {
+                token_type: TokenType::StringDelimiter,
+                close: Some(b"\"".to_vec()),
+                advance: 0,
+            },
+        );
         let mask = trie.process_mask();
         assert!(should_process(b'/', mask));
         assert!(should_process(b'"', mask));
@@ -287,16 +305,22 @@ mod tests {
     #[test]
     fn test_longer_match_wins() {
         let mut trie = TokenTrie::new();
-        trie.insert(b"\"", TokenMatch {
-            token_type: TokenType::StringDelimiter,
-            close: Some(b"\"".to_vec()),
-            advance: 0,
-        });
-        trie.insert(b"\"\"\"", TokenMatch {
-            token_type: TokenType::DocStringDelimiter,
-            close: Some(b"\"\"\"".to_vec()),
-            advance: 0,
-        });
+        trie.insert(
+            b"\"",
+            TokenMatch {
+                token_type: TokenType::StringDelimiter,
+                close: Some(b"\"".to_vec()),
+                advance: 0,
+            },
+        );
+        trie.insert(
+            b"\"\"\"",
+            TokenMatch {
+                token_type: TokenType::DocStringDelimiter,
+                close: Some(b"\"\"\"".to_vec()),
+                advance: 0,
+            },
+        );
         let m = trie.match_at(b"\"\"\"hello\"\"\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::DocStringDelimiter);
         assert_eq!(m.advance, 3);

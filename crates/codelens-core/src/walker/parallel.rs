@@ -133,19 +133,17 @@ impl ParallelWalker {
                     }
                     std::io::Read::read_to_end(&mut f, &mut buf)
                 }) {
-                    Ok(_) => {
-                        match analyzer.analyze_from_bytes(path, &buf) {
-                            Ok(Some(stats)) => {
-                                let _ = tx.send(WalkResult::File(stats));
-                            }
-                            Ok(None) => {
-                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
-                            }
-                            Err(_) => {
-                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
-                            }
+                    Ok(_) => match analyzer.analyze_from_bytes(path, &buf) {
+                        Ok(Some(stats)) => {
+                            let _ = tx.send(WalkResult::File(stats));
                         }
-                    }
+                        Ok(None) => {
+                            let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                        }
+                        Err(_) => {
+                            let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                        }
+                    },
                     Err(_) => {
                         let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
                     }

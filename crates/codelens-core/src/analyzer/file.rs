@@ -232,7 +232,10 @@ mod tests {
         let path = Path::new("test.rs");
         let result = analyzer.analyze_from_bytes(path, content).unwrap();
 
-        assert!(result.is_none(), "File with 1 line should be filtered by min_lines=10");
+        assert!(
+            result.is_none(),
+            "File with 1 line should be filtered by min_lines=10"
+        );
     }
 
     #[test]
@@ -246,7 +249,10 @@ mod tests {
         let path = Path::new("test.rs");
         let result = analyzer.analyze_from_bytes(path, content).unwrap();
 
-        assert!(result.is_none(), "File with 3 lines should be filtered by max_lines=1");
+        assert!(
+            result.is_none(),
+            "File with 3 lines should be filtered by max_lines=1"
+        );
     }
 
     #[test]
