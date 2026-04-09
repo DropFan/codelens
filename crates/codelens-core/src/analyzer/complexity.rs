@@ -1,40 +1,32 @@
 //! Code complexity analysis.
 
-use regex::Regex;
-
 use crate::language::Language;
 
 use super::stats::Complexity;
 
 /// Analyzes code complexity metrics.
-pub struct ComplexityAnalyzer {
-    // Cached regex patterns
-}
+pub struct ComplexityAnalyzer;
 
 impl ComplexityAnalyzer {
-    /// Create a new complexity analyzer.
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 
     /// Analyze complexity metrics for the given content.
+    ///
+    /// Uses precompiled regex patterns cached on the Language via OnceLock.
     pub fn analyze(&self, content: &str, lang: &Language) -> Complexity {
         let mut complexity = Complexity::default();
+        let patterns = lang.complexity_patterns();
 
         // Count functions
-        if let Some(ref pattern) = lang.function_pattern {
-            if let Ok(re) = Regex::new(pattern) {
-                complexity.functions = re.find_iter(content).count();
-            }
+        if let Some(ref re) = patterns.function_re {
+            complexity.functions = re.find_iter(content).count();
         }
 
-        // Count complexity keywords (cyclomatic complexity approximation)
-        for keyword in &lang.complexity_keywords {
-            // Match whole words only
-            let pattern = format!(r"\b{}\b", regex::escape(keyword));
-            if let Ok(re) = Regex::new(&pattern) {
-                complexity.cyclomatic += re.find_iter(content).count();
-            }
+        // Count complexity keywords (single alternation regex, one pass)
+        if let Some(ref re) = patterns.keywords_re {
+            complexity.cyclomatic = re.find_iter(content).count();
         }
 
         // Base complexity is 1 per function

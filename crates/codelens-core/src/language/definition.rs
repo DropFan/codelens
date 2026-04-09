@@ -2,6 +2,7 @@
 
 use std::sync::OnceLock;
 
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::analyzer::trie::{self, TokenTrie};
@@ -47,6 +48,19 @@ pub struct Language {
     /// Lazily-built token trie and process mask.
     #[serde(skip)]
     pub(crate) tokens_cache: OnceLock<(TokenTrie, u8)>,
+
+    /// Lazily-compiled complexity regex patterns.
+    #[serde(skip)]
+    pub(crate) complexity_cache: OnceLock<ComplexityPatterns>,
+}
+
+/// Precompiled regex patterns for complexity analysis.
+#[derive(Debug)]
+pub struct ComplexityPatterns {
+    /// Compiled function_pattern regex.
+    pub function_re: Option<Regex>,
+    /// Single alternation regex matching all complexity keywords: `\b(if|else|...)\b`
+    pub keywords_re: Option<Regex>,
 }
 
 impl Clone for Language {
@@ -62,6 +76,7 @@ impl Clone for Language {
             complexity_keywords: self.complexity_keywords.clone(),
             nested_comments: self.nested_comments,
             tokens_cache: OnceLock::new(),
+            complexity_cache: OnceLock::new(),
         }
     }
 }
@@ -71,6 +86,33 @@ impl Language {
     pub fn tokens(&self) -> &(TokenTrie, u8) {
         self.tokens_cache
             .get_or_init(|| trie::build_from_language(self))
+    }
+
+    /// Get precompiled complexity regex patterns, building them on first access.
+    pub fn complexity_patterns(&self) -> &ComplexityPatterns {
+        self.complexity_cache.get_or_init(|| {
+            let function_re = self
+                .function_pattern
+                .as_ref()
+                .and_then(|p| Regex::new(p).ok());
+
+            let keywords_re = if self.complexity_keywords.is_empty() {
+                None
+            } else {
+                let alts: Vec<String> = self
+                    .complexity_keywords
+                    .iter()
+                    .map(|k| regex::escape(k))
+                    .collect();
+                let pattern = format!(r"\b({})\b", alts.join("|"));
+                Regex::new(&pattern).ok()
+            };
+
+            ComplexityPatterns {
+                function_re,
+                keywords_re,
+            }
+        })
     }
 }
 
@@ -87,6 +129,7 @@ impl Default for Language {
             complexity_keywords: vec![],
             nested_comments: false,
             tokens_cache: OnceLock::new(),
+            complexity_cache: OnceLock::new(),
         }
     }
 }
