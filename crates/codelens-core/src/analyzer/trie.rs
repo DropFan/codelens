@@ -80,9 +80,8 @@ impl TokenTrie {
         let mut node = &self.root;
         let mut last_match: Option<&TokenMatch> = None;
 
-        for i in pos..content.len() {
-            let idx = content[i] as usize;
-            match &node.children[idx] {
+        for &byte in &content[pos..] {
+            match &node.children[byte as usize] {
                 Some(child) => {
                     node = child;
                     if node.token_match.is_some() {
