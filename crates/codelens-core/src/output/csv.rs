@@ -40,18 +40,9 @@ impl OutputFormat for CsvOutput {
     ) -> Result<()> {
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
-            Report::Health(_) => {
-                writeln!(writer, "# Health report CSV output not yet implemented")?;
-                Ok(())
-            }
-            Report::Hotspot(_) => {
-                writeln!(writer, "# Hotspot report CSV output not yet implemented")?;
-                Ok(())
-            }
-            Report::Trend(_) => {
-                writeln!(writer, "# Trend report CSV output not yet implemented")?;
-                Ok(())
-            }
+            Report::Health(report) => self.write_health(report, options, writer),
+            Report::Hotspot(report) => self.write_hotspot(report, options, writer),
+            Report::Trend(report) => self.write_trend(report, options, writer),
         }
     }
 }
@@ -81,6 +72,80 @@ impl CsvOutput {
             )?;
         }
 
+        Ok(())
+    }
+
+    fn write_health(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "File,Score,Grade,TopIssue")?;
+        for file in &report.worst_files {
+            writeln!(
+                writer,
+                "{},{:.1},{},{}",
+                file.path.display(),
+                file.score,
+                file.grade,
+                file.top_issue,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_hotspot(
+        &self,
+        report: &crate::insight::hotspot::HotspotReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "File,Commits,Added,Deleted,Churn,CC,Score,Risk")?;
+        for file in &report.files {
+            writeln!(
+                writer,
+                "{},{},{},{},{},{},{:.2},{}",
+                file.path.display(),
+                file.churn.commits,
+                file.churn.lines_added,
+                file.churn.lines_deleted,
+                file.churn.lines_churn,
+                file.complexity.cyclomatic,
+                file.hotspot_score,
+                file.risk,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_trend(
+        &self,
+        report: &crate::insight::trend::TrendReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Metric,Before,After,Delta,Percent")?;
+        let deltas = [
+            ("Files", &report.delta.files),
+            ("Lines", &report.delta.lines),
+            ("Code", &report.delta.code),
+            ("Comments", &report.delta.comment),
+            ("Blank", &report.delta.blank),
+            ("Complexity", &report.delta.complexity),
+            ("Functions", &report.delta.functions),
+        ];
+        for (name, dv) in &deltas {
+            writeln!(
+                writer,
+                "{},{},{},{},{:.1}",
+                name,
+                dv.from,
+                dv.to,
+                dv.signed_delta(),
+                dv.percent,
+            )?;
+        }
         Ok(())
     }
 }

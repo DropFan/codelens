@@ -53,26 +53,37 @@ impl OutputFormat for HtmlOutput {
     ) -> Result<()> {
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
-            Report::Health(_) => {
-                writeln!(writer, "<p>Health report HTML output not yet implemented</p>")?;
-                Ok(())
+            Report::Health(report) => self.write_json_html("Code Health Report", report, writer),
+            Report::Hotspot(report) => {
+                self.write_json_html("Hotspot Analysis", report, writer)
             }
-            Report::Hotspot(_) => {
-                writeln!(
-                    writer,
-                    "<p>Hotspot report HTML output not yet implemented</p>"
-                )?;
-                Ok(())
-            }
-            Report::Trend(_) => {
-                writeln!(writer, "<p>Trend report HTML output not yet implemented</p>")?;
-                Ok(())
-            }
+            Report::Trend(report) => self.write_json_html("Trend Report", report, writer),
         }
     }
 }
 
 impl HtmlOutput {
+    fn write_json_html<T: serde::Serialize>(
+        &self,
+        title: &str,
+        data: &T,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let json = serde_json::to_string_pretty(data)?;
+        writeln!(writer, "<!DOCTYPE html>")?;
+        writeln!(writer, "<html><head><meta charset=\"utf-8\">")?;
+        writeln!(writer, "<title>Codelens - {title}</title>")?;
+        writeln!(
+            writer,
+            "<style>body{{font-family:monospace;margin:2em;}}pre{{background:#f5f5f5;padding:1em;overflow:auto;}}</style>"
+        )?;
+        writeln!(writer, "</head><body>")?;
+        writeln!(writer, "<h1>{title}</h1>")?;
+        writeln!(writer, "<pre>{json}</pre>")?;
+        writeln!(writer, "</body></html>")?;
+        Ok(())
+    }
+
     fn write_analysis(
         &self,
         result: &AnalysisResult,
