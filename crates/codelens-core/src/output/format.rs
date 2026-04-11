@@ -5,6 +5,18 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::config::SortBy;
 use crate::error::Result;
+use crate::insight::health::HealthReport;
+use crate::insight::hotspot::HotspotReport;
+use crate::insight::trend::TrendReport;
+
+/// Unified report type for all output formatters.
+#[derive(Debug, Clone)]
+pub enum Report {
+    Analysis(AnalysisResult),
+    Health(HealthReport),
+    Hotspot(HotspotReport),
+    Trend(TrendReport),
+}
 
 /// Trait for output formatters.
 pub trait OutputFormat: Send + Sync {
@@ -14,10 +26,10 @@ pub trait OutputFormat: Send + Sync {
     /// Get the file extension.
     fn extension(&self) -> &'static str;
 
-    /// Write the analysis result to the writer.
+    /// Write the report to the writer.
     fn write(
         &self,
-        result: &AnalysisResult,
+        report: &Report,
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()>;

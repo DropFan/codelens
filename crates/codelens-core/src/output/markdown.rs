@@ -5,7 +5,7 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 
-use super::format::{OutputFormat, OutputOptions};
+use super::format::{OutputFormat, OutputOptions, Report};
 
 /// Markdown output formatter.
 pub struct MarkdownOutput;
@@ -33,6 +33,34 @@ impl OutputFormat for MarkdownOutput {
     }
 
     fn write(
+        &self,
+        report: &Report,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        match report {
+            Report::Analysis(result) => self.write_analysis(result, options, writer),
+            Report::Health(_) => {
+                writeln!(writer, "# Health report Markdown output not yet implemented")?;
+                Ok(())
+            }
+            Report::Hotspot(_) => {
+                writeln!(
+                    writer,
+                    "# Hotspot report Markdown output not yet implemented"
+                )?;
+                Ok(())
+            }
+            Report::Trend(_) => {
+                writeln!(writer, "# Trend report Markdown output not yet implemented")?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl MarkdownOutput {
+    fn write_analysis(
         &self,
         result: &AnalysisResult,
         options: &OutputOptions,
@@ -103,6 +131,7 @@ impl OutputFormat for MarkdownOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::Report;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;
@@ -157,7 +186,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
         assert!(md_str.starts_with("# Code Statistics Report"));
@@ -170,7 +201,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
 
@@ -189,7 +222,9 @@ mod tests {
         };
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
 
@@ -208,7 +243,9 @@ mod tests {
         };
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
 
@@ -226,7 +263,9 @@ mod tests {
         };
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
 
@@ -246,7 +285,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let md_str = String::from_utf8(buffer).unwrap();
 

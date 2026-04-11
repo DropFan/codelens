@@ -7,7 +7,7 @@ use askama::Template;
 use crate::analyzer::stats::{AnalysisResult, LanguageSummary, Summary};
 use crate::error::Result;
 
-use super::format::{OutputFormat, OutputOptions};
+use super::format::{OutputFormat, OutputOptions, Report};
 
 /// HTML report template.
 #[derive(Template)]
@@ -46,6 +46,34 @@ impl OutputFormat for HtmlOutput {
     }
 
     fn write(
+        &self,
+        report: &Report,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        match report {
+            Report::Analysis(result) => self.write_analysis(result, options, writer),
+            Report::Health(_) => {
+                writeln!(writer, "<p>Health report HTML output not yet implemented</p>")?;
+                Ok(())
+            }
+            Report::Hotspot(_) => {
+                writeln!(
+                    writer,
+                    "<p>Hotspot report HTML output not yet implemented</p>"
+                )?;
+                Ok(())
+            }
+            Report::Trend(_) => {
+                writeln!(writer, "<p>Trend report HTML output not yet implemented</p>")?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl HtmlOutput {
+    fn write_analysis(
         &self,
         result: &AnalysisResult,
         options: &OutputOptions,

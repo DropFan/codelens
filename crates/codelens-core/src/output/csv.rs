@@ -5,7 +5,7 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 
-use super::format::{OutputFormat, OutputOptions};
+use super::format::{OutputFormat, OutputOptions, Report};
 
 /// CSV output formatter.
 pub struct CsvOutput;
@@ -33,6 +33,31 @@ impl OutputFormat for CsvOutput {
     }
 
     fn write(
+        &self,
+        report: &Report,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        match report {
+            Report::Analysis(result) => self.write_analysis(result, options, writer),
+            Report::Health(_) => {
+                writeln!(writer, "# Health report CSV output not yet implemented")?;
+                Ok(())
+            }
+            Report::Hotspot(_) => {
+                writeln!(writer, "# Hotspot report CSV output not yet implemented")?;
+                Ok(())
+            }
+            Report::Trend(_) => {
+                writeln!(writer, "# Trend report CSV output not yet implemented")?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl CsvOutput {
+    fn write_analysis(
         &self,
         result: &AnalysisResult,
         _options: &OutputOptions,
@@ -63,6 +88,7 @@ impl OutputFormat for CsvOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::Report;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;
@@ -117,7 +143,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let csv_str = String::from_utf8(buffer).unwrap();
         let lines: Vec<&str> = csv_str.lines().collect();
@@ -132,7 +160,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let csv_str = String::from_utf8(buffer).unwrap();
 
@@ -150,7 +180,9 @@ mod tests {
         let options = OutputOptions::default();
 
         let mut buffer = Vec::new();
-        output.write(&result, &options, &mut buffer).unwrap();
+        output
+            .write(&Report::Analysis(result), &options, &mut buffer)
+            .unwrap();
 
         let csv_str = String::from_utf8(buffer).unwrap();
         let lines: Vec<&str> = csv_str.lines().collect();

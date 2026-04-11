@@ -8,7 +8,7 @@ use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 
-use super::format::{OutputFormat, OutputOptions};
+use super::format::{OutputFormat, OutputOptions, Report};
 
 /// Console output formatter.
 pub struct ConsoleOutput;
@@ -64,6 +64,22 @@ impl OutputFormat for ConsoleOutput {
     }
 
     fn write(
+        &self,
+        report: &Report,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        match report {
+            Report::Analysis(result) => self.write_analysis(result, options, writer),
+            Report::Health(report) => self.write_health(report, options, writer),
+            Report::Hotspot(report) => self.write_hotspot(report, options, writer),
+            Report::Trend(report) => self.write_trend(report, options, writer),
+        }
+    }
+}
+
+impl ConsoleOutput {
+    fn write_analysis(
         &self,
         result: &AnalysisResult,
         options: &OutputOptions,
@@ -179,6 +195,39 @@ impl OutputFormat for ConsoleOutput {
             result.elapsed.as_secs_f64()
         )?;
 
+        Ok(())
+    }
+
+    fn write_health(
+        &self,
+        _report: &crate::insight::health::HealthReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Health report output: use --format json for full data")?;
+        Ok(())
+    }
+
+    fn write_hotspot(
+        &self,
+        _report: &crate::insight::hotspot::HotspotReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(
+            writer,
+            "Hotspot report output: use --format json for full data"
+        )?;
+        Ok(())
+    }
+
+    fn write_trend(
+        &self,
+        _report: &crate::insight::trend::TrendReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Trend report output: use --format json for full data")?;
         Ok(())
     }
 }

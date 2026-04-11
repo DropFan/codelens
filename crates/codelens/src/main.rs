@@ -12,7 +12,7 @@ use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
-use codelens_core::output::{create_output, OutputOptions};
+use codelens_core::output::{create_output, OutputOptions, Report};
 use codelens_core::{analyze, Config, LanguageRegistry};
 
 use crate::cli::{Cli, OutputFormatArg, SortByArg};
@@ -68,16 +68,18 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    let report = Report::Analysis(result);
+
     if let Some(ref path) = cli.output.output_file {
         let file = File::create(path).context("Failed to create output file")?;
         let mut writer = BufWriter::new(file);
-        formatter.write(&result, &output_options, &mut writer)?;
+        formatter.write(&report, &output_options, &mut writer)?;
         writer.flush()?;
         println!("Output written to: {}", path.display().to_string().green());
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
-        formatter.write(&result, &output_options, &mut writer)?;
+        formatter.write(&report, &output_options, &mut writer)?;
     }
 
     Ok(())
