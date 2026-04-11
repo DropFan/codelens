@@ -340,8 +340,8 @@ impl EstimationModel for CocomoIIModel {
 ///
 /// Software Equation: Size = Ck × E^(1/3) × T^(4/3)
 /// Combined with D0 = E / T³:
-///   T = (Size / (Ck × D0^(1/3)))^(3/7)   [years]
-///   E = D0 × T³                            [person-years]
+///   T = (Size / (Ck × D0^(1/3)))^(3/7)   \[years\]
+///   E = D0 × T³                            \[person-years\]
 pub struct PutnamModel {
     /// Technology/productivity constant Ck.
     /// Typical: 2000 (poor), 8000 (good), 11000 (excellent).
