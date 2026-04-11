@@ -19,7 +19,7 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Get version from tag
         id: get_version
@@ -30,7 +30,7 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           generate_release_notes: true
@@ -71,7 +71,7 @@ jobs:
             archive: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -113,7 +113,7 @@ jobs:
           Compress-Archive -Path codelens.exe -DestinationPath ../../../codelens-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
 
       - name: Upload artifacts
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}-rust
           files: codelens-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
@@ -126,7 +126,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # Allow failure if already published
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Publish codelens-core
@@ -164,7 +164,7 @@ jobs:
           echo "sha_linux_arm=${SHA_LINUX_ARM}" >> $GITHUB_OUTPUT
 
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: DropFan/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
