@@ -38,17 +38,12 @@ impl Default for CostConfig {
 }
 
 /// COCOMO project complexity type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub enum ProjectType {
+    #[default]
     Organic,
     SemiDetached,
     Embedded,
-}
-
-impl Default for ProjectType {
-    fn default() -> Self {
-        Self::Organic
-    }
 }
 
 impl std::fmt::Display for ProjectType {
@@ -431,8 +426,7 @@ impl LocomoModel {
         let c_factor = 1.0 + d.sqrt() * self.complexity_weight;
         let i_factor = self.base_iterations + d.sqrt() * self.iteration_weight;
         let output_tokens = metrics.code_lines as f64 * self.tokens_per_line * i_factor;
-        let input_tokens =
-            metrics.code_lines as f64 * self.input_per_line * c_factor * i_factor;
+        let input_tokens = metrics.code_lines as f64 * self.input_per_line * c_factor * i_factor;
         (input_tokens, output_tokens)
     }
 }

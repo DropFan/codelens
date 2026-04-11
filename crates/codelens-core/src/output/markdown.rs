@@ -308,11 +308,7 @@ impl MarkdownOutput {
         writeln!(writer, "| Metric | Value |")?;
         writeln!(writer, "|--------|-------|")?;
         writeln!(writer, "| Total SLOC | {} |", report.total_sloc)?;
-        writeln!(
-            writer,
-            "| Estimated Cost | ${:.2} |",
-            report.estimated_cost
-        )?;
+        writeln!(writer, "| Estimated Cost | ${:.2} |", report.estimated_cost)?;
         writeln!(
             writer,
             "| Schedule Effort | {:.2} months |",

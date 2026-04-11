@@ -341,11 +341,8 @@ fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
         }),
     };
 
-    let report = codelens_core::insight::estimation::estimate(
-        &result.summary,
-        model.as_ref(),
-        &cost_config,
-    );
+    let report =
+        codelens_core::insight::estimation::estimate(&result.summary, model.as_ref(), &cost_config);
     write_report(Report::Estimation(report), &args.output)
 }
 
