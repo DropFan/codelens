@@ -12,8 +12,12 @@ use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
+use codelens_core::config::Config;
+use codelens_core::git::{self, GitClient};
+use codelens_core::insight::{health, hotspot, trend};
+use codelens_core::insight::scoring::default::DefaultModel;
 use codelens_core::output::{create_output, OutputOptions, Report};
-use codelens_core::{analyze, Config, LanguageRegistry};
+use codelens_core::{analyze, LanguageRegistry};
 
 use crate::cli::{Cli, OutputFormatArg, SortByArg};
 
@@ -36,6 +40,15 @@ fn run() -> Result<()> {
     // Handle special commands
     if cli.advanced.list_languages {
         return list_languages();
+    }
+
+    // Handle subcommands
+    if let Some(ref command) = cli.command {
+        return match command {
+            cli::Command::Health(args) => run_health(args),
+            cli::Command::Hotspot(args) => run_hotspot(args),
+            cli::Command::Trend(args) => run_trend(args),
+        };
     }
 
     // Build configuration
@@ -188,6 +201,128 @@ fn build_config(cli: &Cli) -> Result<Config> {
     };
 
     Ok(config)
+}
+
+fn run_health(args: &cli::HealthArgs) -> Result<()> {
+    let config = build_config_from_args(&args.filter, &args.output)?;
+    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let model = DefaultModel::new();
+    let report = health::score(&result, &model, args.worst_n);
+    write_report(Report::Health(report), &args.output)
+}
+
+fn run_hotspot(args: &cli::HotspotArgs) -> Result<()> {
+    let config = build_config_from_args(&args.filter, &args.output)?;
+    let git_client = GitClient::detect(&args.paths[0]).context("Not a git repository")?;
+    let since = git::parse_since(&args.since);
+    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let churns = git_client.file_churn(&since)?;
+    let total_commits = git_client.commit_count(&since)?;
+    let report = hotspot::analyze(&churns, &result, &args.since, total_commits, args.limit);
+    write_report(Report::Hotspot(report), &args.output)
+}
+
+fn run_trend(args: &cli::TrendArgs) -> Result<()> {
+    let project_root = args
+        .paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    if args.list {
+        let metas = trend::list_snapshots(&project_root)?;
+        if metas.is_empty() {
+            println!("No snapshots found. Use --save to create one.");
+            return Ok(());
+        }
+        for meta in &metas {
+            let label = meta.label.as_deref().unwrap_or("");
+            let commit = meta.git_commit.as_deref().unwrap_or("");
+            println!(
+                "  {}  {}  {}",
+                meta.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                label,
+                commit
+            );
+        }
+        println!("\nTotal: {} snapshots", metas.len());
+        return Ok(());
+    }
+
+    if args.save {
+        let config = Config::default();
+        let result = analyze(&[&project_root], &config).context("Analysis failed")?;
+        let (git_commit, git_branch) = GitClient::detect(&project_root)
+            .and_then(|c| c.repo_info())
+            .map(|info| (info.commit, info.branch))
+            .unwrap_or((None, None));
+        let path =
+            trend::save_snapshot(&project_root, result, args.label.clone(), git_commit, git_branch)?;
+        println!("Snapshot saved to: {}", path.display().to_string().green());
+        return Ok(());
+    }
+
+    let (from_ref, to_ref) = if let Some(ref refs) = args.compare {
+        (refs[0].as_str(), refs[1].as_str())
+    } else {
+        ("latest~1", "latest")
+    };
+
+    let report = trend::diff(&project_root, from_ref, to_ref)?;
+    write_report(Report::Trend(report), &args.output)
+}
+
+fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
+    let output_options = OutputOptions {
+        summary_only: output_args.summary,
+        sort_by: output_args.sort.into(),
+        top_n: output_args.top,
+        colorize: !output_args.quiet,
+        show_git_info: false,
+    };
+    let formatter = create_output(output_args.format.into());
+
+    if output_args.quiet {
+        return Ok(());
+    }
+
+    if let Some(ref path) = output_args.output_file {
+        let file = File::create(path).context("Failed to create output file")?;
+        let mut writer = BufWriter::new(file);
+        formatter.write(&report, &output_options, &mut writer)?;
+        writer.flush()?;
+        println!("Output written to: {}", path.display().to_string().green());
+    } else {
+        let stdout = io::stdout();
+        let mut writer = stdout.lock();
+        formatter.write(&report, &output_options, &mut writer)?;
+    }
+    Ok(())
+}
+
+fn build_config_from_args(
+    filter: &cli::FilterArgs,
+    _output: &cli::OutputArgs,
+) -> Result<Config> {
+    use codelens_core::config::FilterConfig;
+    use codelens_core::walker::WalkerConfig;
+
+    Ok(Config {
+        walker: WalkerConfig {
+            threads: num_cpus::get(),
+            use_gitignore: !filter.no_gitignore,
+            max_depth: filter.depth,
+            ..WalkerConfig::default()
+        },
+        filter: FilterConfig {
+            excludes: filter.exclude.clone().unwrap_or_default(),
+            languages: filter.lang.clone().unwrap_or_default(),
+            smart_exclude: !filter.no_smart_exclude,
+            include_all: filter.all,
+            ..FilterConfig::default()
+        },
+        ..Config::default()
+    })
 }
 
 impl From<OutputFormatArg> for codelens_core::config::OutputFormatType {

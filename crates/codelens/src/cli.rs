@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// High performance code statistics tool.
 #[derive(Parser, Debug)]
@@ -14,6 +14,9 @@ use clap::{Args, Parser, ValueEnum};
     after_help = EXAMPLES,
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// Directories to analyze (defaults to current directory).
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
@@ -26,6 +29,80 @@ pub struct Cli {
 
     #[command(flatten)]
     pub advanced: AdvancedArgs,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Analyze code health score.
+    Health(HealthArgs),
+    /// Detect change hotspots (churn x complexity).
+    Hotspot(HotspotArgs),
+    /// Track codebase trends with snapshots.
+    Trend(TrendArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct HealthArgs {
+    /// Directories to analyze (defaults to current directory).
+    #[arg(default_value = ".")]
+    pub paths: Vec<PathBuf>,
+
+    /// Number of worst files/directories to show.
+    #[arg(long = "worst", default_value = "10")]
+    pub worst_n: usize,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct HotspotArgs {
+    /// Directories to analyze (defaults to current directory).
+    #[arg(default_value = ".")]
+    pub paths: Vec<PathBuf>,
+
+    /// Time window (e.g. 30d, 4w, 6m, 1y, or YYYY-MM-DD).
+    #[arg(long, default_value = "90d")]
+    pub since: String,
+
+    /// Number of top hotspots to show.
+    #[arg(long = "limit", default_value = "20")]
+    pub limit: usize,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct TrendArgs {
+    /// Directories to analyze (defaults to current directory).
+    #[arg(default_value = ".")]
+    pub paths: Vec<PathBuf>,
+
+    /// Save a new snapshot.
+    #[arg(long)]
+    pub save: bool,
+
+    /// Label for the snapshot.
+    #[arg(long)]
+    pub label: Option<String>,
+
+    /// Compare two snapshot references.
+    #[arg(long, num_args = 2)]
+    pub compare: Option<Vec<String>>,
+
+    /// List all snapshots.
+    #[arg(long)]
+    pub list: bool,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
 }
 
 /// Filter options.
@@ -160,4 +237,9 @@ Examples:
   codelens --top 20 --sort code   # Show top 20 by code lines
   codelens --git-info             # Include git information
   codelens --list-languages       # List supported languages
+  codelens health .               # Code health report
+  codelens hotspot . --since 30d  # Change hotspot analysis
+  codelens trend --save           # Save trend snapshot
+  codelens trend --list           # List snapshots
+  codelens trend --compare latest~1 latest  # Compare snapshots
 "#;
