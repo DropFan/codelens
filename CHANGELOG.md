@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-12
+
+### Fixed
+- Deadlock in parallel walker when scanning repositories with more than 1000 files, caused by bounded channel consumer starting only after blocking `run()` call returns; fixed by running consumer concurrently via `std::thread::scope`
+
 ## [0.1.1] - 2026-04-11
 
 ### Fixed
