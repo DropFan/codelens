@@ -62,6 +62,22 @@ pub enum Error {
     #[error("directory traversal error: {0}")]
     Walk(#[from] ignore::Error),
 
+    /// Not a git repository.
+    #[error("not a git repository: {path}")]
+    NotGitRepo { path: PathBuf },
+
+    /// Git command execution failed.
+    #[error("git command failed: {message}")]
+    GitError { message: String },
+
+    /// No snapshots found.
+    #[error("no snapshots found in {path}")]
+    NoSnapshots { path: PathBuf },
+
+    /// Snapshot not found.
+    #[error("snapshot not found: {id}")]
+    SnapshotNotFound { id: String },
+
     /// Language definition file parse error.
     #[error("failed to parse language definitions")]
     LanguageParse(#[from] toml::de::Error),
@@ -111,6 +127,41 @@ mod tests {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "file not found");
         let err: Error = Error::OutputWrite(io_err);
         assert!(err.to_string().contains("failed to write output"));
+    }
+
+    #[test]
+    fn test_error_display_not_git_repo() {
+        let err = Error::NotGitRepo {
+            path: PathBuf::from("/some/path"),
+        };
+        assert_eq!(err.to_string(), "not a git repository: /some/path");
+    }
+
+    #[test]
+    fn test_error_display_git_error() {
+        let err = Error::GitError {
+            message: "command not found".to_string(),
+        };
+        assert_eq!(err.to_string(), "git command failed: command not found");
+    }
+
+    #[test]
+    fn test_error_display_no_snapshots() {
+        let err = Error::NoSnapshots {
+            path: PathBuf::from(".codelens/snapshots"),
+        };
+        assert_eq!(
+            err.to_string(),
+            "no snapshots found in .codelens/snapshots"
+        );
+    }
+
+    #[test]
+    fn test_error_display_snapshot_not_found() {
+        let err = Error::SnapshotNotFound {
+            id: "2026-04-01".to_string(),
+        };
+        assert_eq!(err.to_string(), "snapshot not found: 2026-04-01");
     }
 
     #[test]
