@@ -84,41 +84,45 @@ fn run() -> Result<()> {
 
     let report = Report::Analysis(result);
 
+    // Collect all reports to write: analysis + health + estimation comparison
+    let mut reports = vec![report.clone()];
+
+    if let Report::Analysis(ref analysis) = report {
+        // Health
+        let scoring_model = DefaultModel::new();
+        let health_top_n = cli.output.top.unwrap_or(10);
+        let health_report = health::score(analysis, &scoring_model, health_top_n);
+        reports.push(Report::Health(health_report));
+
+        // Estimation comparison (all models)
+        let cost_config = codelens_core::CostConfig::default();
+        let cocomo_basic = codelens_core::CocomoBasicModel::default();
+        let cocomo2 = codelens_core::CocomoIIModel::default();
+        let putnam = codelens_core::PutnamModel::default();
+        let locomo = codelens_core::LocomoModel::default();
+        let models: Vec<&dyn codelens_core::EstimationModel> =
+            vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
+        let comparison = codelens_core::insight::estimation::estimate_all(
+            &analysis.summary,
+            &models,
+            &cost_config,
+        );
+        reports.push(Report::EstimationComparison(comparison));
+    }
+
     if let Some(ref path) = cli.output.output_file {
         let file = File::create(path).context("Failed to create output file")?;
         let mut writer = BufWriter::new(file);
-        formatter.write(&report, &output_options, &mut writer)?;
+        for r in &reports {
+            formatter.write(r, &output_options, &mut writer)?;
+        }
         writer.flush()?;
         println!("Output written to: {}", path.display().to_string().green());
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
-        formatter.write(&report, &output_options, &mut writer)?;
-    }
-
-    if cli.advanced.show_estimate {
-        let cost_config = codelens_core::CostConfig::default();
-        let model = codelens_core::CocomoBasicModel::default();
-        if let Report::Analysis(ref analysis) = report {
-            let est_report = codelens_core::insight::estimation::estimate(
-                &analysis.summary,
-                &model,
-                &cost_config,
-            );
-            let est = Report::Estimation(est_report);
-            if let Some(ref path) = cli.output.output_file {
-                let file = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(path)
-                    .context("Failed to append estimation")?;
-                let mut writer = BufWriter::new(file);
-                formatter.write(&est, &output_options, &mut writer)?;
-                writer.flush()?;
-            } else {
-                let stdout = io::stdout();
-                let mut writer = stdout.lock();
-                formatter.write(&est, &output_options, &mut writer)?;
-            }
+        for r in &reports {
+            formatter.write(r, &output_options, &mut writer)?;
         }
     }
 

@@ -305,10 +305,6 @@ pub struct AdvancedArgs {
     /// List supported languages.
     #[arg(long)]
     pub list_languages: bool,
-
-    /// Show cost estimation in analysis output.
-    #[arg(long)]
-    pub show_estimate: bool,
 }
 
 /// Output format argument.
@@ -369,5 +365,4 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens estimate . --model putnam --ck 11000\x1b[0m  \x1b[2m# Putnam with custom Ck\x1b[0m
   \x1b[1;36mcodelens estimate . --model locomo\x1b[0m         \x1b[2m# LLM generation cost\x1b[0m
   \x1b[1;36mcodelens estimate . --avg-wage 100000\x1b[0m      \x1b[2m# Custom salary\x1b[0m
-  \x1b[1;36mcodelens --show-estimate\x1b[0m                   \x1b[2m# Append estimation to analysis\x1b[0m
 ";
