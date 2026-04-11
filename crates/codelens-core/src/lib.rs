@@ -29,6 +29,7 @@
 pub mod analyzer;
 pub mod config;
 pub mod error;
+pub mod git;
 pub mod filter;
 pub mod language;
 pub mod output;
@@ -40,6 +41,7 @@ pub use analyzer::stats::{
 };
 pub use config::Config;
 pub use error::{Error, Result};
+pub use git::{FileChurn, GitClient};
 pub use language::{Language, LanguageRegistry};
 pub use output::{OutputFormat, OutputOptions};
 
