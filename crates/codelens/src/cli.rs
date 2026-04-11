@@ -2,7 +2,14 @@
 
 use std::path::PathBuf;
 
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .placeholder(AnsiColor::Cyan.on_default());
 
 /// High performance code statistics tool.
 #[derive(Parser, Debug)]
@@ -11,6 +18,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     author,
     version,
     about = "High performance code statistics tool",
+    styles = STYLES,
     after_help = EXAMPLES,
 )]
 pub struct Cli {
@@ -227,32 +235,33 @@ pub enum SortByArg {
     Size,
 }
 
-const EXAMPLES: &str = r#"
-Examples:
-  codelens                        # Analyze current directory
-  codelens src tests              # Analyze multiple directories
-  codelens -l rust,go             # Only count Rust and Go files
-  codelens -f json -O stats.json  # Output JSON to file
-  codelens --exclude vendor,dist  # Exclude directories
-  codelens --top 20 --sort code   # Show top 20 by code lines
-  codelens --git-info             # Include git information
-  codelens --list-languages       # List supported languages
+// ANSI: \x1b[1;32m = bold green, \x1b[1;36m = bold cyan, \x1b[2m = dim, \x1b[0m = reset
+const EXAMPLES: &str = "\
+\x1b[1;32mExamples:\x1b[0m
+  \x1b[1;36mcodelens\x1b[0m                        \x1b[2m# Analyze current directory\x1b[0m
+  \x1b[1;36mcodelens src tests\x1b[0m              \x1b[2m# Analyze multiple directories\x1b[0m
+  \x1b[1;36mcodelens -l rust,go\x1b[0m             \x1b[2m# Only count Rust and Go files\x1b[0m
+  \x1b[1;36mcodelens -f json -O stats.json\x1b[0m  \x1b[2m# Output JSON to file\x1b[0m
+  \x1b[1;36mcodelens --exclude vendor,dist\x1b[0m  \x1b[2m# Exclude directories\x1b[0m
+  \x1b[1;36mcodelens --top 20 --sort code\x1b[0m   \x1b[2m# Show top 20 by code lines\x1b[0m
+  \x1b[1;36mcodelens --git-info\x1b[0m             \x1b[2m# Include git information\x1b[0m
+  \x1b[1;36mcodelens --list-languages\x1b[0m       \x1b[2m# List supported languages\x1b[0m
 
-Health (code health score):
-  codelens health .               # Health report for current directory
-  codelens health src -f json     # Health report in JSON format
-  codelens health . --top 20      # Show top 20 worst files/directories
+\x1b[1;32mHealth\x1b[0m \x1b[2m(code health score):\x1b[0m
+  \x1b[1;36mcodelens health .\x1b[0m               \x1b[2m# Health report for current directory\x1b[0m
+  \x1b[1;36mcodelens health src -f json\x1b[0m     \x1b[2m# Health report in JSON format\x1b[0m
+  \x1b[1;36mcodelens health . --top 20\x1b[0m      \x1b[2m# Show top 20 worst files/directories\x1b[0m
 
-Hotspot (churn x complexity):
-  codelens hotspot .              # Hotspots in last 90 days (default)
-  codelens hotspot . --since 30d  # Hotspots in last 30 days
-  codelens hotspot . --since 6m   # Hotspots in last 6 months
-  codelens hotspot . --top 5      # Show top 5 hotspots
+\x1b[1;32mHotspot\x1b[0m \x1b[2m(churn x complexity):\x1b[0m
+  \x1b[1;36mcodelens hotspot .\x1b[0m              \x1b[2m# Hotspots in last 90 days (default)\x1b[0m
+  \x1b[1;36mcodelens hotspot . --since 30d\x1b[0m  \x1b[2m# Hotspots in last 30 days\x1b[0m
+  \x1b[1;36mcodelens hotspot . --since 6m\x1b[0m   \x1b[2m# Hotspots in last 6 months\x1b[0m
+  \x1b[1;36mcodelens hotspot . --top 5\x1b[0m      \x1b[2m# Show top 5 hotspots\x1b[0m
 
-Trend (snapshot comparison):
-  codelens trend --save           # Save a snapshot
-  codelens trend --save --label v1.0  # Save with label
-  codelens trend                  # Compare latest two snapshots
-  codelens trend --list           # List all snapshots
-  codelens trend --compare latest~2 latest  # Compare specific snapshots
-"#;
+\x1b[1;32mTrend\x1b[0m \x1b[2m(snapshot comparison):\x1b[0m
+  \x1b[1;36mcodelens trend --save\x1b[0m           \x1b[2m# Save a snapshot\x1b[0m
+  \x1b[1;36mcodelens trend --save --label v1.0\x1b[0m  \x1b[2m# Save with label\x1b[0m
+  \x1b[1;36mcodelens trend\x1b[0m                  \x1b[2m# Compare latest two snapshots\x1b[0m
+  \x1b[1;36mcodelens trend --list\x1b[0m           \x1b[2m# List all snapshots\x1b[0m
+  \x1b[1;36mcodelens trend --compare latest~2 latest\x1b[0m  \x1b[2m# Compare specific snapshots\x1b[0m
+";
