@@ -1,6 +1,6 @@
 # Codelens
 
-High performance code analysis tool written in Rust — stats, health scores, hotspots, and trends.
+High performance code analysis tool written in Rust — stats, health scores, hotspots, trends, and cost estimation.
 
 ## Features
 
@@ -12,6 +12,7 @@ High performance code analysis tool written in Rust — stats, health scores, ho
 - **Health Score**: Project/directory/file-level health grading (A-F) with pluggable scoring models
 - **Hotspot Detection**: Identify risky files via churn × complexity analysis
 - **Trend Tracking**: Save snapshots and compare codebase evolution over time
+- **Cost Estimation**: Multi-model development cost estimation (COCOMO Basic/II, Putnam, LOCOMO)
 - **Extensible**: Add custom languages via TOML configuration
 
 ## Installation
@@ -94,6 +95,26 @@ codelens trend                         # Compare latest two snapshots
 codelens trend --list                  # List all snapshots
 codelens trend --compare latest~2 latest  # Compare specific snapshots
 ```
+
+### Cost Estimation
+
+Estimate development cost, schedule, and team size using four pluggable models. Default mode runs all models and shows a comparison table.
+
+```bash
+codelens estimate .                       # All models comparison (default)
+codelens estimate . --model cocomo-basic   # Single model with per-language breakdown
+codelens estimate . --model cocomo2        # COCOMO II Post-Architecture
+codelens estimate . --model putnam --ck 11000  # Putnam with custom productivity
+codelens estimate . --model locomo         # LLM generation cost
+codelens estimate . --avg-wage 120000      # Custom salary across all models
+```
+
+| Model | Description | Typical Use |
+|-------|-------------|-------------|
+| COCOMO Basic | Classic Boehm 1981 regression | Quick estimates, scc comparison |
+| COCOMO II | Modern 2000 calibration with scale factors | Organization-level planning |
+| Putnam/SLIM | Rayleigh-curve conservative model | Risk assessment, worst case |
+| LOCOMO | LLM token cost model | AI-assisted development cost |
 
 ## Output Formats
 

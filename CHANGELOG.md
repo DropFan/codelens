@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-12
+
+### Added
+- **`codelens estimate`** — Multi-model cost estimation subcommand
+  - Four pluggable models via `EstimationModel` trait:
+    - **COCOMO Basic** (Boehm 1981) — classic `E = a × KLOC^b × EAF`
+    - **COCOMO II** (Boehm 2000) — modern calibration with 5 scale factors
+    - **Putnam/SLIM** (1978) — Rayleigh-curve conservative estimate
+    - **LOCOMO** — LLM token cost model (AI-era code generation)
+  - `--model all` (default) shows comparison table across all four models
+  - Per-language cost breakdown for single model mode
+  - All model parameters configurable via CLI flags (`--eaf`, `--ck`, `--d0`, `--llm-input-price`, etc.)
+  - Full output format support (console, JSON, CSV, Markdown, HTML with Chart.js)
+- Default `codelens` output now includes health score and estimation comparison alongside statistics
+- HTML estimation templates with consistent header/footer matching existing report pages
+
+### Changed
+- `Report` enum extended with `Estimation` and `EstimationComparison` variants
+- CLI help and examples updated to reflect new `estimate` subcommand
+
+### Removed
+- `--show-estimate` flag (superseded by default output including estimation)
+
 ## [0.1.2] - 2026-04-12
 
 ### Fixed
