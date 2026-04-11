@@ -44,6 +44,9 @@ impl OutputFormat for CsvOutput {
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
+            Report::EstimationComparison(report) => {
+                self.write_estimation_comparison(report, writer)
+            }
         }
     }
 }
@@ -162,6 +165,27 @@ impl CsvOutput {
                 writer,
                 "{},{},{:.2},{:.2}",
                 lang.language, lang.code_lines, lang.effort_months, lang.cost,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_estimation_comparison(
+        &self,
+        report: &crate::insight::estimation::EstimationComparison,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Model,SLOC,Effort(PM),Schedule(M),People,Cost")?;
+        for r in &report.reports {
+            writeln!(
+                writer,
+                "{},{},{:.2},{:.2},{:.2},{:.2}",
+                r.model,
+                r.total_sloc,
+                r.effort_months,
+                r.schedule_months,
+                r.people_required,
+                r.estimated_cost,
             )?;
         }
         Ok(())

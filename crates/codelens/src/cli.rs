@@ -195,6 +195,8 @@ pub enum ModelArg {
     Cocomo2,
     Putnam,
     Locomo,
+    /// Run all models and show comparison table.
+    All,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, Default)]

@@ -75,6 +75,9 @@ impl OutputFormat for ConsoleOutput {
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
+            Report::EstimationComparison(report) => {
+                self.write_estimation_comparison(report, writer)
+            }
         }
     }
 }
@@ -581,6 +584,64 @@ impl ConsoleOutput {
             write!(writer, "{}  ", format!("{key}: {val}").dimmed())?;
         }
         writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn write_estimation_comparison(
+        &self,
+        report: &crate::insight::estimation::EstimationComparison,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(
+            writer,
+            "{}",
+            " CODELENS - Cost Estimation Comparison ".bold().cyan()
+        )?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "  Total SLOC: {}",
+            Self::format_number(report.total_sloc).bold()
+        )?;
+        writeln!(writer)?;
+
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("Model").add_attribute(Attribute::Bold),
+            Cell::new("Effort (PM)").add_attribute(Attribute::Bold),
+            Cell::new("Schedule (M)").add_attribute(Attribute::Bold),
+            Cell::new("People").add_attribute(Attribute::Bold),
+            Cell::new("Cost").add_attribute(Attribute::Bold),
+        ]);
+        for r in &report.reports {
+            table.add_row(vec![
+                Cell::new(&r.model).fg(Color::Cyan),
+                Cell::new(format!("{:.2}", r.effort_months)),
+                Cell::new(format!("{:.2}", r.schedule_months)).fg(Color::Yellow),
+                Cell::new(format!("{:.2}", r.people_required)).fg(Color::Magenta),
+                Cell::new(format!("${}", Self::format_cost(r.estimated_cost))).fg(Color::Green),
+            ]);
+        }
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+
+        // Per-model parameter summary
+        writeln!(writer, "{}", "─".repeat(60).dimmed())?;
+        for r in &report.reports {
+            let params: Vec<String> = r.params.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            writeln!(
+                writer,
+                "{}",
+                format!("{}: {}", r.model, params.join(", ")).dimmed()
+            )?;
+        }
 
         Ok(())
     }

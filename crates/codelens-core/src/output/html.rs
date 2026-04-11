@@ -140,6 +140,25 @@ struct EstimationHtmlReport {
     params: Vec<HtmlEstimationParam>,
 }
 
+// ── Estimation Comparison ────────────────────────────────
+
+struct HtmlComparisonRow {
+    model: String,
+    effort_months: String,
+    schedule_months: String,
+    people_required: String,
+    estimated_cost: String,
+    cost_raw: f64,
+}
+
+#[derive(Template)]
+#[template(path = "estimation_comparison.html")]
+struct EstimationComparisonHtmlReport {
+    generated_at: String,
+    total_sloc: usize,
+    rows: Vec<HtmlComparisonRow>,
+}
+
 // ── OutputFormat impl ────────────────────────────────────
 
 pub struct HtmlOutput;
@@ -177,6 +196,9 @@ impl OutputFormat for HtmlOutput {
             Report::Hotspot(report) => self.write_hotspot(report, writer),
             Report::Trend(report) => self.write_trend(report, writer),
             Report::Estimation(report) => self.write_estimation(report, writer),
+            Report::EstimationComparison(report) => {
+                self.write_estimation_comparison(report, writer)
+            }
         }
     }
 }
@@ -378,6 +400,31 @@ impl HtmlOutput {
                 .map(|(k, v)| HtmlEstimationParam {
                     key: k.clone(),
                     value: v.clone(),
+                })
+                .collect(),
+        };
+        write!(writer, "{}", html.render()?)?;
+        Ok(())
+    }
+
+    fn write_estimation_comparison(
+        &self,
+        report: &crate::insight::estimation::EstimationComparison,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let html = EstimationComparisonHtmlReport {
+            generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            total_sloc: report.total_sloc,
+            rows: report
+                .reports
+                .iter()
+                .map(|r| HtmlComparisonRow {
+                    model: r.model.clone(),
+                    effort_months: format!("{:.2}", r.effort_months),
+                    schedule_months: format!("{:.2}", r.schedule_months),
+                    people_required: format!("{:.2}", r.people_required),
+                    estimated_cost: format!("{:.2}", r.estimated_cost),
+                    cost_raw: r.estimated_cost,
                 })
                 .collect(),
         };

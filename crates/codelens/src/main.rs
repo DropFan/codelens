@@ -315,11 +315,25 @@ fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
         overhead: args.overhead,
     };
 
-    let model: Box<dyn codelens_core::EstimationModel> = match args.model {
-        cli::ModelArg::CocomoBasic => Box::new(codelens_core::CocomoBasicModel {
-            project_type: args.project_type.into(),
-            eaf: args.eaf,
-        }),
+    if matches!(args.model, cli::ModelArg::All) {
+        return run_estimate_all(&result.summary, args, &cost_config);
+    }
+
+    let model: Box<dyn codelens_core::EstimationModel> = build_model(args);
+
+    let report =
+        codelens_core::insight::estimation::estimate(&result.summary, model.as_ref(), &cost_config);
+    write_report(Report::Estimation(report), &args.output)
+}
+
+fn build_model(args: &cli::EstimateArgs) -> Box<dyn codelens_core::EstimationModel> {
+    match args.model {
+        cli::ModelArg::CocomoBasic | cli::ModelArg::All => {
+            Box::new(codelens_core::CocomoBasicModel {
+                project_type: args.project_type.into(),
+                eaf: args.eaf,
+            })
+        }
         cli::ModelArg::Cocomo2 => {
             let mut m = codelens_core::CocomoIIModel::default();
             if let Some(sf) = args.sf_sum {
@@ -339,11 +353,39 @@ fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
             tokens_per_second: args.llm_tps,
             ..Default::default()
         }),
+    }
+}
+
+fn run_estimate_all(
+    summary: &codelens_core::Summary,
+    args: &cli::EstimateArgs,
+    cost_config: &codelens_core::CostConfig,
+) -> Result<()> {
+    let cocomo_basic = codelens_core::CocomoBasicModel {
+        project_type: args.project_type.into(),
+        eaf: args.eaf,
+    };
+    let mut cocomo2 = codelens_core::CocomoIIModel::default();
+    if let Some(sf) = args.sf_sum {
+        cocomo2.scale_factors = [sf / 5.0; 5];
+    }
+    cocomo2.eaf = args.eaf;
+    let putnam = codelens_core::PutnamModel {
+        ck: args.ck,
+        d0: args.d0,
+    };
+    let locomo = codelens_core::LocomoModel {
+        input_price_per_m: args.llm_input_price,
+        output_price_per_m: args.llm_output_price,
+        tokens_per_second: args.llm_tps,
+        ..Default::default()
     };
 
-    let report =
-        codelens_core::insight::estimation::estimate(&result.summary, model.as_ref(), &cost_config);
-    write_report(Report::Estimation(report), &args.output)
+    let models: Vec<&dyn codelens_core::EstimationModel> =
+        vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
+    let comparison =
+        codelens_core::insight::estimation::estimate_all(summary, &models, cost_config);
+    write_report(Report::EstimationComparison(comparison), &args.output)
 }
 
 fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {

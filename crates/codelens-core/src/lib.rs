@@ -44,8 +44,8 @@ pub use config::Config;
 pub use error::{Error, Result};
 pub use git::{FileChurn, GitClient};
 pub use insight::estimation::{
-    CocomoBasicModel, CocomoIIModel, CostConfig, EstimationModel, EstimationReport, LocomoModel,
-    ProjectType, PutnamModel,
+    CocomoBasicModel, CocomoIIModel, CostConfig, EstimationComparison, EstimationModel,
+    EstimationReport, LocomoModel, ProjectType, PutnamModel,
 };
 pub use language::{Language, LanguageRegistry};
 pub use output::{OutputFormat, OutputOptions};

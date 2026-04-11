@@ -176,6 +176,29 @@ pub fn estimate(
     }
 }
 
+/// Multi-model comparison report.
+#[derive(Debug, Clone, Serialize)]
+pub struct EstimationComparison {
+    pub total_sloc: usize,
+    pub reports: Vec<EstimationReport>,
+}
+
+/// Run all given models and produce a comparison report.
+pub fn estimate_all(
+    summary: &Summary,
+    models: &[&dyn EstimationModel],
+    cost_config: &CostConfig,
+) -> EstimationComparison {
+    let reports = models
+        .iter()
+        .map(|m| estimate(summary, *m, cost_config))
+        .collect();
+    EstimationComparison {
+        total_sloc: summary.lines.code,
+        reports,
+    }
+}
+
 // ════════════════════════════════════════════════════════
 // Model 1: COCOMO I Basic
 // ════════════════════════════════════════════════════════

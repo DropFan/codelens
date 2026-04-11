@@ -5,7 +5,7 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::config::SortBy;
 use crate::error::Result;
-use crate::insight::estimation::EstimationReport;
+use crate::insight::estimation::{EstimationComparison, EstimationReport};
 use crate::insight::health::HealthReport;
 use crate::insight::hotspot::HotspotReport;
 use crate::insight::trend::TrendReport;
@@ -18,6 +18,7 @@ pub enum Report {
     Hotspot(HotspotReport),
     Trend(TrendReport),
     Estimation(EstimationReport),
+    EstimationComparison(EstimationComparison),
 }
 
 /// Trait for output formatters.

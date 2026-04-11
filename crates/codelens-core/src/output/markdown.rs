@@ -44,6 +44,9 @@ impl OutputFormat for MarkdownOutput {
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
+            Report::EstimationComparison(report) => {
+                self.write_estimation_comparison(report, writer)
+            }
         }
     }
 }
@@ -345,6 +348,33 @@ impl MarkdownOutput {
             .map(|(k, v)| format!("{k}: {v}"))
             .collect();
         writeln!(writer, "*{}*", params_str.join(" | "))?;
+        Ok(())
+    }
+
+    fn write_estimation_comparison(
+        &self,
+        report: &crate::insight::estimation::EstimationComparison,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "# Cost Estimation Comparison")?;
+        writeln!(writer)?;
+        writeln!(writer, "**Total SLOC:** {}", report.total_sloc)?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "| Model | Effort (PM) | Schedule (M) | People | Cost |"
+        )?;
+        writeln!(
+            writer,
+            "|-------|-------------|--------------|--------|------|"
+        )?;
+        for r in &report.reports {
+            writeln!(
+                writer,
+                "| {} | {:.2} | {:.2} | {:.2} | ${:.2} |",
+                r.model, r.effort_months, r.schedule_months, r.people_required, r.estimated_cost,
+            )?;
+        }
         Ok(())
     }
 }
