@@ -109,12 +109,12 @@ codelens estimate . --model locomo         # LLM generation cost
 codelens estimate . --avg-wage 120000      # Custom salary across all models
 ```
 
-| Model | Description | Typical Use |
-|-------|-------------|-------------|
-| COCOMO Basic | Classic Boehm 1981 regression | Quick estimates, scc comparison |
-| COCOMO II | Modern 2000 calibration with scale factors | Organization-level planning |
-| Putnam/SLIM | Rayleigh-curve conservative model | Risk assessment, worst case |
-| LOCOMO | LLM token cost model | AI-assisted development cost |
+| Model | Description | Reference | Typical Use |
+|-------|-------------|-----------|-------------|
+| [COCOMO Basic](https://en.wikipedia.org/wiki/COCOMO) | Classic Boehm 1981 regression | [*Software Engineering Economics*](https://dl.acm.org/doi/book/10.5555/539404), Boehm 1981 | Quick estimates, scc comparison |
+| [COCOMO II](https://en.wikipedia.org/wiki/COCOMO#COCOMO_II) | Modern 2000 calibration with scale factors | [*Software Cost Estimation with COCOMO II*](https://dl.acm.org/doi/book/10.5555/557000), Boehm et al. 2000 | Organization-level planning |
+| [Putnam/SLIM](https://en.wikipedia.org/wiki/Putnam_model) | Rayleigh-curve conservative model | [*A General Empirical Solution to the Macro Software Sizing and Estimating Problem*](https://ieeexplore.ieee.org/document/1702708), Putnam 1978 | Risk assessment, worst case |
+| [LOCOMO](https://github.com/boyter/scc) | LLM token cost model | [scc LOCOMO model](https://boyter.org/posts/scc-a-very-fast-accurate-code-counter/#locomo), Boyter 2026 | AI-assisted development cost |
 
 ## Output Formats
 
