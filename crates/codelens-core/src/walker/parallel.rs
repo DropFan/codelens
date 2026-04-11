@@ -260,8 +260,7 @@ mod tests {
         }
 
         let walker = ParallelWalker::default();
-        let registry =
-            Arc::new(crate::language::LanguageRegistry::with_builtin().unwrap());
+        let registry = Arc::new(crate::language::LanguageRegistry::with_builtin().unwrap());
         let analyzer = Arc::new(FileAnalyzer::new(
             registry,
             &crate::config::Config::default(),
