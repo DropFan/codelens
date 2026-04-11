@@ -1,7 +1,7 @@
 //! Change hotspot analysis: churn × complexity.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -57,12 +57,21 @@ pub fn analyze(
     total_commits: usize,
     top_n: usize,
 ) -> HotspotReport {
-    let stats_map: HashMap<&PathBuf, _> = analysis.files.iter().map(|f| (&f.path, f)).collect();
+    // Normalize paths: strip leading "./" so analysis paths match git paths
+    let stats_map: HashMap<&Path, _> = analysis
+        .files
+        .iter()
+        .map(|f| {
+            let p: &Path = f.path.strip_prefix("./").unwrap_or(&f.path);
+            (p, f)
+        })
+        .collect();
 
     let mut hotspots: Vec<FileHotspot> = churns
         .iter()
         .filter_map(|churn| {
-            stats_map.get(&churn.path).map(|stats| FileHotspot {
+            let key: &Path = churn.path.strip_prefix("./").unwrap_or(&churn.path);
+            stats_map.get(key).map(|stats| FileHotspot {
                 path: churn.path.clone(),
                 language: stats.language.clone(),
                 churn: ChurnMetrics {
