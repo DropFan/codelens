@@ -47,9 +47,9 @@ pub struct HealthArgs {
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
-    /// Number of worst files/directories to show.
-    #[arg(long = "worst", default_value = "10")]
-    pub worst_n: usize,
+    /// Show top N worst files/directories.
+    #[arg(long, default_value = "10")]
+    pub top: usize,
 
     #[command(flatten)]
     pub filter: FilterArgs,
@@ -68,9 +68,9 @@ pub struct HotspotArgs {
     #[arg(long, default_value = "90d")]
     pub since: String,
 
-    /// Number of top hotspots to show.
-    #[arg(long = "limit", default_value = "20")]
-    pub limit: usize,
+    /// Show top N hotspots.
+    #[arg(long, default_value = "20")]
+    pub top: usize,
 
     #[command(flatten)]
     pub filter: FilterArgs,
@@ -93,8 +93,8 @@ pub struct TrendArgs {
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Compare two snapshot references.
-    #[arg(long, num_args = 2)]
+    /// Compare two snapshot references (e.g. "latest~1 latest", "2026-04-01 latest").
+    #[arg(long, num_args = 2, value_names = ["FROM", "TO"])]
     pub compare: Option<Vec<String>>,
 
     /// List all snapshots.
@@ -237,9 +237,22 @@ Examples:
   codelens --top 20 --sort code   # Show top 20 by code lines
   codelens --git-info             # Include git information
   codelens --list-languages       # List supported languages
-  codelens health .               # Code health report
-  codelens hotspot . --since 30d  # Change hotspot analysis
-  codelens trend --save           # Save trend snapshot
-  codelens trend --list           # List snapshots
-  codelens trend --compare latest~1 latest  # Compare snapshots
+
+Health (code health score):
+  codelens health .               # Health report for current directory
+  codelens health src -f json     # Health report in JSON format
+  codelens health . --top 20      # Show top 20 worst files/directories
+
+Hotspot (churn x complexity):
+  codelens hotspot .              # Hotspots in last 90 days (default)
+  codelens hotspot . --since 30d  # Hotspots in last 30 days
+  codelens hotspot . --since 6m   # Hotspots in last 6 months
+  codelens hotspot . --top 5      # Show top 5 hotspots
+
+Trend (snapshot comparison):
+  codelens trend --save           # Save a snapshot
+  codelens trend --save --label v1.0  # Save with label
+  codelens trend                  # Compare latest two snapshots
+  codelens trend --list           # List all snapshots
+  codelens trend --compare latest~2 latest  # Compare specific snapshots
 "#;
