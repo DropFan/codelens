@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codelens - Code Health Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+            --accent-red: #f85149;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary); color: var(--text-primary); line-height: 1.6;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .grade-badge {
+            display: inline-block; font-size: 4rem; font-weight: bold; width: 100px; height: 100px;
+            line-height: 100px; text-align: center; border-radius: 50%; margin: 1rem auto;
+        }
+        .grade-A { background: #1a3a1a; color: var(--accent-green); border: 3px solid var(--accent-green); }
+        .grade-B { background: #1a2a3a; color: var(--accent-blue); border: 3px solid var(--accent-blue); }
+        .grade-C { background: #2a2a1a; color: var(--accent-yellow); border: 3px solid var(--accent-yellow); }
+        .grade-D { background: #2a1a1a; color: #f0883e; border: 3px solid #f0883e; }
+        .grade-F { background: #2a1010; color: var(--accent-red); border: 3px solid var(--accent-red); }
+        .score-text { font-size: 1.2rem; color: var(--text-secondary); margin-top: 0.5rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+        .stat-card {
+            background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; text-align: center;
+            border: 1px solid var(--bg-tertiary);
+        }
+        .stat-card .value { font-size: 1.8rem; font-weight: bold; }
+        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+        .charts-section { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 3rem; }
+        .chart-container { background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; border: 1px solid var(--bg-tertiary); }
+        .chart-container h3 { margin-bottom: 1rem; color: var(--text-secondary); }
+        table { width: 100%; border-collapse: collapse; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; margin-bottom: 2rem; }
+        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
+        th { background: var(--bg-tertiary); font-weight: 600; color: var(--text-secondary); }
+        tr:hover { background: var(--bg-tertiary); }
+        .progress-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; min-width: 80px; }
+        .progress-bar .fill { height: 100%; border-radius: 4px; }
+        h2 { margin-bottom: 1rem; margin-top: 2rem; }
+        footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Code Health Report</h1>
+            <p style="color: var(--text-secondary)">Generated: {{ generated_at }} | Model: {{ model }}</p>
+            <div class="grade-badge grade-{{ grade }}">{{ grade }}</div>
+            <div class="score-text">Score: {{ score }} / 100</div>
+        </header>
+
+        <section class="stats-grid">
+            {% for dim in dimensions %}
+            <div class="stat-card">
+                <div class="value" style="color: {% match dim.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}">{{ dim.score_display }}</div>
+                <div class="label">{{ dim.dimension }}</div>
+                <div class="progress-bar" style="margin-top: 0.5rem">
+                    <div class="fill" style="width: {{ dim.score_display }}%; background: {% match dim.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+
+        <section style="display: flex; justify-content: center; margin-bottom: 3rem;">
+            <div class="chart-container" style="max-width: 420px; width: 100%;">
+                <h3>Health Dimensions</h3>
+                <canvas id="radarChart"></canvas>
+            </div>
+        </section>
+
+        {% if !by_directory.is_empty() %}
+        <section>
+            <h2>By Directory (worst first)</h2>
+            <table>
+                <thead><tr><th>Directory</th><th>Score</th><th>Grade</th><th>Files</th><th></th></tr></thead>
+                <tbody>
+                {% for dir in by_directory %}
+                <tr>
+                    <td><strong>{{ dir.path }}</strong></td>
+                    <td>{{ dir.score_display }}</td>
+                    <td>{{ dir.grade }}</td>
+                    <td>{{ dir.file_count }}</td>
+                    <td><div class="progress-bar"><div class="fill" style="width: {{ dir.score_display }}%; background: {% match dir.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div></div></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        {% if !worst_files.is_empty() %}
+        <section>
+            <h2>Worst Files</h2>
+            <table>
+                <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Top Issue</th><th></th></tr></thead>
+                <tbody>
+                {% for file in worst_files %}
+                <tr>
+                    <td><strong>{{ file.path }}</strong></td>
+                    <td>{{ file.score_display }}</td>
+                    <td>{{ file.grade }}</td>
+                    <td>{{ file.top_issue }}</td>
+                    <td><div class="progress-bar"><div class="fill" style="width: {{ file.score_display }}%; background: {% match file.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div></div></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        <footer>
+            <p>Generated by <strong>Codelens</strong> | High-performance code analysis tool powered by Rust</p>
+        </footer>
+    </div>
+
+    <script>
+        const dims = [
+            {% for dim in dimensions %}
+            { label: "{{ dim.dimension }}", value: {{ dim.score_display }} },
+            {% endfor %}
+        ];
+        new Chart(document.getElementById('radarChart'), {
+            type: 'radar',
+            data: {
+                labels: dims.map(d => d.label),
+                datasets: [{
+                    label: 'Score',
+                    data: dims.map(d => d.value),
+                    backgroundColor: 'rgba(88, 166, 255, 0.2)',
+                    borderColor: '#58a6ff',
+                    pointBackgroundColor: '#58a6ff',
+                    pointBorderColor: '#fff',
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    r: {
+                        beginAtZero: true, max: 100,
+                        ticks: { color: '#8b949e', backdropColor: 'transparent' },
+                        grid: { color: '#21262d' },
+                        pointLabels: { color: '#f0f6fc', font: { size: 13 } },
+                        angleLines: { color: '#21262d' }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    </script>
+</body>
+</html>
