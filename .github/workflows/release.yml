@@ -180,7 +180,7 @@ jobs:
         run: |
           cat > homebrew-tap/Formula/codelens.rb << 'FORMULA'
           class Codelens < Formula
-            desc "High performance code statistics tool written in Rust"
+            desc "High performance code analysis tool — stats, health scores, hotspots, and trends"
             homepage "https://github.com/DropFan/codelens"
             version "VERSION_PLACEHOLDER"
             license "MIT"

@@ -1,6 +1,6 @@
 [package]
 name = "codelens-core"
-description = "Core library for codelens - high performance code statistics tool"
+description = "Core library for codelens - high performance code analysis tool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

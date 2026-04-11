@@ -1,6 +1,6 @@
 //! # codelens-core
 //!
-//! Core library for codelens - a high performance code statistics tool.
+//! Core library for codelens - a high performance code analysis tool.
 //!
 //! ## Features
 //!

@@ -1,4 +1,4 @@
-//! Codelens CLI - High performance code statistics tool.
+//! Codelens CLI - High performance code analysis tool.
 
 mod cli;
 

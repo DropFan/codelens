@@ -1,6 +1,6 @@
 [package]
 name = "codelens"
-description = "High performance code statistics tool written in Rust"
+description = "High performance code analysis tool — stats, health scores, hotspots, and trends"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

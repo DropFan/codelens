@@ -1,6 +1,6 @@
 # Codelens
 
-High performance code statistics tool written in Rust.
+High performance code analysis tool written in Rust — stats, health scores, hotspots, and trends.
 
 ## Features
 
@@ -9,6 +9,9 @@ High performance code statistics tool written in Rust.
 - **Smart Filtering**: Respects `.gitignore`, auto-excludes build directories
 - **Multiple Outputs**: Console, JSON, CSV, Markdown, HTML with charts
 - **Complexity Analysis**: Function count, cyclomatic complexity, nesting depth
+- **Health Score**: Project/directory/file-level health grading (A-F) with pluggable scoring models
+- **Hotspot Detection**: Identify risky files via churn × complexity analysis
+- **Trend Tracking**: Save snapshots and compare codebase evolution over time
 - **Extensible**: Add custom languages via TOML configuration
 
 ## Installation
@@ -59,6 +62,37 @@ codelens --exclude vendor,dist,node_modules
 
 # List supported languages
 codelens --list-languages
+```
+
+### Health Score
+
+Score code health across five dimensions (complexity, function size, comment ratio, file size, nesting depth) with grades from A to F.
+
+```bash
+codelens health .               # Project, directory, and file-level report
+codelens health . --top 20      # Show top 20 worst files
+codelens health . -f json       # Output as JSON
+```
+
+### Hotspot Detection
+
+Find the riskiest files by combining git change frequency (churn) with code complexity — files that change often AND are complex are the most likely sources of bugs.
+
+```bash
+codelens hotspot .              # Last 90 days (default)
+codelens hotspot . --since 30d  # Last 30 days
+codelens hotspot . --since 6m --top 5  # Last 6 months, top 5
+```
+
+### Trend Tracking
+
+Save snapshots and compare codebase evolution over time. Snapshots are stored in `.codelens/snapshots/`. Use `latest`, `latest~N`, or a date prefix like `2025-01-01` as references.
+
+```bash
+codelens trend --save --label v1.0     # Save a labeled snapshot
+codelens trend                         # Compare latest two snapshots
+codelens trend --list                  # List all snapshots
+codelens trend --compare latest~2 latest  # Compare specific snapshots
 ```
 
 ## Output Formats

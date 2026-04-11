@@ -230,7 +230,7 @@ cargo install codelens
 Formula 模板 (`codelens.rb`):
 ```ruby
 class Codelens < Formula
-  desc "High performance code statistics tool"
+  desc "High performance code analysis tool — stats, health scores, hotspots, and trends"
   homepage "https://github.com/DropFan/codelens"
   version "0.1.0"
   license "MIT"
