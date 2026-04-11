@@ -1,51 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Codelens — Cost Estimation</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #0d1117; color: #c9d1d9; }
-  h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: .5rem; }
-  h2 { color: #8b949e; margin-top: 2rem; }
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  th, td { padding: .5rem .75rem; text-align: left; border: 1px solid #30363d; }
-  th { background: #161b22; color: #8b949e; font-weight: 600; }
-  tr:nth-child(even) { background: #161b22; }
-  .cost { color: #3fb950; font-weight: bold; }
-  .sloc { color: #58a6ff; }
-  .schedule { color: #d29922; }
-  .people { color: #bc8cff; }
-  .meta { color: #8b949e; font-size: .85rem; margin-top: 2rem; border-top: 1px solid #30363d; padding-top: .5rem; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codelens - Cost Estimation</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+            --accent-red: #f85149;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary); color: var(--text-primary); line-height: 1.6;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1.5rem; margin-bottom: 3rem;
+        }
+        .stat-card {
+            background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; text-align: center;
+            border: 1px solid var(--bg-tertiary); transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+        .stat-card .value { font-size: 2rem; font-weight: bold; }
+        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+        .charts-section {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem; margin-bottom: 3rem;
+        }
+        .chart-container {
+            background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem;
+            border: 1px solid var(--bg-tertiary);
+        }
+        .chart-container h3 { margin-bottom: 1rem; color: var(--text-secondary); }
+        table {
+            width: 100%; border-collapse: collapse; background: var(--bg-secondary);
+            border-radius: 12px; overflow: hidden; margin-bottom: 2rem;
+        }
+        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
+        th { background: var(--bg-tertiary); font-weight: 600; color: var(--text-secondary); }
+        tr:hover { background: var(--bg-tertiary); }
+        .progress-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; min-width: 80px; }
+        .progress-bar .fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent-green), var(--accent-blue)); }
+        h2 { margin-bottom: 1rem; margin-top: 2rem; }
+        .params { color: var(--text-secondary); font-size: 0.85rem; margin-top: 1rem; }
+        footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+    </style>
 </head>
 <body>
-<h1>Cost Estimation Report</h1>
-<p><strong>Model:</strong> {{ model }}</p>
-<h2>Summary</h2>
-<table>
-  <tr><th>Metric</th><th>Value</th></tr>
-  <tr><td>Total SLOC</td><td class="sloc">{{ total_sloc }}</td></tr>
-  <tr><td>Estimated Cost</td><td class="cost">${{ estimated_cost }}</td></tr>
-  <tr><td>Schedule Effort</td><td class="schedule">{{ schedule_months }} months</td></tr>
-  <tr><td>People Required</td><td class="people">{{ people_required }}</td></tr>
-</table>
-{% if !by_language.is_empty() %}
-<h2>By Language</h2>
-<table>
-  <tr><th>Language</th><th>Code Lines</th><th>Effort (PM)</th><th>Cost</th></tr>
-  {% for lang in by_language %}
-  <tr>
-    <td>{{ lang.language }}</td>
-    <td>{{ lang.code_lines }}</td>
-    <td>{{ lang.effort_months }}</td>
-    <td class="cost">${{ lang.cost }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% endif %}
-<p class="meta">
-{% for p in params %}{{ p.key }}: {{ p.value }}{% if !loop.last %} | {% endif %}{% endfor %}
- | Generated: {{ generated_at }}
-</p>
+    <div class="container">
+        <header>
+            <h1>Cost Estimation Report</h1>
+            <p style="color: var(--text-secondary)">Generated: {{ generated_at }} | Model: {{ model }}</p>
+        </header>
+
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="value" style="color: var(--accent-blue)">{{ total_sloc }}</div>
+                <div class="label">Total SLOC</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" style="color: var(--accent-green)">${{ estimated_cost }}</div>
+                <div class="label">Estimated Cost</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" style="color: var(--accent-yellow)">{{ schedule_months }}</div>
+                <div class="label">Schedule (months)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" style="color: var(--accent-purple)">{{ people_required }}</div>
+                <div class="label">People Required</div>
+            </div>
+        </section>
+
+        {% if !by_language.is_empty() %}
+        <section class="charts-section">
+            <div class="chart-container">
+                <h3>Cost by Language</h3>
+                <canvas id="costChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Effort by Language (Person-Months)</h3>
+                <canvas id="effortChart"></canvas>
+            </div>
+        </section>
+
+        <section>
+            <h2>By Language</h2>
+            <table>
+                <thead>
+                    <tr><th>Language</th><th>Code Lines</th><th>Effort (PM)</th><th>Cost</th><th>Share</th></tr>
+                </thead>
+                <tbody>
+                {% for lang in by_language %}
+                <tr>
+                    <td><strong>{{ lang.language }}</strong></td>
+                    <td>{{ lang.code_lines }}</td>
+                    <td>{{ lang.effort_months }}</td>
+                    <td style="color: var(--accent-green)">${{ lang.cost }}</td>
+                    <td>
+                        <div class="progress-bar">
+                            {% if total_sloc > 0 %}
+                            <div class="fill" style="width: {{ lang.code_lines * 100 / total_sloc }}%"></div>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        <div class="params">
+            {% for p in params %}{{ p.key }}: {{ p.value }}{% if !loop.last %} | {% endif %}{% endfor %}
+        </div>
+
+        <footer>
+            <p>Generated by <a href="https://github.com/DropFan/codelens" style="color: var(--accent-blue)"><strong>Codelens</strong></a> by <a href="https://github.com/DropFan" style="color: var(--accent-blue)">Tiger</a> | High-performance code analysis tool powered by Rust</p>
+        </footer>
+    </div>
+
+    {% if !by_language.is_empty() %}
+    <script>
+        const langData = [
+            {% for lang in by_language %}
+            { name: "{{ lang.language }}", code: {{ lang.code_lines }}, cost: {{ lang.cost_raw }}, effort: {{ lang.effort_raw }} },
+            {% endfor %}
+        ];
+        const colors = ['#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f85149', '#79c0ff', '#56d364', '#e3b341', '#ff7b72', '#7ee787', '#ffa657', '#d2a8ff'];
+
+        new Chart(document.getElementById('costChart'), {
+            type: 'doughnut',
+            data: {
+                labels: langData.map(d => d.name),
+                datasets: [{ data: langData.map(d => d.cost), backgroundColor: colors }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'right', labels: { color: '#f0f6fc' } } }
+            }
+        });
+
+        new Chart(document.getElementById('effortChart'), {
+            type: 'bar',
+            data: {
+                labels: langData.map(d => d.name),
+                datasets: [{ label: 'Effort (PM)', data: langData.map(d => d.effort), backgroundColor: colors, borderRadius: 4 }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+                    x: { ticks: { color: '#8b949e' }, grid: { display: false } }
+                }
+            }
+        });
+    </script>
+    {% endif %}
 </body>
 </html>

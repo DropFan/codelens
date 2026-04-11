@@ -117,6 +117,9 @@ struct HtmlLanguageEstimation {
     code_lines: usize,
     effort_months: String,
     cost: String,
+    /// Raw f64 values for chart.js data attributes.
+    cost_raw: f64,
+    effort_raw: f64,
 }
 
 struct HtmlEstimationParam {
@@ -365,6 +368,8 @@ impl HtmlOutput {
                     code_lines: l.code_lines,
                     effort_months: format!("{:.2}", l.effort_months),
                     cost: format!("{:.2}", l.cost),
+                    cost_raw: l.cost,
+                    effort_raw: l.effort_months,
                 })
                 .collect(),
             params: report
