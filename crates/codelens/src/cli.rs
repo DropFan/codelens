@@ -55,10 +55,6 @@ pub struct HealthArgs {
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
-    /// Show top N worst files/directories.
-    #[arg(long, default_value = "10")]
-    pub top: usize,
-
     #[command(flatten)]
     pub filter: FilterArgs,
 
@@ -75,10 +71,6 @@ pub struct HotspotArgs {
     /// Time window (e.g. 30d, 4w, 6m, 1y, or YYYY-MM-DD).
     #[arg(long, default_value = "90d")]
     pub since: String,
-
-    /// Show top N hotspots.
-    #[arg(long, default_value = "20")]
-    pub top: usize,
 
     #[command(flatten)]
     pub filter: FilterArgs,

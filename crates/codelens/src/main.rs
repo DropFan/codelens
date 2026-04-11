@@ -207,7 +207,8 @@ fn run_health(args: &cli::HealthArgs) -> Result<()> {
     let config = build_config_from_args(&args.filter, &args.output)?;
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
     let model = DefaultModel::new();
-    let report = health::score(&result, &model, args.top);
+    let top_n = args.output.top.unwrap_or(10);
+    let report = health::score(&result, &model, top_n);
     write_report(Report::Health(report), &args.output)
 }
 
@@ -218,7 +219,8 @@ fn run_hotspot(args: &cli::HotspotArgs) -> Result<()> {
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
     let churns = git_client.file_churn(&since)?;
     let total_commits = git_client.commit_count(&since)?;
-    let report = hotspot::analyze(&churns, &result, &args.since, total_commits, args.top);
+    let top_n = args.output.top.unwrap_or(20);
+    let report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
     write_report(Report::Hotspot(report), &args.output)
 }
 
