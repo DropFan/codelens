@@ -39,6 +39,7 @@ impl OutputFormat for JsonOutput {
             Report::Health(report) => self.write_json(report, writer),
             Report::Hotspot(report) => self.write_json(report, writer),
             Report::Trend(report) => self.write_json(report, writer),
+            Report::Estimation(report) => self.write_json(report, writer),
         }
     }
 }

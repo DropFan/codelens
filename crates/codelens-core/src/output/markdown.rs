@@ -43,6 +43,7 @@ impl OutputFormat for MarkdownOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            Report::Estimation(report) => self.write_estimation(report, options, writer),
         }
     }
 }
@@ -289,6 +290,65 @@ impl MarkdownOutput {
             writeln!(writer)?;
         }
 
+        Ok(())
+    }
+
+    fn write_estimation(
+        &self,
+        report: &crate::insight::estimation::EstimationReport,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "# Cost Estimation Report")?;
+        writeln!(writer)?;
+        writeln!(writer, "**Model:** {}", report.model)?;
+        writeln!(writer)?;
+        writeln!(writer, "## Summary")?;
+        writeln!(writer)?;
+        writeln!(writer, "| Metric | Value |")?;
+        writeln!(writer, "|--------|-------|")?;
+        writeln!(writer, "| Total SLOC | {} |", report.total_sloc)?;
+        writeln!(
+            writer,
+            "| Estimated Cost | ${:.2} |",
+            report.estimated_cost
+        )?;
+        writeln!(
+            writer,
+            "| Schedule Effort | {:.2} months |",
+            report.schedule_months
+        )?;
+        writeln!(
+            writer,
+            "| People Required | {:.2} |",
+            report.people_required
+        )?;
+        writeln!(writer)?;
+        if !options.summary_only && !report.by_language.is_empty() {
+            writeln!(writer, "## By Language")?;
+            writeln!(writer)?;
+            writeln!(writer, "| Language | Code | Effort (PM) | Cost |")?;
+            writeln!(writer, "|----------|------|-------------|------|")?;
+            let mut langs = report.by_language.iter().collect::<Vec<_>>();
+            if let Some(n) = options.top_n {
+                langs.truncate(n);
+            }
+            for lang in langs {
+                writeln!(
+                    writer,
+                    "| {} | {} | {:.2} | ${:.2} |",
+                    lang.language, lang.code_lines, lang.effort_months, lang.cost,
+                )?;
+            }
+            writeln!(writer)?;
+        }
+        writeln!(writer, "---")?;
+        let params_str: Vec<String> = report
+            .params
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect();
+        writeln!(writer, "*{}*", params_str.join(" | "))?;
         Ok(())
     }
 }

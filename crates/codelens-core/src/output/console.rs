@@ -74,6 +74,7 @@ impl OutputFormat for ConsoleOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            Report::Estimation(report) => self.write_estimation(report, options, writer),
         }
     }
 }
@@ -487,6 +488,99 @@ impl ConsoleOutput {
             writeln!(writer, "{lang_table}")?;
             writeln!(writer)?;
         }
+
+        Ok(())
+    }
+
+    fn format_cost(cost: f64) -> String {
+        if cost >= 1_000_000.0 {
+            format!("{:.2}M", cost / 1_000_000.0)
+        } else if cost >= 1_000.0 {
+            format!("{:.0}", cost)
+        } else {
+            format!("{:.2}", cost)
+        }
+    }
+
+    fn write_estimation(
+        &self,
+        report: &crate::insight::estimation::EstimationReport,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(
+            writer,
+            "{}",
+            " CODELENS - Cost Estimation Report ".bold().cyan()
+        )?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+        writeln!(writer, "  Model: {}", report.model.bold())?;
+        writeln!(writer)?;
+
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("Metric").add_attribute(Attribute::Bold),
+            Cell::new("Value").add_attribute(Attribute::Bold),
+        ]);
+        table.add_row(vec![
+            Cell::new("Total SLOC"),
+            Cell::new(Self::format_number(report.total_sloc)).fg(Color::Cyan),
+        ]);
+        table.add_row(vec![
+            Cell::new("Estimated Cost to Develop"),
+            Cell::new(format!("${}", Self::format_cost(report.estimated_cost))).fg(Color::Green),
+        ]);
+        table.add_row(vec![
+            Cell::new("Estimated Schedule Effort"),
+            Cell::new(format!("{:.2} months", report.schedule_months)).fg(Color::Yellow),
+        ]);
+        table.add_row(vec![
+            Cell::new("Estimated People Required"),
+            Cell::new(format!("{:.2}", report.people_required)).fg(Color::Magenta),
+        ]);
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+
+        if !options.summary_only && !report.by_language.is_empty() {
+            writeln!(writer, "{}", "By Language".bold())?;
+            writeln!(writer)?;
+            let mut lang_table = Table::new();
+            lang_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            lang_table.set_header(vec![
+                Cell::new("Language").add_attribute(Attribute::Bold),
+                Cell::new("Code").add_attribute(Attribute::Bold),
+                Cell::new("Effort (PM)").add_attribute(Attribute::Bold),
+                Cell::new("Cost").add_attribute(Attribute::Bold),
+            ]);
+            let mut langs = report.by_language.iter().collect::<Vec<_>>();
+            if let Some(n) = options.top_n {
+                langs.truncate(n);
+            }
+            for lang in langs {
+                lang_table.add_row(vec![
+                    Cell::new(&lang.language).fg(Color::Cyan),
+                    Cell::new(Self::format_number(lang.code_lines)),
+                    Cell::new(format!("{:.2}", lang.effort_months)),
+                    Cell::new(format!("${}", Self::format_cost(lang.cost))).fg(Color::Green),
+                ]);
+            }
+            writeln!(writer, "{lang_table}")?;
+            writeln!(writer)?;
+        }
+
+        writeln!(writer, "{}", "─".repeat(60).dimmed())?;
+        for (key, val) in &report.params {
+            write!(writer, "{}  ", format!("{key}: {val}").dimmed())?;
+        }
+        writeln!(writer)?;
 
         Ok(())
     }

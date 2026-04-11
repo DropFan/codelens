@@ -43,6 +43,7 @@ impl OutputFormat for CsvOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            Report::Estimation(report) => self.write_estimation(report, options, writer),
         }
     }
 }
@@ -144,6 +145,23 @@ impl CsvOutput {
                 dv.to,
                 dv.signed_delta(),
                 dv.percent,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_estimation(
+        &self,
+        report: &crate::insight::estimation::EstimationReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Language,Code,Effort(PM),Cost")?;
+        for lang in &report.by_language {
+            writeln!(
+                writer,
+                "{},{},{:.2},{:.2}",
+                lang.language, lang.code_lines, lang.effort_months, lang.cost,
             )?;
         }
         Ok(())

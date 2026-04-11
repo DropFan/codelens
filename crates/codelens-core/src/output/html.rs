@@ -110,6 +110,33 @@ struct TrendHtmlReport {
     by_language: Vec<HtmlLanguageTrend>,
 }
 
+// ── Estimation ──────────────────────────────────────────
+
+struct HtmlLanguageEstimation {
+    language: String,
+    code_lines: usize,
+    effort_months: String,
+    cost: String,
+}
+
+struct HtmlEstimationParam {
+    key: String,
+    value: String,
+}
+
+#[derive(Template)]
+#[template(path = "estimation.html")]
+struct EstimationHtmlReport {
+    generated_at: String,
+    model: String,
+    total_sloc: usize,
+    estimated_cost: String,
+    schedule_months: String,
+    people_required: String,
+    by_language: Vec<HtmlLanguageEstimation>,
+    params: Vec<HtmlEstimationParam>,
+}
+
 // ── OutputFormat impl ────────────────────────────────────
 
 pub struct HtmlOutput;
@@ -146,6 +173,7 @@ impl OutputFormat for HtmlOutput {
             Report::Health(report) => self.write_health(report, writer),
             Report::Hotspot(report) => self.write_hotspot(report, writer),
             Report::Trend(report) => self.write_trend(report, writer),
+            Report::Estimation(report) => self.write_estimation(report, writer),
         }
     }
 }
@@ -312,6 +340,41 @@ impl HtmlOutput {
             to_label: report.to.label.as_deref().unwrap_or("").to_string(),
             metrics,
             by_language,
+        };
+        write!(writer, "{}", html.render()?)?;
+        Ok(())
+    }
+
+    fn write_estimation(
+        &self,
+        report: &crate::insight::estimation::EstimationReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let html = EstimationHtmlReport {
+            generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            model: report.model.clone(),
+            total_sloc: report.total_sloc,
+            estimated_cost: format!("{:.2}", report.estimated_cost),
+            schedule_months: format!("{:.2}", report.schedule_months),
+            people_required: format!("{:.2}", report.people_required),
+            by_language: report
+                .by_language
+                .iter()
+                .map(|l| HtmlLanguageEstimation {
+                    language: l.language.clone(),
+                    code_lines: l.code_lines,
+                    effort_months: format!("{:.2}", l.effort_months),
+                    cost: format!("{:.2}", l.cost),
+                })
+                .collect(),
+            params: report
+                .params
+                .iter()
+                .map(|(k, v)| HtmlEstimationParam {
+                    key: k.clone(),
+                    value: v.clone(),
+                })
+                .collect(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())

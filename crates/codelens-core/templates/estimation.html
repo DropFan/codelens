@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Codelens — Cost Estimation</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #0d1117; color: #c9d1d9; }
+  h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: .5rem; }
+  h2 { color: #8b949e; margin-top: 2rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { padding: .5rem .75rem; text-align: left; border: 1px solid #30363d; }
+  th { background: #161b22; color: #8b949e; font-weight: 600; }
+  tr:nth-child(even) { background: #161b22; }
+  .cost { color: #3fb950; font-weight: bold; }
+  .sloc { color: #58a6ff; }
+  .schedule { color: #d29922; }
+  .people { color: #bc8cff; }
+  .meta { color: #8b949e; font-size: .85rem; margin-top: 2rem; border-top: 1px solid #30363d; padding-top: .5rem; }
+</style>
+</head>
+<body>
+<h1>Cost Estimation Report</h1>
+<p><strong>Model:</strong> {{ model }}</p>
+<h2>Summary</h2>
+<table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Total SLOC</td><td class="sloc">{{ total_sloc }}</td></tr>
+  <tr><td>Estimated Cost</td><td class="cost">${{ estimated_cost }}</td></tr>
+  <tr><td>Schedule Effort</td><td class="schedule">{{ schedule_months }} months</td></tr>
+  <tr><td>People Required</td><td class="people">{{ people_required }}</td></tr>
+</table>
+{% if !by_language.is_empty() %}
+<h2>By Language</h2>
+<table>
+  <tr><th>Language</th><th>Code Lines</th><th>Effort (PM)</th><th>Cost</th></tr>
+  {% for lang in by_language %}
+  <tr>
+    <td>{{ lang.language }}</td>
+    <td>{{ lang.code_lines }}</td>
+    <td>{{ lang.effort_months }}</td>
+    <td class="cost">${{ lang.cost }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+<p class="meta">
+{% for p in params %}{{ p.key }}: {{ p.value }}{% if !loop.last %} | {% endif %}{% endfor %}
+ | Generated: {{ generated_at }}
+</p>
+</body>
+</html>
