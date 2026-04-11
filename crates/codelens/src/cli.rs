@@ -16,7 +16,7 @@ const STYLES: Styles = Styles::styled()
 #[command(
     name = "codelens",
     version,
-    about = "High performance code analysis tool — stats, health scores, hotspots, and trends\n\n\
+    about = "High performance code analysis tool — stats, health scores, hotspots, trends, and cost estimation\n\n\
         Author: Tiger <DropFan@Gmail.com>\n\
         GitHub: https://github.com/DropFan/codelens",
     styles = STYLES,
@@ -70,8 +70,9 @@ pub enum Command {
         - cocomo-basic:  COCOMO I Basic (Boehm 1981)\n\
         - cocomo2:       COCOMO II Post-Architecture (Boehm 2000)\n\
         - putnam:        Putnam/SLIM Rayleigh curve model\n\
-        - locomo:        LOCOMO LLM Output Cost Model\n\n\
-        All parameters are configurable. Shows per-language breakdown."
+        - locomo:        LOCOMO LLM Output Cost Model\n\
+        - all:           Run all models and show comparison table (default)\n\n\
+        All parameters are configurable. Single model shows per-language breakdown."
     )]
     Estimate(EstimateArgs),
 }
@@ -134,11 +135,11 @@ pub struct TrendArgs {
 
 #[derive(Args, Debug)]
 pub struct EstimateArgs {
-    /// Directories to analyze.
+    /// Directories to analyze (defaults to current directory).
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
-    /// Estimation model.
+    /// Estimation model (default: all models comparison).
     #[arg(long, value_enum, default_value = "all")]
     pub model: ModelArg,
 
@@ -360,7 +361,8 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens trend --compare latest~2 latest\x1b[0m  \x1b[2m# Compare specific snapshots\x1b[0m
 
 \x1b[1;32mEstimate\x1b[0m \x1b[2m(cost estimation):\x1b[0m
-  \x1b[1;36mcodelens estimate .\x1b[0m                       \x1b[2m# COCOMO Basic (default)\x1b[0m
+  \x1b[1;36mcodelens estimate .\x1b[0m                       \x1b[2m# All models comparison (default)\x1b[0m
+  \x1b[1;36mcodelens estimate . --model cocomo-basic\x1b[0m   \x1b[2m# Single model with details\x1b[0m
   \x1b[1;36mcodelens estimate . --model cocomo2\x1b[0m        \x1b[2m# COCOMO II model\x1b[0m
   \x1b[1;36mcodelens estimate . --model putnam --ck 11000\x1b[0m  \x1b[2m# Putnam with custom Ck\x1b[0m
   \x1b[1;36mcodelens estimate . --model locomo\x1b[0m         \x1b[2m# LLM generation cost\x1b[0m
