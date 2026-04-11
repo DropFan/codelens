@@ -107,7 +107,7 @@ pub fn save_snapshot(
         result,
     };
 
-    let filename = now.format("%Y-%m-%dT%H:%M:%SZ").to_string() + ".json";
+    let filename = now.format("%Y-%m-%dT%H-%M-%SZ").to_string() + ".json";
     let path = dir.join(&filename);
     let json = serde_json::to_string_pretty(&snapshot)?;
     fs::write(&path, json).map_err(|e| Error::FileRead {
