@@ -29,8 +29,9 @@
 pub mod analyzer;
 pub mod config;
 pub mod error;
-pub mod git;
 pub mod filter;
+pub mod git;
+pub mod insight;
 pub mod language;
 pub mod output;
 pub mod walker;

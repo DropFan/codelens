@@ -1,0 +1,1 @@
+//! Trend tracking with snapshots.
