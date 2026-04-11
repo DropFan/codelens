@@ -15,9 +15,10 @@ const STYLES: Styles = Styles::styled()
 #[derive(Parser, Debug)]
 #[command(
     name = "codelens",
-    author,
     version,
-    about = "High performance code analysis tool — stats, health scores, hotspots, and trends",
+    about = "High performance code analysis tool — stats, health scores, hotspots, and trends\n\n\
+        Author: Tiger <DropFan@Gmail.com>\n\
+        GitHub: https://github.com/DropFan/codelens",
     styles = STYLES,
     after_help = EXAMPLES,
 )]
@@ -42,20 +43,26 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Analyze code health score.
-    #[command(long_about = "Score code health across five dimensions: complexity, function size, \
+    #[command(
+        long_about = "Score code health across five dimensions: complexity, function size, \
         comment ratio, file size, and nesting depth. Reports at project, directory, and file \
         levels with grades from A (best) to F (worst). Use --top to control how many items \
-        are shown per level.")]
+        are shown per level."
+    )]
     Health(HealthArgs),
     /// Detect change hotspots (churn x complexity).
-    #[command(long_about = "Find the riskiest files in your codebase by combining git change \
+    #[command(
+        long_about = "Find the riskiest files in your codebase by combining git change \
         frequency (churn) with code complexity. Files that change often AND are complex are \
-        the most likely sources of bugs. Requires a git repository.")]
+        the most likely sources of bugs. Requires a git repository."
+    )]
     Hotspot(HotspotArgs),
     /// Track codebase trends with snapshots.
-    #[command(long_about = "Save snapshots of codebase metrics and compare them over time. \
+    #[command(
+        long_about = "Save snapshots of codebase metrics and compare them over time. \
         Snapshots are stored in .codelens/snapshots/ as JSON files. References: \"latest\", \
-        \"latest~N\" (Nth before latest), or date prefix like \"2025-01-01\".")]
+        \"latest~N\" (Nth before latest), or date prefix like \"2025-01-01\"."
+    )]
     Trend(TrendArgs),
 }
 
