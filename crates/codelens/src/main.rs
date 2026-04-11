@@ -14,8 +14,8 @@ use tracing_subscriber::EnvFilter;
 
 use codelens_core::config::Config;
 use codelens_core::git::{self, GitClient};
-use codelens_core::insight::{health, hotspot, trend};
 use codelens_core::insight::scoring::default::DefaultModel;
+use codelens_core::insight::{health, hotspot, trend};
 use codelens_core::output::{create_output, OutputOptions, Report};
 use codelens_core::{analyze, LanguageRegistry};
 
@@ -256,8 +256,13 @@ fn run_trend(args: &cli::TrendArgs) -> Result<()> {
             .and_then(|c| c.repo_info())
             .map(|info| (info.commit, info.branch))
             .unwrap_or((None, None));
-        let path =
-            trend::save_snapshot(&project_root, result, args.label.clone(), git_commit, git_branch)?;
+        let path = trend::save_snapshot(
+            &project_root,
+            result,
+            args.label.clone(),
+            git_commit,
+            git_branch,
+        )?;
         println!("Snapshot saved to: {}", path.display().to_string().green());
         return Ok(());
     }
@@ -300,10 +305,7 @@ fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
     Ok(())
 }
 
-fn build_config_from_args(
-    filter: &cli::FilterArgs,
-    _output: &cli::OutputArgs,
-) -> Result<Config> {
+fn build_config_from_args(filter: &cli::FilterArgs, _output: &cli::OutputArgs) -> Result<Config> {
     use codelens_core::config::FilterConfig;
     use codelens_core::walker::WalkerConfig;
 

@@ -49,9 +49,7 @@ impl GitClient {
             });
         }
 
-        let repo_path = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let repo_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         Ok(Self {
             repo_path: PathBuf::from(repo_path),
@@ -113,12 +111,7 @@ impl GitClient {
 
     /// Get total commit count in the given time window.
     pub fn commit_count(&self, since: &str) -> Result<usize> {
-        let output = self.run_git(&[
-            "rev-list",
-            "--count",
-            "HEAD",
-            &format!("--since={since}"),
-        ])?;
+        let output = self.run_git(&["rev-list", "--count", "HEAD", &format!("--since={since}")])?;
         Ok(output.parse::<usize>().unwrap_or(0))
     }
 
@@ -228,7 +221,10 @@ mod tests {
         let input = "abc1234\n5\t3\tsrc/main.rs\n2\t1\tsrc/lib.rs\n";
         let result = parse_numstat(input);
         assert_eq!(result.len(), 2);
-        let main = result.iter().find(|f| f.path == PathBuf::from("src/main.rs")).unwrap();
+        let main = result
+            .iter()
+            .find(|f| f.path == PathBuf::from("src/main.rs"))
+            .unwrap();
         assert_eq!(main.commits, 1);
         assert_eq!(main.lines_added, 5);
         assert_eq!(main.lines_deleted, 3);
@@ -249,7 +245,10 @@ mod tests {
     fn test_parse_numstat_binary_files() {
         let input = "abc1234\n-\t-\timage.png\n5\t3\tsrc/main.rs\n";
         let result = parse_numstat(input);
-        let png = result.iter().find(|f| f.path == PathBuf::from("image.png")).unwrap();
+        let png = result
+            .iter()
+            .find(|f| f.path == PathBuf::from("image.png"))
+            .unwrap();
         assert_eq!(png.commits, 1);
         assert_eq!(png.lines_added, 0);
     }
@@ -288,7 +287,11 @@ mod tests {
     #[test]
     fn test_detect_in_git_repo() {
         let temp = tempfile::TempDir::new().unwrap();
-        Command::new("git").args(["init"]).current_dir(temp.path()).output().unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
         let client = GitClient::detect(temp.path());
         assert!(client.is_ok());
     }
@@ -303,9 +306,21 @@ mod tests {
     #[test]
     fn test_file_churn_empty_repo() {
         let temp = tempfile::TempDir::new().unwrap();
-        Command::new("git").args(["init"]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["config", "user.email", "test@test.com"]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["config", "user.name", "Test"]).current_dir(temp.path()).output().unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
         let client = GitClient::detect(temp.path()).unwrap();
         let churns = client.file_churn("90 days ago").unwrap();
         assert!(churns.is_empty());
@@ -314,17 +329,49 @@ mod tests {
     #[test]
     fn test_file_churn_with_commits() {
         let temp = tempfile::TempDir::new().unwrap();
-        Command::new("git").args(["init"]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["config", "user.email", "test@test.com"]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["config", "user.name", "Test"]).current_dir(temp.path()).output().unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
 
         std::fs::write(temp.path().join("hello.rs"), "fn main() {}\n").unwrap();
-        Command::new("git").args(["add", "."]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["commit", "-m", "init"]).current_dir(temp.path()).output().unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
 
-        std::fs::write(temp.path().join("hello.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
-        Command::new("git").args(["add", "."]).current_dir(temp.path()).output().unwrap();
-        Command::new("git").args(["commit", "-m", "update"]).current_dir(temp.path()).output().unwrap();
+        std::fs::write(
+            temp.path().join("hello.rs"),
+            "fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "update"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
 
         let client = GitClient::detect(temp.path()).unwrap();
         let churns = client.file_churn("90 days ago").unwrap();

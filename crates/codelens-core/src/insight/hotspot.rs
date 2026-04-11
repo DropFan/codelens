@@ -86,7 +86,11 @@ pub fn analyze(
     });
     hotspots.truncate(top_n);
 
-    HotspotReport { files: hotspots, since: since.to_string(), total_commits }
+    HotspotReport {
+        files: hotspots,
+        since: since.to_string(),
+        total_commits,
+    }
 }
 
 fn normalize_and_score(hotspots: &mut [FileHotspot]) {
@@ -94,11 +98,23 @@ fn normalize_and_score(hotspots: &mut [FileHotspot]) {
         return;
     }
     let max_churn = hotspots.iter().map(|h| h.churn.commits).max().unwrap_or(1) as f64;
-    let max_cc = hotspots.iter().map(|h| h.complexity.cyclomatic).max().unwrap_or(1) as f64;
+    let max_cc = hotspots
+        .iter()
+        .map(|h| h.complexity.cyclomatic)
+        .max()
+        .unwrap_or(1) as f64;
 
     for h in hotspots.iter_mut() {
-        let norm_churn = if max_churn > 0.0 { h.churn.commits as f64 / max_churn } else { 0.0 };
-        let norm_cc = if max_cc > 0.0 { h.complexity.cyclomatic as f64 / max_cc } else { 0.0 };
+        let norm_churn = if max_churn > 0.0 {
+            h.churn.commits as f64 / max_churn
+        } else {
+            0.0
+        };
+        let norm_cc = if max_cc > 0.0 {
+            h.complexity.cyclomatic as f64 / max_cc
+        } else {
+            0.0
+        };
         h.hotspot_score = norm_churn * norm_cc;
         h.risk = match h.hotspot_score {
             s if s > 0.7 => RiskLevel::High,
@@ -116,34 +132,93 @@ mod tests {
 
     fn make_churns() -> Vec<FileChurn> {
         vec![
-            FileChurn { path: PathBuf::from("hot.rs"), commits: 50, lines_added: 500, lines_deleted: 200 },
-            FileChurn { path: PathBuf::from("warm.rs"), commits: 10, lines_added: 100, lines_deleted: 50 },
-            FileChurn { path: PathBuf::from("cold.rs"), commits: 2, lines_added: 10, lines_deleted: 5 },
-            FileChurn { path: PathBuf::from("deleted.rs"), commits: 5, lines_added: 30, lines_deleted: 30 },
+            FileChurn {
+                path: PathBuf::from("hot.rs"),
+                commits: 50,
+                lines_added: 500,
+                lines_deleted: 200,
+            },
+            FileChurn {
+                path: PathBuf::from("warm.rs"),
+                commits: 10,
+                lines_added: 100,
+                lines_deleted: 50,
+            },
+            FileChurn {
+                path: PathBuf::from("cold.rs"),
+                commits: 2,
+                lines_added: 10,
+                lines_deleted: 5,
+            },
+            FileChurn {
+                path: PathBuf::from("deleted.rs"),
+                commits: 5,
+                lines_added: 30,
+                lines_deleted: 30,
+            },
         ]
     }
 
     fn make_analysis() -> AnalysisResult {
         let files = vec![
             FileStats {
-                path: PathBuf::from("hot.rs"), language: "Rust".to_string(),
-                lines: LineStats { total: 300, code: 250, comment: 20, blank: 30 }, size: 5000,
-                complexity: Complexity { functions: 5, cyclomatic: 40, max_depth: 6, avg_func_lines: 50.0 },
+                path: PathBuf::from("hot.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 300,
+                    code: 250,
+                    comment: 20,
+                    blank: 30,
+                },
+                size: 5000,
+                complexity: Complexity {
+                    functions: 5,
+                    cyclomatic: 40,
+                    max_depth: 6,
+                    avg_func_lines: 50.0,
+                },
             },
             FileStats {
-                path: PathBuf::from("warm.rs"), language: "Rust".to_string(),
-                lines: LineStats { total: 100, code: 80, comment: 10, blank: 10 }, size: 2000,
-                complexity: Complexity { functions: 4, cyclomatic: 10, max_depth: 3, avg_func_lines: 20.0 },
+                path: PathBuf::from("warm.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 100,
+                    code: 80,
+                    comment: 10,
+                    blank: 10,
+                },
+                size: 2000,
+                complexity: Complexity {
+                    functions: 4,
+                    cyclomatic: 10,
+                    max_depth: 3,
+                    avg_func_lines: 20.0,
+                },
             },
             FileStats {
-                path: PathBuf::from("cold.rs"), language: "Rust".to_string(),
-                lines: LineStats { total: 50, code: 40, comment: 5, blank: 5 }, size: 1000,
-                complexity: Complexity { functions: 2, cyclomatic: 4, max_depth: 2, avg_func_lines: 20.0 },
+                path: PathBuf::from("cold.rs"),
+                language: "Rust".to_string(),
+                lines: LineStats {
+                    total: 50,
+                    code: 40,
+                    comment: 5,
+                    blank: 5,
+                },
+                size: 1000,
+                complexity: Complexity {
+                    functions: 2,
+                    cyclomatic: 4,
+                    max_depth: 2,
+                    avg_func_lines: 20.0,
+                },
             },
         ];
         AnalysisResult {
-            summary: Summary::from_file_stats(&files), files,
-            elapsed: Duration::from_millis(50), scanned_files: 3, skipped_files: 0,
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::from_millis(50),
+            scanned_files: 3,
+            skipped_files: 0,
         }
     }
 
@@ -174,7 +249,10 @@ mod tests {
     #[test]
     fn test_hotspot_skips_deleted_files() {
         let report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
-        assert!(report.files.iter().all(|f| f.path != PathBuf::from("deleted.rs")));
+        assert!(report
+            .files
+            .iter()
+            .all(|f| f.path != PathBuf::from("deleted.rs")));
     }
 
     #[test]

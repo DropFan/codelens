@@ -54,9 +54,7 @@ impl OutputFormat for HtmlOutput {
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_json_html("Code Health Report", report, writer),
-            Report::Hotspot(report) => {
-                self.write_json_html("Hotspot Analysis", report, writer)
-            }
+            Report::Hotspot(report) => self.write_json_html("Hotspot Analysis", report, writer),
             Report::Trend(report) => self.write_json_html("Trend Report", report, writer),
         }
     }

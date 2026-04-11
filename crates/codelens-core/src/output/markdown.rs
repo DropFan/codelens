@@ -275,26 +275,15 @@ impl MarkdownOutput {
         if !report.by_language.is_empty() {
             writeln!(writer, "## By Language")?;
             writeln!(writer)?;
-            writeln!(
-                writer,
-                "| Language | Status | Before | After | Delta |"
-            )?;
-            writeln!(
-                writer,
-                "|----------|--------|--------|-------|-------|"
-            )?;
+            writeln!(writer, "| Language | Status | Before | After | Delta |")?;
+            writeln!(writer, "|----------|--------|--------|-------|-------|")?;
             for lang in &report.by_language {
                 let signed = lang.code.signed_delta();
                 let sign = if signed > 0 { "+" } else { "" };
                 writeln!(
                     writer,
                     "| {} | {} | {} | {} | {}{} |",
-                    lang.language,
-                    lang.status,
-                    lang.code.from,
-                    lang.code.to,
-                    sign,
-                    signed,
+                    lang.language, lang.status, lang.code.from, lang.code.to, sign, signed,
                 )?;
             }
             writeln!(writer)?;
@@ -306,8 +295,8 @@ impl MarkdownOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::Report;
+    use super::*;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;

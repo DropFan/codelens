@@ -5,23 +5,44 @@ use super::{DimensionWeight, HealthDimension, RawMetrics, ScoringModel};
 pub struct DefaultModel;
 
 impl DefaultModel {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl Default for DefaultModel {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScoringModel for DefaultModel {
-    fn name(&self) -> &str { "default" }
+    fn name(&self) -> &str {
+        "default"
+    }
 
     fn dimensions(&self) -> &[DimensionWeight] {
         &[
-            DimensionWeight { dimension: HealthDimension::Complexity, weight: 0.30 },
-            DimensionWeight { dimension: HealthDimension::FuncSize, weight: 0.20 },
-            DimensionWeight { dimension: HealthDimension::CommentRatio, weight: 0.15 },
-            DimensionWeight { dimension: HealthDimension::FileSize, weight: 0.20 },
-            DimensionWeight { dimension: HealthDimension::NestingDepth, weight: 0.15 },
+            DimensionWeight {
+                dimension: HealthDimension::Complexity,
+                weight: 0.30,
+            },
+            DimensionWeight {
+                dimension: HealthDimension::FuncSize,
+                weight: 0.20,
+            },
+            DimensionWeight {
+                dimension: HealthDimension::CommentRatio,
+                weight: 0.15,
+            },
+            DimensionWeight {
+                dimension: HealthDimension::FileSize,
+                weight: 0.20,
+            },
+            DimensionWeight {
+                dimension: HealthDimension::NestingDepth,
+                weight: 0.15,
+            },
         ]
     }
 
@@ -37,9 +58,15 @@ impl ScoringModel for DefaultModel {
 }
 
 fn interpolate(value: f64, breakpoints: &[(f64, f64)]) -> f64 {
-    if breakpoints.is_empty() { return 50.0; }
-    if value <= breakpoints[0].0 { return breakpoints[0].1; }
-    if value >= breakpoints[breakpoints.len() - 1].0 { return breakpoints[breakpoints.len() - 1].1; }
+    if breakpoints.is_empty() {
+        return 50.0;
+    }
+    if value <= breakpoints[0].0 {
+        return breakpoints[0].1;
+    }
+    if value >= breakpoints[breakpoints.len() - 1].0 {
+        return breakpoints[breakpoints.len() - 1].1;
+    }
     for window in breakpoints.windows(2) {
         let (x0, y0) = window[0];
         let (x1, y1) = window[1];
@@ -52,23 +79,73 @@ fn interpolate(value: f64, breakpoints: &[(f64, f64)]) -> f64 {
 }
 
 fn score_complexity(avg_cc: f64) -> f64 {
-    interpolate(avg_cc, &[(0.0, 100.0), (3.0, 100.0), (6.0, 80.0), (10.0, 60.0), (15.0, 40.0), (25.0, 20.0)])
+    interpolate(
+        avg_cc,
+        &[
+            (0.0, 100.0),
+            (3.0, 100.0),
+            (6.0, 80.0),
+            (10.0, 60.0),
+            (15.0, 40.0),
+            (25.0, 20.0),
+        ],
+    )
 }
 
 fn score_func_size(avg_lines: f64) -> f64 {
-    interpolate(avg_lines, &[(0.0, 100.0), (15.0, 100.0), (30.0, 80.0), (50.0, 60.0), (80.0, 40.0), (150.0, 20.0)])
+    interpolate(
+        avg_lines,
+        &[
+            (0.0, 100.0),
+            (15.0, 100.0),
+            (30.0, 80.0),
+            (50.0, 60.0),
+            (80.0, 40.0),
+            (150.0, 20.0),
+        ],
+    )
 }
 
 fn score_comment_ratio(ratio: f64) -> f64 {
-    interpolate(ratio, &[(0.0, 40.0), (0.03, 70.0), (0.05, 100.0), (0.30, 100.0), (0.50, 70.0), (0.80, 40.0)])
+    interpolate(
+        ratio,
+        &[
+            (0.0, 40.0),
+            (0.03, 70.0),
+            (0.05, 100.0),
+            (0.30, 100.0),
+            (0.50, 70.0),
+            (0.80, 40.0),
+        ],
+    )
 }
 
 fn score_file_size(avg_lines: f64) -> f64 {
-    interpolate(avg_lines, &[(0.0, 100.0), (200.0, 100.0), (400.0, 80.0), (600.0, 60.0), (1000.0, 40.0), (2000.0, 20.0)])
+    interpolate(
+        avg_lines,
+        &[
+            (0.0, 100.0),
+            (200.0, 100.0),
+            (400.0, 80.0),
+            (600.0, 60.0),
+            (1000.0, 40.0),
+            (2000.0, 20.0),
+        ],
+    )
 }
 
 fn score_nesting(depth: usize) -> f64 {
-    interpolate(depth as f64, &[(0.0, 100.0), (3.0, 100.0), (4.0, 80.0), (6.0, 60.0), (8.0, 40.0), (12.0, 20.0)])
+    interpolate(
+        depth as f64,
+        &[
+            (0.0, 100.0),
+            (3.0, 100.0),
+            (4.0, 80.0),
+            (6.0, 60.0),
+            (8.0, 40.0),
+            (12.0, 20.0),
+        ],
+    )
 }
 
 #[cfg(test)]
@@ -132,22 +209,36 @@ mod tests {
     fn test_default_model_total_score() {
         let model = DefaultModel::new();
         let metrics = RawMetrics {
-            avg_cyclomatic: 2.0, avg_func_lines: 10.0, comment_ratio: 0.15,
-            max_depth: 2, avg_file_lines: 100.0, total_files: 10,
+            avg_cyclomatic: 2.0,
+            avg_func_lines: 10.0,
+            comment_ratio: 0.15,
+            max_depth: 2,
+            avg_file_lines: 100.0,
+            total_files: 10,
         };
         let score = model.total_score(&metrics);
-        assert!(score >= 90.0, "excellent metrics should give A grade, got {score}");
+        assert!(
+            score >= 90.0,
+            "excellent metrics should give A grade, got {score}"
+        );
     }
 
     #[test]
     fn test_default_model_poor_score() {
         let model = DefaultModel::new();
         let metrics = RawMetrics {
-            avg_cyclomatic: 20.0, avg_func_lines: 100.0, comment_ratio: 0.0,
-            max_depth: 10, avg_file_lines: 1500.0, total_files: 5,
+            avg_cyclomatic: 20.0,
+            avg_func_lines: 100.0,
+            comment_ratio: 0.0,
+            max_depth: 10,
+            avg_file_lines: 1500.0,
+            total_files: 5,
         };
         let score = model.total_score(&metrics);
-        assert!(score < 50.0, "poor metrics should give F grade, got {score}");
+        assert!(
+            score < 50.0,
+            "poor metrics should give F grade, got {score}"
+        );
     }
 
     #[test]

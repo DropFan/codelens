@@ -53,11 +53,7 @@ impl JsonOutput {
         self.write_json(result, writer)
     }
 
-    fn write_json<T: serde::Serialize>(
-        &self,
-        data: &T,
-        writer: &mut dyn Write,
-    ) -> Result<()> {
+    fn write_json<T: serde::Serialize>(&self, data: &T, writer: &mut dyn Write) -> Result<()> {
         if self.pretty {
             serde_json::to_writer_pretty(&mut *writer, data)?;
         } else {
@@ -70,8 +66,8 @@ impl JsonOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::Report;
+    use super::*;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;

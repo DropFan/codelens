@@ -150,10 +150,7 @@ mod tests {
         let err = Error::NoSnapshots {
             path: PathBuf::from(".codelens/snapshots"),
         };
-        assert_eq!(
-            err.to_string(),
-            "no snapshots found in .codelens/snapshots"
-        );
+        assert_eq!(err.to_string(), "no snapshots found in .codelens/snapshots");
     }
 
     #[test]

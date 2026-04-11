@@ -322,11 +322,7 @@ impl ConsoleOutput {
         // Header
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
-        writeln!(
-            writer,
-            "{}",
-            " CODELENS - Hotspot Analysis ".bold().cyan()
-        )?;
+        writeln!(writer, "{}", " CODELENS - Hotspot Analysis ".bold().cyan())?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer)?;
 
@@ -394,11 +390,7 @@ impl ConsoleOutput {
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer)?;
 
-        let from_label = report
-            .from
-            .label
-            .as_deref()
-            .unwrap_or_default();
+        let from_label = report.from.label.as_deref().unwrap_or_default();
         let to_label = report.to.label.as_deref().unwrap_or_default();
         writeln!(
             writer,

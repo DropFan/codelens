@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::analyzer::stats::{AnalysisResult, FileStats};
-use crate::insight::Grade;
 use crate::insight::scoring::{HealthDimension, RawMetrics, ScoringModel};
+use crate::insight::Grade;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DimensionScore {
@@ -49,14 +49,15 @@ pub struct HealthReport {
 /// Generate a health report from analysis results using the given scoring model.
 pub fn score(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) -> HealthReport {
     // File-level scoring
-    let mut file_healths: Vec<FileHealth> = result
-        .files
-        .iter()
-        .map(|f| score_file(f, model))
-        .collect();
+    let mut file_healths: Vec<FileHealth> =
+        result.files.iter().map(|f| score_file(f, model)).collect();
 
     // Sort by score ascending (worst first)
-    file_healths.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+    file_healths.sort_by(|a, b| {
+        a.score
+            .partial_cmp(&b.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Directory-level scoring
     let mut dir_files: HashMap<PathBuf, Vec<&FileStats>> = HashMap::new();
@@ -79,7 +80,11 @@ pub fn score(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) ->
         })
         .collect();
 
-    dir_healths.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+    dir_healths.sort_by(|a, b| {
+        a.score
+            .partial_cmp(&b.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Project-level scoring
     let project_metrics = RawMetrics::from_files(&result.files);
@@ -103,7 +108,11 @@ fn score_file(file: &FileStats, model: &dyn ScoringModel) -> FileHealth {
 
     let top_issue = dimensions
         .iter()
-        .min_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|d| d.dimension)
         .unwrap_or(HealthDimension::Complexity);
 
@@ -144,23 +153,53 @@ mod tests {
             FileStats {
                 path: PathBuf::from("src/good.rs"),
                 language: "Rust".to_string(),
-                lines: LineStats { total: 50, code: 40, comment: 5, blank: 5 },
+                lines: LineStats {
+                    total: 50,
+                    code: 40,
+                    comment: 5,
+                    blank: 5,
+                },
                 size: 1000,
-                complexity: Complexity { functions: 3, cyclomatic: 6, max_depth: 2, avg_func_lines: 13.0 },
+                complexity: Complexity {
+                    functions: 3,
+                    cyclomatic: 6,
+                    max_depth: 2,
+                    avg_func_lines: 13.0,
+                },
             },
             FileStats {
                 path: PathBuf::from("src/bad.rs"),
                 language: "Rust".to_string(),
-                lines: LineStats { total: 500, code: 400, comment: 10, blank: 90 },
+                lines: LineStats {
+                    total: 500,
+                    code: 400,
+                    comment: 10,
+                    blank: 90,
+                },
                 size: 10000,
-                complexity: Complexity { functions: 2, cyclomatic: 30, max_depth: 8, avg_func_lines: 200.0 },
+                complexity: Complexity {
+                    functions: 2,
+                    cyclomatic: 30,
+                    max_depth: 8,
+                    avg_func_lines: 200.0,
+                },
             },
             FileStats {
                 path: PathBuf::from("lib/utils.rs"),
                 language: "Rust".to_string(),
-                lines: LineStats { total: 80, code: 60, comment: 10, blank: 10 },
+                lines: LineStats {
+                    total: 80,
+                    code: 60,
+                    comment: 10,
+                    blank: 10,
+                },
                 size: 1500,
-                complexity: Complexity { functions: 5, cyclomatic: 10, max_depth: 3, avg_func_lines: 12.0 },
+                complexity: Complexity {
+                    functions: 5,
+                    cyclomatic: 10,
+                    max_depth: 3,
+                    avg_func_lines: 12.0,
+                },
             },
         ];
         AnalysisResult {
@@ -198,8 +237,16 @@ mod tests {
         let result = make_test_result();
         let model = DefaultModel::new();
         let report = score(&result, &model, 10);
-        let bad = report.worst_files.iter().find(|f| f.path.ends_with("bad.rs")).unwrap();
-        let good = report.worst_files.iter().find(|f| f.path.ends_with("good.rs")).unwrap();
+        let bad = report
+            .worst_files
+            .iter()
+            .find(|f| f.path.ends_with("bad.rs"))
+            .unwrap();
+        let good = report
+            .worst_files
+            .iter()
+            .find(|f| f.path.ends_with("good.rs"))
+            .unwrap();
         assert!(bad.score < good.score);
     }
 
@@ -209,7 +256,11 @@ mod tests {
         let model = DefaultModel::new();
         let report = score(&result, &model, 10);
         assert_eq!(report.by_directory.len(), 2);
-        let dir_paths: Vec<&Path> = report.by_directory.iter().map(|d| d.path.as_path()).collect();
+        let dir_paths: Vec<&Path> = report
+            .by_directory
+            .iter()
+            .map(|d| d.path.as_path())
+            .collect();
         assert!(dir_paths.contains(&Path::new("src")));
         assert!(dir_paths.contains(&Path::new("lib")));
     }
@@ -226,8 +277,11 @@ mod tests {
     #[test]
     fn test_empty_result() {
         let result = AnalysisResult {
-            files: vec![], summary: Summary::default(),
-            elapsed: Duration::from_millis(1), scanned_files: 0, skipped_files: 0,
+            files: vec![],
+            summary: Summary::default(),
+            elapsed: Duration::from_millis(1),
+            scanned_files: 0,
+            skipped_files: 0,
         };
         let model = DefaultModel::new();
         let report = score(&result, &model, 10);
@@ -240,7 +294,11 @@ mod tests {
         let result = make_test_result();
         let model = DefaultModel::new();
         let report = score(&result, &model, 10);
-        let bad = report.worst_files.iter().find(|f| f.path.ends_with("bad.rs")).unwrap();
+        let bad = report
+            .worst_files
+            .iter()
+            .find(|f| f.path.ends_with("bad.rs"))
+            .unwrap();
         assert!(bad.dimensions.iter().any(|d| d.dimension == bad.top_issue));
     }
 }

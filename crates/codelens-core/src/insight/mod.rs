@@ -49,7 +49,12 @@ impl DeltaValue<usize> {
         } else {
             0.0
         };
-        Self { from, to, delta, percent }
+        Self {
+            from,
+            to,
+            delta,
+            percent,
+        }
     }
 
     pub fn signed_delta(&self) -> i64 {
@@ -67,7 +72,12 @@ impl DeltaValue<f64> {
         } else {
             0.0
         };
-        Self { from, to, delta, percent }
+        Self {
+            from,
+            to,
+            delta,
+            percent,
+        }
     }
 }
 

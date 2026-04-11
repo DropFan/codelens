@@ -152,8 +152,8 @@ impl CsvOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::Report;
+    use super::*;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;

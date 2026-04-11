@@ -27,12 +27,8 @@ pub trait OutputFormat: Send + Sync {
     fn extension(&self) -> &'static str;
 
     /// Write the report to the writer.
-    fn write(
-        &self,
-        report: &Report,
-        options: &OutputOptions,
-        writer: &mut dyn Write,
-    ) -> Result<()>;
+    fn write(&self, report: &Report, options: &OutputOptions, writer: &mut dyn Write)
+        -> Result<()>;
 }
 
 /// Output options.

@@ -84,33 +84,57 @@ pub fn save_snapshot(
     git_branch: Option<String>,
 ) -> Result<PathBuf> {
     let dir = snapshots_dir(project_root);
-    fs::create_dir_all(&dir).map_err(|e| Error::FileRead { path: dir.clone(), source: e })?;
+    fs::create_dir_all(&dir).map_err(|e| Error::FileRead {
+        path: dir.clone(),
+        source: e,
+    })?;
 
     let gitignore = project_root.join(".codelens").join(".gitignore");
     if !gitignore.exists() {
-        let _ = fs::write(&gitignore, "# codelens snapshots - uncomment the next line to stop tracking\n# *\n");
+        let _ = fs::write(
+            &gitignore,
+            "# codelens snapshots - uncomment the next line to stop tracking\n# *\n",
+        );
     }
 
     let now = Utc::now();
-    let snapshot = Snapshot { version: 1, timestamp: now, label, git_commit, git_branch, result };
+    let snapshot = Snapshot {
+        version: 1,
+        timestamp: now,
+        label,
+        git_commit,
+        git_branch,
+        result,
+    };
 
     let filename = now.format("%Y-%m-%dT%H:%M:%SZ").to_string() + ".json";
     let path = dir.join(&filename);
     let json = serde_json::to_string_pretty(&snapshot)?;
-    fs::write(&path, json).map_err(|e| Error::FileRead { path: path.clone(), source: e })?;
+    fs::write(&path, json).map_err(|e| Error::FileRead {
+        path: path.clone(),
+        source: e,
+    })?;
 
     Ok(path)
 }
 
 pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
     let dir = snapshots_dir(project_root);
-    if !dir.exists() { return Ok(vec![]); }
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
 
     let mut metas = Vec::new();
-    let entries = fs::read_dir(&dir).map_err(|e| Error::FileRead { path: dir.clone(), source: e })?;
+    let entries = fs::read_dir(&dir).map_err(|e| Error::FileRead {
+        path: dir.clone(),
+        source: e,
+    })?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| Error::FileRead { path: dir.clone(), source: e })?;
+        let entry = entry.map_err(|e| Error::FileRead {
+            path: dir.clone(),
+            source: e,
+        })?;
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "json") {
             if let Ok(meta) = read_snapshot_meta(&path) {
@@ -124,7 +148,10 @@ pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
 }
 
 fn read_snapshot_meta(path: &Path) -> Result<SnapshotMeta> {
-    let content = fs::read_to_string(path).map_err(|e| Error::FileRead { path: path.to_path_buf(), source: e })?;
+    let content = fs::read_to_string(path).map_err(|e| Error::FileRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     let snapshot: Snapshot = serde_json::from_str(&content)?;
     Ok(SnapshotMeta {
         timestamp: snapshot.timestamp,
@@ -135,7 +162,10 @@ fn read_snapshot_meta(path: &Path) -> Result<SnapshotMeta> {
 }
 
 fn load_snapshot(path: &Path) -> Result<Snapshot> {
-    let content = fs::read_to_string(path).map_err(|e| Error::FileRead { path: path.to_path_buf(), source: e })?;
+    let content = fs::read_to_string(path).map_err(|e| Error::FileRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     let snapshot: Snapshot = serde_json::from_str(&content)?;
     Ok(snapshot)
 }
@@ -143,7 +173,9 @@ fn load_snapshot(path: &Path) -> Result<Snapshot> {
 pub fn resolve_snapshot(project_root: &Path, reference: &str) -> Result<PathBuf> {
     let metas = list_snapshots(project_root)?;
     if metas.is_empty() {
-        return Err(Error::NoSnapshots { path: snapshots_dir(project_root) });
+        return Err(Error::NoSnapshots {
+            path: snapshots_dir(project_root),
+        });
     }
 
     if reference == "latest" {
@@ -151,8 +183,15 @@ pub fn resolve_snapshot(project_root: &Path, reference: &str) -> Result<PathBuf>
     }
 
     if let Some(offset_str) = reference.strip_prefix("latest~") {
-        let offset: usize = offset_str.parse().map_err(|_| Error::SnapshotNotFound { id: reference.to_string() })?;
-        let idx = metas.len().checked_sub(1 + offset).ok_or(Error::SnapshotNotFound { id: reference.to_string() })?;
+        let offset: usize = offset_str.parse().map_err(|_| Error::SnapshotNotFound {
+            id: reference.to_string(),
+        })?;
+        let idx = metas
+            .len()
+            .checked_sub(1 + offset)
+            .ok_or(Error::SnapshotNotFound {
+                id: reference.to_string(),
+            })?;
         return Ok(metas[idx].file_path.clone());
     }
 
@@ -164,7 +203,9 @@ pub fn resolve_snapshot(project_root: &Path, reference: &str) -> Result<PathBuf>
         }
     }
 
-    Err(Error::SnapshotNotFound { id: reference.to_string() })
+    Err(Error::SnapshotNotFound {
+        id: reference.to_string(),
+    })
 }
 
 pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendReport> {
@@ -183,8 +224,14 @@ pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendRe
         code: DeltaValue::new(from_summary.lines.code, to_summary.lines.code),
         comment: DeltaValue::new(from_summary.lines.comment, to_summary.lines.comment),
         blank: DeltaValue::new(from_summary.lines.blank, to_summary.lines.blank),
-        complexity: DeltaValue::new(from_summary.complexity.cyclomatic, to_summary.complexity.cyclomatic),
-        functions: DeltaValue::new(from_summary.complexity.functions, to_summary.complexity.functions),
+        complexity: DeltaValue::new(
+            from_summary.complexity.cyclomatic,
+            to_summary.complexity.cyclomatic,
+        ),
+        functions: DeltaValue::new(
+            from_summary.complexity.functions,
+            to_summary.complexity.functions,
+        ),
     };
 
     let mut by_language = Vec::new();
@@ -220,11 +267,26 @@ pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendRe
         }
     }
 
-    by_language.sort_by(|a, b| b.code.signed_delta().unsigned_abs().cmp(&a.code.signed_delta().unsigned_abs()));
+    by_language.sort_by(|a, b| {
+        b.code
+            .signed_delta()
+            .unsigned_abs()
+            .cmp(&a.code.signed_delta().unsigned_abs())
+    });
 
     Ok(TrendReport {
-        from: SnapshotMeta { timestamp: from_snap.timestamp, label: from_snap.label, git_commit: from_snap.git_commit, file_path: from_path },
-        to: SnapshotMeta { timestamp: to_snap.timestamp, label: to_snap.label, git_commit: to_snap.git_commit, file_path: to_path },
+        from: SnapshotMeta {
+            timestamp: from_snap.timestamp,
+            label: from_snap.label,
+            git_commit: from_snap.git_commit,
+            file_path: from_path,
+        },
+        to: SnapshotMeta {
+            timestamp: to_snap.timestamp,
+            label: to_snap.label,
+            git_commit: to_snap.git_commit,
+            file_path: to_path,
+        },
         delta,
         by_language,
     })
@@ -242,7 +304,12 @@ mod tests {
             .map(|i| FileStats {
                 path: PathBuf::from(format!("file_{i}.rs")),
                 language: "Rust".to_string(),
-                lines: LineStats { total: code / files.max(1), code: code / files.max(1), comment: 0, blank: 0 },
+                lines: LineStats {
+                    total: code / files.max(1),
+                    code: code / files.max(1),
+                    comment: 0,
+                    blank: 0,
+                },
                 size: 1000,
                 complexity: Default::default(),
             })
@@ -279,7 +346,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         save_snapshot(dir.path(), make_result(10, 1), None, None, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100)); // ensure different second in timestamp
-        save_snapshot(dir.path(), make_result(20, 2), Some("second".into()), None, None).unwrap();
+        save_snapshot(
+            dir.path(),
+            make_result(20, 2),
+            Some("second".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let path = resolve_snapshot(dir.path(), "latest").unwrap();
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("\"scanned_files\": 2"));
@@ -288,9 +362,23 @@ mod tests {
     #[test]
     fn test_resolve_latest_offset() {
         let dir = TempDir::new().unwrap();
-        save_snapshot(dir.path(), make_result(10, 1), Some("first".into()), None, None).unwrap();
+        save_snapshot(
+            dir.path(),
+            make_result(10, 1),
+            Some("first".into()),
+            None,
+            None,
+        )
+        .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        save_snapshot(dir.path(), make_result(20, 2), Some("second".into()), None, None).unwrap();
+        save_snapshot(
+            dir.path(),
+            make_result(20, 2),
+            Some("second".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let path = resolve_snapshot(dir.path(), "latest~1").unwrap();
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("\"scanned_files\": 1"));
@@ -306,9 +394,23 @@ mod tests {
     #[test]
     fn test_diff() {
         let dir = TempDir::new().unwrap();
-        save_snapshot(dir.path(), make_result(100, 5), Some("v1".into()), None, None).unwrap();
+        save_snapshot(
+            dir.path(),
+            make_result(100, 5),
+            Some("v1".into()),
+            None,
+            None,
+        )
+        .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        save_snapshot(dir.path(), make_result(150, 7), Some("v2".into()), None, None).unwrap();
+        save_snapshot(
+            dir.path(),
+            make_result(150, 7),
+            Some("v2".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let report = diff(dir.path(), "latest~1", "latest").unwrap();
         assert_eq!(report.from.label.as_deref(), Some("v1"));
         assert_eq!(report.to.label.as_deref(), Some("v2"));
