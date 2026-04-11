@@ -1,13 +1,13 @@
 //! Statistics data structures.
 
 use indexmap::IndexMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 /// Statistics for a single file.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileStats {
     /// File path.
     pub path: PathBuf,
@@ -22,7 +22,7 @@ pub struct FileStats {
 }
 
 /// Line count statistics.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LineStats {
     /// Total number of lines.
     pub total: usize,
@@ -69,7 +69,7 @@ impl std::ops::AddAssign for LineStats {
 }
 
 /// Code complexity metrics.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Complexity {
     /// Number of functions/methods.
     pub functions: usize,
@@ -91,7 +91,7 @@ impl Complexity {
 }
 
 /// File size distribution buckets.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SizeDistribution {
     /// Files < 1KB
     pub tiny: usize,
@@ -119,7 +119,7 @@ impl SizeDistribution {
 }
 
 /// Statistics grouped by language.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LanguageSummary {
     /// Number of files.
     pub files: usize,
@@ -179,7 +179,7 @@ pub struct GitInfo {
 }
 
 /// Overall analysis summary.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Summary {
     /// Total number of files.
     pub total_files: usize,
@@ -231,7 +231,7 @@ impl Summary {
 }
 
 /// Complete analysis result.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     /// All file statistics.
     pub files: Vec<FileStats>,
@@ -257,7 +257,6 @@ mod duration_serde {
         duration.as_secs_f64().serialize(serializer)
     }
 
-    #[allow(dead_code)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
     where
         D: Deserializer<'de>,
