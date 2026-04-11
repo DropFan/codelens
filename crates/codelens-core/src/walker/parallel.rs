@@ -86,88 +86,101 @@ impl ParallelWalker {
             builder.add_custom_ignore_filename(pattern);
         }
 
-        // Start parallel walk
+        // Start parallel walk with concurrent consumer.
+        // The consumer MUST run in parallel with `run()` because `run()` blocks
+        // until all walker threads finish. With a bounded channel, walker threads
+        // block on send when the channel is full. If the consumer only starts
+        // after `run()` returns, this creates a deadlock when results exceed the
+        // channel capacity.
         let filter_clone = Arc::clone(&filter);
         let analyzer_clone = Arc::clone(&analyzer);
 
-        builder.build_parallel().run(|| {
-            let tx = tx.clone();
-            let filter = Arc::clone(&filter_clone);
-            let analyzer = Arc::clone(&analyzer_clone);
-            // Per-thread reusable buffer (64KB initial capacity)
-            let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+        std::thread::scope(|s| {
+            // Spawn consumer thread that drains results while producers are running
+            let consumer = s.spawn(|| {
+                for result in &rx {
+                    match result {
+                        WalkResult::File(stats) => on_file(stats),
+                        WalkResult::Skipped(path) => on_skip(&path),
+                    }
+                }
+            });
 
-            Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(_) => return WalkState::Continue,
-                };
+            // Run producers (blocks until all walker threads finish)
+            builder.build_parallel().run(|| {
+                let tx = tx.clone();
+                let filter = Arc::clone(&filter_clone);
+                let analyzer = Arc::clone(&analyzer_clone);
+                // Per-thread reusable buffer (64KB initial capacity)
+                let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
 
-                let path = entry.path();
-                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => return WalkState::Continue,
+                    };
 
-                // Apply custom filter
-                if !filter.should_include(path, is_dir) {
+                    let path = entry.path();
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+                    // Apply custom filter
+                    if !filter.should_include(path, is_dir) {
+                        if is_dir {
+                            return WalkState::Skip;
+                        }
+                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                        return WalkState::Continue;
+                    }
+
+                    // Skip directories (they're handled by the walker)
                     if is_dir {
-                        return WalkState::Skip;
+                        return WalkState::Continue;
                     }
-                    let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
-                    return WalkState::Continue;
-                }
 
-                // Skip directories (they're handled by the walker)
-                if is_dir {
-                    return WalkState::Continue;
-                }
-
-                // Skip non-files
-                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    return WalkState::Continue;
-                }
-
-                // Read file into reusable buffer
-                buf.clear();
-                match std::fs::File::open(path).and_then(|mut f| {
-                    if let Ok(meta) = f.metadata() {
-                        buf.reserve(meta.len() as usize);
+                    // Skip non-files
+                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        return WalkState::Continue;
                     }
-                    std::io::Read::read_to_end(&mut f, &mut buf)
-                }) {
-                    Ok(_) => match analyzer.analyze_from_bytes(path, &buf) {
-                        Ok(Some(stats)) => {
-                            let _ = tx.send(WalkResult::File(stats));
+
+                    // Read file into reusable buffer
+                    buf.clear();
+                    match std::fs::File::open(path).and_then(|mut f| {
+                        if let Ok(meta) = f.metadata() {
+                            buf.reserve(meta.len() as usize);
                         }
-                        Ok(None) => {
-                            let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
-                        }
+                        std::io::Read::read_to_end(&mut f, &mut buf)
+                    }) {
+                        Ok(_) => match analyzer.analyze_from_bytes(path, &buf) {
+                            Ok(Some(stats)) => {
+                                let _ = tx.send(WalkResult::File(stats));
+                            }
+                            Ok(None) => {
+                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                            }
+                            Err(_) => {
+                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                            }
+                        },
                         Err(_) => {
                             let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
                         }
-                    },
-                    Err(_) => {
-                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
                     }
-                }
 
-                // Shrink buffer if it grew too large from a single file
-                if buf.capacity() > 1_048_576 {
-                    buf = Vec::with_capacity(64 * 1024);
-                }
+                    // Shrink buffer if it grew too large from a single file
+                    if buf.capacity() > 1_048_576 {
+                        buf = Vec::with_capacity(64 * 1024);
+                    }
 
-                WalkState::Continue
-            })
+                    WalkState::Continue
+                })
+            });
+
+            // Close the sender so consumer finishes when all results are drained
+            drop(tx);
+
+            // Wait for consumer to finish
+            consumer.join().expect("consumer thread panicked");
         });
-
-        // Close the sender
-        drop(tx);
-
-        // Collect results
-        for result in rx {
-            match result {
-                WalkResult::File(stats) => on_file(stats),
-                WalkResult::Skipped(path) => on_skip(&path),
-            }
-        }
 
         Ok(())
     }
@@ -233,5 +246,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_walk_many_files_no_deadlock() {
+        // Regression test: >1000 files previously caused deadlock because
+        // the bounded channel (capacity 1000) filled up while run() blocked
+        // waiting for threads, and the consumer only started after run().
+        let dir = TempDir::new().unwrap();
+        let file_count = 1500;
+        for i in 0..file_count {
+            std::fs::write(dir.path().join(format!("file_{i}.rs")), "fn main() {}\n").unwrap();
+        }
+
+        let walker = ParallelWalker::default();
+        let registry =
+            Arc::new(crate::language::LanguageRegistry::with_builtin().unwrap());
+        let analyzer = Arc::new(FileAnalyzer::new(
+            registry,
+            &crate::config::Config::default(),
+        ));
+        let filter = Arc::new(AllowAll);
+
+        let analyzed = AtomicUsize::new(0);
+        walker
+            .walk_and_analyze(
+                dir.path(),
+                analyzer,
+                filter,
+                |_| {
+                    analyzed.fetch_add(1, Ordering::SeqCst);
+                },
+                |_| {},
+            )
+            .unwrap();
+
+        assert_eq!(analyzed.load(Ordering::SeqCst), file_count);
     }
 }
