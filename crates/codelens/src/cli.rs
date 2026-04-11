@@ -64,6 +64,16 @@ pub enum Command {
         \"latest~N\" (Nth before latest), or date prefix like \"2025-01-01\"."
     )]
     Trend(TrendArgs),
+    /// Estimate development cost using pluggable models.
+    #[command(
+        long_about = "Estimate development cost, schedule, and team size. Built-in models:\n\
+        - cocomo-basic:  COCOMO I Basic (Boehm 1981)\n\
+        - cocomo2:       COCOMO II Post-Architecture (Boehm 2000)\n\
+        - putnam:        Putnam/SLIM Rayleigh curve model\n\
+        - locomo:        LOCOMO LLM Output Cost Model\n\n\
+        All parameters are configurable. Shows per-language breakdown."
+    )]
+    Estimate(EstimateArgs),
 }
 
 #[derive(Args, Debug)]
@@ -120,6 +130,79 @@ pub struct TrendArgs {
 
     #[command(flatten)]
     pub output: OutputArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct EstimateArgs {
+    /// Directories to analyze.
+    #[arg(default_value = ".")]
+    pub paths: Vec<PathBuf>,
+
+    /// Estimation model.
+    #[arg(long, value_enum, default_value = "cocomo-basic")]
+    pub model: ModelArg,
+
+    // ── Shared cost params ──
+    /// Average annual salary in USD.
+    #[arg(long, default_value = "56286")]
+    pub avg_wage: f64,
+    /// Overhead multiplier.
+    #[arg(long, default_value = "2.4")]
+    pub overhead: f64,
+
+    // ── COCOMO Basic params ──
+    /// COCOMO project type.
+    #[arg(long, value_enum, default_value = "organic")]
+    pub project_type: ProjectTypeArg,
+    /// Effort Adjustment Factor (COCOMO).
+    #[arg(long, default_value = "1.0")]
+    pub eaf: f64,
+
+    // ── COCOMO II params ──
+    /// COCOMO II scale factor sum (default: 18.97 = all nominal).
+    #[arg(long)]
+    pub sf_sum: Option<f64>,
+
+    // ── Putnam params ──
+    /// Putnam productivity constant Ck.
+    #[arg(long, default_value = "8000")]
+    pub ck: f64,
+    /// Putnam manpower buildup index D0.
+    #[arg(long, default_value = "15")]
+    pub d0: f64,
+
+    // ── LOCOMO params ──
+    /// LLM input price per 1M tokens.
+    #[arg(long, default_value = "3.0")]
+    pub llm_input_price: f64,
+    /// LLM output price per 1M tokens.
+    #[arg(long, default_value = "15.0")]
+    pub llm_output_price: f64,
+    /// LLM tokens per second.
+    #[arg(long, default_value = "50")]
+    pub llm_tps: f64,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, Default)]
+pub enum ModelArg {
+    #[default]
+    CocomoBasic,
+    Cocomo2,
+    Putnam,
+    Locomo,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, Default)]
+pub enum ProjectTypeArg {
+    #[default]
+    Organic,
+    SemiDetached,
+    Embedded,
 }
 
 /// Filter options.
@@ -220,6 +303,10 @@ pub struct AdvancedArgs {
     /// List supported languages.
     #[arg(long)]
     pub list_languages: bool,
+
+    /// Show cost estimation in analysis output.
+    #[arg(long)]
+    pub show_estimate: bool,
 }
 
 /// Output format argument.
@@ -273,4 +360,12 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens trend\x1b[0m                  \x1b[2m# Compare latest two snapshots\x1b[0m
   \x1b[1;36mcodelens trend --list\x1b[0m           \x1b[2m# List all snapshots\x1b[0m
   \x1b[1;36mcodelens trend --compare latest~2 latest\x1b[0m  \x1b[2m# Compare specific snapshots\x1b[0m
+
+\x1b[1;32mEstimate\x1b[0m \x1b[2m(cost estimation):\x1b[0m
+  \x1b[1;36mcodelens estimate .\x1b[0m                       \x1b[2m# COCOMO Basic (default)\x1b[0m
+  \x1b[1;36mcodelens estimate . --model cocomo2\x1b[0m        \x1b[2m# COCOMO II model\x1b[0m
+  \x1b[1;36mcodelens estimate . --model putnam --ck 11000\x1b[0m  \x1b[2m# Putnam with custom Ck\x1b[0m
+  \x1b[1;36mcodelens estimate . --model locomo\x1b[0m         \x1b[2m# LLM generation cost\x1b[0m
+  \x1b[1;36mcodelens estimate . --avg-wage 100000\x1b[0m      \x1b[2m# Custom salary\x1b[0m
+  \x1b[1;36mcodelens --show-estimate\x1b[0m                   \x1b[2m# Append estimation to analysis\x1b[0m
 ";

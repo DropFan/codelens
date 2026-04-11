@@ -48,6 +48,7 @@ fn run() -> Result<()> {
             cli::Command::Health(args) => run_health(args),
             cli::Command::Hotspot(args) => run_hotspot(args),
             cli::Command::Trend(args) => run_trend(args),
+            cli::Command::Estimate(args) => run_estimate(args),
         };
     }
 
@@ -93,6 +94,32 @@ fn run() -> Result<()> {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
         formatter.write(&report, &output_options, &mut writer)?;
+    }
+
+    if cli.advanced.show_estimate {
+        let cost_config = codelens_core::CostConfig::default();
+        let model = codelens_core::CocomoBasicModel::default();
+        if let Report::Analysis(ref analysis) = report {
+            let est_report = codelens_core::insight::estimation::estimate(
+                &analysis.summary,
+                &model,
+                &cost_config,
+            );
+            let est = Report::Estimation(est_report);
+            if let Some(ref path) = cli.output.output_file {
+                let file = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(path)
+                    .context("Failed to append estimation")?;
+                let mut writer = BufWriter::new(file);
+                formatter.write(&est, &output_options, &mut writer)?;
+                writer.flush()?;
+            } else {
+                let stdout = io::stdout();
+                let mut writer = stdout.lock();
+                formatter.write(&est, &output_options, &mut writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -279,6 +306,49 @@ fn run_trend(args: &cli::TrendArgs) -> Result<()> {
     write_report(Report::Trend(report), &args.output)
 }
 
+fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
+    let config = build_config_from_args(&args.filter, &args.output)?;
+    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+
+    let cost_config = codelens_core::CostConfig {
+        average_wage: args.avg_wage,
+        overhead: args.overhead,
+    };
+
+    let model: Box<dyn codelens_core::EstimationModel> = match args.model {
+        cli::ModelArg::CocomoBasic => Box::new(codelens_core::CocomoBasicModel {
+            project_type: args.project_type.into(),
+            eaf: args.eaf,
+        }),
+        cli::ModelArg::Cocomo2 => {
+            let mut m = codelens_core::CocomoIIModel::default();
+            if let Some(sf) = args.sf_sum {
+                let per_factor = sf / 5.0;
+                m.scale_factors = [per_factor; 5];
+            }
+            m.eaf = args.eaf;
+            Box::new(m)
+        }
+        cli::ModelArg::Putnam => Box::new(codelens_core::PutnamModel {
+            ck: args.ck,
+            d0: args.d0,
+        }),
+        cli::ModelArg::Locomo => Box::new(codelens_core::LocomoModel {
+            input_price_per_m: args.llm_input_price,
+            output_price_per_m: args.llm_output_price,
+            tokens_per_second: args.llm_tps,
+            ..Default::default()
+        }),
+    };
+
+    let report = codelens_core::insight::estimation::estimate(
+        &result.summary,
+        model.as_ref(),
+        &cost_config,
+    );
+    write_report(Report::Estimation(report), &args.output)
+}
+
 fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
     let output_options = OutputOptions {
         summary_only: output_args.summary,
@@ -349,6 +419,16 @@ impl From<SortByArg> for codelens_core::config::SortBy {
             SortByArg::Code => Self::Code,
             SortByArg::Name => Self::Name,
             SortByArg::Size => Self::Size,
+        }
+    }
+}
+
+impl From<cli::ProjectTypeArg> for codelens_core::ProjectType {
+    fn from(arg: cli::ProjectTypeArg) -> Self {
+        match arg {
+            cli::ProjectTypeArg::Organic => Self::Organic,
+            cli::ProjectTypeArg::SemiDetached => Self::SemiDetached,
+            cli::ProjectTypeArg::Embedded => Self::Embedded,
         }
     }
 }
