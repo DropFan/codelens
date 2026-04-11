@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(result.len(), 2);
         let main = result
             .iter()
-            .find(|f| f.path == PathBuf::from("src/main.rs"))
+            .find(|f| f.path == Path::new("src/main.rs"))
             .unwrap();
         assert_eq!(main.commits, 1);
         assert_eq!(main.lines_added, 5);
@@ -247,7 +247,7 @@ mod tests {
         let result = parse_numstat(input);
         let png = result
             .iter()
-            .find(|f| f.path == PathBuf::from("image.png"))
+            .find(|f| f.path == Path::new("image.png"))
             .unwrap();
         assert_eq!(png.commits, 1);
         assert_eq!(png.lines_added, 0);

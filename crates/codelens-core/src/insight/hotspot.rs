@@ -252,7 +252,7 @@ mod tests {
         assert!(report
             .files
             .iter()
-            .all(|f| f.path != PathBuf::from("deleted.rs")));
+            .all(|f| f.path != std::path::Path::new("deleted.rs")));
     }
 
     #[test]
