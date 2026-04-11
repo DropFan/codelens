@@ -139,7 +139,7 @@ pub struct EstimateArgs {
     pub paths: Vec<PathBuf>,
 
     /// Estimation model.
-    #[arg(long, value_enum, default_value = "cocomo-basic")]
+    #[arg(long, value_enum, default_value = "all")]
     pub model: ModelArg,
 
     // ── Shared cost params ──
@@ -190,12 +190,12 @@ pub struct EstimateArgs {
 
 #[derive(ValueEnum, Clone, Copy, Debug, Default)]
 pub enum ModelArg {
-    #[default]
     CocomoBasic,
     Cocomo2,
     Putnam,
     Locomo,
     /// Run all models and show comparison table.
+    #[default]
     All,
 }
 
