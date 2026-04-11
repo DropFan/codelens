@@ -200,34 +200,313 @@ impl ConsoleOutput {
 
     fn write_health(
         &self,
-        _report: &crate::insight::health::HealthReport,
-        _options: &OutputOptions,
+        report: &crate::insight::health::HealthReport,
+        options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "Health report output: use --format json for full data")?;
+        // Header
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(
+            writer,
+            "{}",
+            " CODELENS - Code Health Report ".bold().cyan()
+        )?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+
+        // Project score and grade
+        let grade_color = Self::grade_color(report.grade);
+        let grade_str = report.grade.to_string();
+        let colored_grade = match grade_color {
+            Color::Green => grade_str.green().bold().to_string(),
+            Color::Cyan => grade_str.cyan().bold().to_string(),
+            Color::Yellow => grade_str.yellow().bold().to_string(),
+            Color::Red => grade_str.red().bold().to_string(),
+            Color::DarkRed => grade_str.red().bold().to_string(),
+            _ => grade_str.bold().to_string(),
+        };
+        writeln!(
+            writer,
+            "  Project Score: {}  Grade: {}",
+            format!("{:.1}", report.score).bold(),
+            colored_grade,
+        )?;
+        writeln!(writer)?;
+
+        // Dimensions table
+        let mut dim_table = Table::new();
+        dim_table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        dim_table.set_header(vec![
+            Cell::new("Dimension").add_attribute(Attribute::Bold),
+            Cell::new("Score").add_attribute(Attribute::Bold),
+            Cell::new("Grade").add_attribute(Attribute::Bold),
+        ]);
+        for dim in &report.dimensions {
+            dim_table.add_row(vec![
+                Cell::new(dim.dimension.to_string()),
+                Cell::new(format!("{:.1}", dim.score)),
+                Cell::new(dim.grade.to_string()).fg(Self::grade_color(dim.grade)),
+            ]);
+        }
+        writeln!(writer, "{dim_table}")?;
+        writeln!(writer)?;
+
+        if !options.summary_only {
+            // By Directory table
+            if !report.by_directory.is_empty() {
+                writeln!(writer, "{}", "By Directory".bold())?;
+                writeln!(writer)?;
+                let mut dir_table = Table::new();
+                dir_table
+                    .load_preset(UTF8_FULL)
+                    .set_content_arrangement(ContentArrangement::Dynamic);
+                dir_table.set_header(vec![
+                    Cell::new("Directory").add_attribute(Attribute::Bold),
+                    Cell::new("Score").add_attribute(Attribute::Bold),
+                    Cell::new("Grade").add_attribute(Attribute::Bold),
+                    Cell::new("Files").add_attribute(Attribute::Bold),
+                ]);
+                for dir in &report.by_directory {
+                    dir_table.add_row(vec![
+                        Cell::new(dir.path.display().to_string()).fg(Color::Cyan),
+                        Cell::new(format!("{:.1}", dir.score)),
+                        Cell::new(dir.grade.to_string()).fg(Self::grade_color(dir.grade)),
+                        Cell::new(Self::format_number(dir.file_count)),
+                    ]);
+                }
+                writeln!(writer, "{dir_table}")?;
+                writeln!(writer)?;
+            }
+
+            // Worst Files table
+            if !report.worst_files.is_empty() {
+                writeln!(writer, "{}", "Worst Files".bold())?;
+                writeln!(writer)?;
+                let mut file_table = Table::new();
+                file_table
+                    .load_preset(UTF8_FULL)
+                    .set_content_arrangement(ContentArrangement::Dynamic);
+                file_table.set_header(vec![
+                    Cell::new("File").add_attribute(Attribute::Bold),
+                    Cell::new("Score").add_attribute(Attribute::Bold),
+                    Cell::new("Grade").add_attribute(Attribute::Bold),
+                    Cell::new("Top Issue").add_attribute(Attribute::Bold),
+                ]);
+                for file in &report.worst_files {
+                    file_table.add_row(vec![
+                        Cell::new(file.path.display().to_string()).fg(Color::Cyan),
+                        Cell::new(format!("{:.1}", file.score)),
+                        Cell::new(file.grade.to_string()).fg(Self::grade_color(file.grade)),
+                        Cell::new(file.top_issue.to_string()).fg(Color::Yellow),
+                    ]);
+                }
+                writeln!(writer, "{file_table}")?;
+                writeln!(writer)?;
+            }
+        }
+
         Ok(())
     }
 
     fn write_hotspot(
         &self,
-        _report: &crate::insight::hotspot::HotspotReport,
+        report: &crate::insight::hotspot::HotspotReport,
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        use crate::insight::hotspot::RiskLevel;
+
+        // Header
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(
             writer,
-            "Hotspot report output: use --format json for full data"
+            "{}",
+            " CODELENS - Hotspot Analysis ".bold().cyan()
         )?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+
+        writeln!(
+            writer,
+            "  Period: {}  Total Commits: {}",
+            report.since.bold(),
+            Self::format_number(report.total_commits).bold()
+        )?;
+        writeln!(writer)?;
+
+        if report.files.is_empty() {
+            writeln!(writer, "  No hotspots found.")?;
+            return Ok(());
+        }
+
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("File").add_attribute(Attribute::Bold),
+            Cell::new("Chg").add_attribute(Attribute::Bold),
+            Cell::new("+/-").add_attribute(Attribute::Bold),
+            Cell::new("CC").add_attribute(Attribute::Bold),
+            Cell::new("Score").add_attribute(Attribute::Bold),
+            Cell::new("Risk").add_attribute(Attribute::Bold),
+        ]);
+
+        for file in &report.files {
+            let risk_color = match file.risk {
+                RiskLevel::High => Color::Red,
+                RiskLevel::Medium => Color::Yellow,
+                RiskLevel::Low => Color::Green,
+            };
+            table.add_row(vec![
+                Cell::new(file.path.display().to_string()).fg(Color::Cyan),
+                Cell::new(Self::format_number(file.churn.commits)),
+                Cell::new(format!(
+                    "+{}/-{}",
+                    file.churn.lines_added, file.churn.lines_deleted
+                )),
+                Cell::new(file.complexity.cyclomatic.to_string()),
+                Cell::new(format!("{:.2}", file.hotspot_score)),
+                Cell::new(file.risk.to_string()).fg(risk_color),
+            ]);
+        }
+
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+
         Ok(())
     }
 
     fn write_trend(
         &self,
-        _report: &crate::insight::trend::TrendReport,
+        report: &crate::insight::trend::TrendReport,
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "Trend report output: use --format json for full data")?;
+        // Header
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer, "{}", " CODELENS - Trend Report ".bold().cyan())?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+
+        let from_label = report
+            .from
+            .label
+            .as_deref()
+            .unwrap_or_default();
+        let to_label = report.to.label.as_deref().unwrap_or_default();
+        writeln!(
+            writer,
+            "  {} {} {}  {} {} {}",
+            "From:".bold(),
+            report.from.timestamp.format("%Y-%m-%d"),
+            from_label,
+            "To:".bold(),
+            report.to.timestamp.format("%Y-%m-%d"),
+            to_label,
+        )?;
+        writeln!(writer)?;
+
+        // Delta table
+        let mut delta_table = Table::new();
+        delta_table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        delta_table.set_header(vec![
+            Cell::new("Metric").add_attribute(Attribute::Bold),
+            Cell::new("Before").add_attribute(Attribute::Bold),
+            Cell::new("After").add_attribute(Attribute::Bold),
+            Cell::new("Delta").add_attribute(Attribute::Bold),
+            Cell::new("Change").add_attribute(Attribute::Bold),
+        ]);
+
+        let deltas = [
+            ("Files", &report.delta.files),
+            ("Lines", &report.delta.lines),
+            ("Code", &report.delta.code),
+            ("Comments", &report.delta.comment),
+            ("Blank", &report.delta.blank),
+            ("Complexity", &report.delta.complexity),
+            ("Functions", &report.delta.functions),
+        ];
+
+        for (name, dv) in &deltas {
+            let signed = dv.signed_delta();
+            let delta_color = if signed > 0 {
+                Color::Green
+            } else if signed < 0 {
+                Color::Red
+            } else {
+                Color::White
+            };
+            let sign = if signed > 0 { "+" } else { "" };
+            delta_table.add_row(vec![
+                Cell::new(*name),
+                Cell::new(Self::format_number(dv.from)),
+                Cell::new(Self::format_number(dv.to)),
+                Cell::new(format!("{sign}{signed}")).fg(delta_color),
+                Cell::new(format!("{:+.1}%", dv.percent)).fg(delta_color),
+            ]);
+        }
+
+        writeln!(writer, "{delta_table}")?;
+        writeln!(writer)?;
+
+        // By Language table
+        if !report.by_language.is_empty() {
+            writeln!(writer, "{}", "By Language".bold())?;
+            writeln!(writer)?;
+            let mut lang_table = Table::new();
+            lang_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            lang_table.set_header(vec![
+                Cell::new("Language").add_attribute(Attribute::Bold),
+                Cell::new("Status").add_attribute(Attribute::Bold),
+                Cell::new("Before").add_attribute(Attribute::Bold),
+                Cell::new("After").add_attribute(Attribute::Bold),
+                Cell::new("Delta").add_attribute(Attribute::Bold),
+            ]);
+
+            for lang in &report.by_language {
+                let signed = lang.code.signed_delta();
+                let delta_color = if signed > 0 {
+                    Color::Green
+                } else if signed < 0 {
+                    Color::Red
+                } else {
+                    Color::White
+                };
+                let sign = if signed > 0 { "+" } else { "" };
+                lang_table.add_row(vec![
+                    Cell::new(&lang.language).fg(Color::Cyan),
+                    Cell::new(lang.status.to_string()),
+                    Cell::new(Self::format_number(lang.code.from)),
+                    Cell::new(Self::format_number(lang.code.to)),
+                    Cell::new(format!("{sign}{signed}")).fg(delta_color),
+                ]);
+            }
+
+            writeln!(writer, "{lang_table}")?;
+            writeln!(writer)?;
+        }
+
         Ok(())
+    }
+
+    fn grade_color(grade: crate::insight::Grade) -> Color {
+        use crate::insight::Grade;
+        match grade {
+            Grade::A => Color::Green,
+            Grade::B => Color::Cyan,
+            Grade::C => Color::Yellow,
+            Grade::D => Color::Red,
+            Grade::F => Color::DarkRed,
+        }
     }
 }
