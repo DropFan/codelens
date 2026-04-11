@@ -52,7 +52,7 @@ impl ScoringModel for DefaultModel {
             HealthDimension::FuncSize => score_func_size(metrics.avg_func_lines),
             HealthDimension::CommentRatio => score_comment_ratio(metrics.comment_ratio),
             HealthDimension::FileSize => score_file_size(metrics.avg_file_lines),
-            HealthDimension::NestingDepth => score_nesting(metrics.max_depth),
+            HealthDimension::NestingDepth => score_nesting(metrics.depth),
         }
     }
 }
@@ -212,7 +212,7 @@ mod tests {
             avg_cyclomatic: 2.0,
             avg_func_lines: 10.0,
             comment_ratio: 0.15,
-            max_depth: 2,
+            depth: 2,
             avg_file_lines: 100.0,
             total_files: 10,
         };
@@ -230,7 +230,7 @@ mod tests {
             avg_cyclomatic: 20.0,
             avg_func_lines: 100.0,
             comment_ratio: 0.0,
-            max_depth: 10,
+            depth: 10,
             avg_file_lines: 1500.0,
             total_files: 5,
         };

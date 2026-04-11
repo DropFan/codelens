@@ -38,7 +38,9 @@ pub struct RawMetrics {
     pub avg_cyclomatic: f64,
     pub avg_func_lines: f64,
     pub comment_ratio: f64,
-    pub max_depth: usize,
+    /// For single file: the file's max nesting depth.
+    /// For multiple files: P90 percentile of all files' max depths (robust against outliers).
+    pub depth: usize,
     pub avg_file_lines: f64,
     pub total_files: usize,
 }
@@ -59,7 +61,7 @@ impl RawMetrics {
             avg_cyclomatic,
             avg_func_lines: file.complexity.avg_func_lines,
             comment_ratio,
-            max_depth: file.complexity.max_depth,
+            depth: file.complexity.max_depth,
             avg_file_lines: file.lines.total as f64,
             total_files: 1,
         }
@@ -74,11 +76,9 @@ impl RawMetrics {
         let total_code: usize = files.iter().map(|f| f.lines.code).sum();
         let total_comment: usize = files.iter().map(|f| f.lines.comment).sum();
         let total_lines: usize = files.iter().map(|f| f.lines.total).sum();
-        let max_depth = files
-            .iter()
-            .map(|f| f.complexity.max_depth)
-            .max()
-            .unwrap_or(0);
+
+        let mut depths: Vec<usize> = files.iter().map(|f| f.complexity.max_depth).collect();
+        let depth = percentile_90(&mut depths);
 
         let avg_cyclomatic = if total_functions > 0 {
             total_cyclomatic as f64 / total_functions as f64
@@ -101,7 +101,7 @@ impl RawMetrics {
             avg_cyclomatic,
             avg_func_lines,
             comment_ratio,
-            max_depth,
+            depth,
             avg_file_lines,
             total_files: files.len(),
         }
@@ -116,11 +116,9 @@ impl RawMetrics {
         let total_code: usize = files.iter().map(|f| f.lines.code).sum();
         let total_comment: usize = files.iter().map(|f| f.lines.comment).sum();
         let total_lines: usize = files.iter().map(|f| f.lines.total).sum();
-        let max_depth = files
-            .iter()
-            .map(|f| f.complexity.max_depth)
-            .max()
-            .unwrap_or(0);
+
+        let mut depths: Vec<usize> = files.iter().map(|f| f.complexity.max_depth).collect();
+        let depth = percentile_90(&mut depths);
 
         let avg_cyclomatic = if total_functions > 0 {
             total_cyclomatic as f64 / total_functions as f64
@@ -143,11 +141,22 @@ impl RawMetrics {
             avg_cyclomatic,
             avg_func_lines,
             comment_ratio,
-            max_depth,
+            depth,
             avg_file_lines,
             total_files: files.len(),
         }
     }
+}
+
+/// Compute the P90 percentile of a mutable slice (sorts in place).
+/// For a single element, returns that element. For empty, returns 0.
+fn percentile_90(values: &mut [usize]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    let idx = ((values.len() as f64 - 1.0) * 0.9).ceil() as usize;
+    values[idx.min(values.len() - 1)]
 }
 
 pub trait ScoringModel: Send + Sync {
@@ -207,7 +216,7 @@ mod tests {
         let metrics = RawMetrics::from_file(&file);
         assert!((metrics.avg_cyclomatic - 3.0).abs() < 0.01);
         assert!((metrics.comment_ratio - 0.125).abs() < 0.01);
-        assert_eq!(metrics.max_depth, 3);
+        assert_eq!(metrics.depth, 3);
     }
 
     #[test]
@@ -257,7 +266,8 @@ mod tests {
         let metrics = RawMetrics::from_files(&files);
         assert_eq!(metrics.total_files, 2);
         assert!((metrics.avg_cyclomatic - 3.0).abs() < 0.01);
-        assert_eq!(metrics.max_depth, 5);
+        // P90 of [3, 5] = 5 (only 2 elements, P90 picks the higher)
+        assert_eq!(metrics.depth, 5);
         assert!((metrics.avg_file_lines - 75.0).abs() < 0.01);
     }
 
@@ -265,5 +275,46 @@ mod tests {
     fn test_health_dimension_display() {
         assert_eq!(HealthDimension::Complexity.to_string(), "Complexity");
         assert_eq!(HealthDimension::CommentRatio.to_string(), "Comment %");
+    }
+
+    #[test]
+    fn test_percentile_90_empty() {
+        assert_eq!(super::percentile_90(&mut []), 0);
+    }
+
+    #[test]
+    fn test_percentile_90_single() {
+        assert_eq!(super::percentile_90(&mut [7]), 7);
+    }
+
+    #[test]
+    fn test_percentile_90_filters_outlier() {
+        // 10 files: 9 with depth 3, 1 outlier with depth 15
+        // P90 index = ceil(9 * 0.9) = 9 → sorted[9] = 15
+        // But with 10 elements: ceil((10-1)*0.9) = ceil(8.1) = 9 → sorted[9] = 15
+        // To actually filter: need more normal values.
+        // 20 files: 18 with depth 3, 2 outliers with depth 15
+        let mut depths = vec![3; 18];
+        depths.extend_from_slice(&[15, 15]);
+        // P90 index = ceil(19 * 0.9) = ceil(17.1) = 18 → sorted[18] = 15
+        // Still picks outlier. Need 90%+ to be normal.
+        // 20 files: 19 with depth 3, 1 outlier with depth 15
+        let mut depths = vec![3; 19];
+        depths.push(15);
+        // P90 index = ceil(19 * 0.9) = ceil(17.1) = 18 → sorted[18] = 3
+        assert_eq!(super::percentile_90(&mut depths), 3);
+    }
+
+    #[test]
+    fn test_percentile_90_gradual() {
+        // depths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        // P90 index = ceil(9 * 0.9) = ceil(8.1) = 9 → sorted[9] = 10
+        let mut depths: Vec<usize> = (1..=10).collect();
+        assert_eq!(super::percentile_90(&mut depths), 10);
+
+        // depths: [1, 2, 3, ..., 20]
+        // P90 index = ceil(19 * 0.9) = ceil(17.1) = 18 → sorted[18] = 19
+        let mut depths: Vec<usize> = (1..=20).collect();
+        assert_eq!(super::percentile_90(&mut depths), 19);
     }
 }
