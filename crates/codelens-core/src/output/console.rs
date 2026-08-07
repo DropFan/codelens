@@ -69,6 +69,46 @@ impl OutputFormat for ConsoleOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        if options.colorize {
+            return self.write_report(report, options, writer);
+        }
+        // colored/comfy_table decide colors from the process tty, not the
+        // actual writer, so strip escape codes when colors are unwanted
+        // (e.g. writing to a file via -O).
+        let mut buf = Vec::new();
+        self.write_report(report, options, &mut buf)?;
+        writer.write_all(&strip_ansi(&buf))?;
+        Ok(())
+    }
+}
+
+/// Remove ANSI CSI escape sequences (`ESC [ ... <final byte>`).
+fn strip_ansi(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] == 0x1b && input.get(i + 1) == Some(&b'[') {
+            i += 2;
+            // Skip parameter/intermediate bytes until the final byte (0x40-0x7e)
+            while i < input.len() && !(0x40..=0x7e).contains(&input[i]) {
+                i += 1;
+            }
+            i += 1; // skip the final byte itself
+        } else {
+            out.push(input[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+impl ConsoleOutput {
+    fn write_report(
+        &self,
+        report: &Report,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),
@@ -660,5 +700,61 @@ impl ConsoleOutput {
             Grade::D => Color::Red,
             Grade::F => Color::DarkRed,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::stats::{AnalysisResult, FileStats, LineStats, Summary};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn make_result() -> AnalysisResult {
+        let files = vec![FileStats {
+            path: PathBuf::from("test.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats {
+                total: 10,
+                code: 8,
+                comment: 1,
+                blank: 1,
+            },
+            size: 100,
+            complexity: Default::default(),
+        }];
+        AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::from_millis(5),
+            scanned_files: 1,
+            skipped_files: 0,
+        }
+    }
+
+    #[test]
+    fn test_strip_ansi_removes_csi_sequences() {
+        let input = b"\x1b[1;32mgreen\x1b[0m plain";
+        assert_eq!(strip_ansi(input), b"green plain");
+    }
+
+    #[test]
+    fn test_no_ansi_codes_when_colorize_disabled() {
+        let output = ConsoleOutput::new();
+        let options = OutputOptions {
+            colorize: false,
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        output
+            .write(&Report::Analysis(make_result()), &options, &mut buf)
+            .unwrap();
+        assert!(
+            !buf.contains(&0x1b),
+            "colorize=false output must not contain ANSI escape codes"
+        );
+        // Content is still intact
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("Rust"));
     }
 }

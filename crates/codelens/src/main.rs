@@ -70,7 +70,7 @@ fn run() -> Result<()> {
         summary_only: config.output.summary_only,
         sort_by: config.output.sort_by,
         top_n: config.output.top_n,
-        colorize: !config.output.quiet,
+        colorize: should_colorize(&config.output),
         show_git_info: config.output.show_git_info,
     };
 
@@ -452,12 +452,19 @@ fn run_estimate_all(
     write_report(Report::EstimationComparison(comparison), output)
 }
 
+/// Colors belong on an interactive terminal only — never in an -O file,
+/// and not when stdout is piped/redirected.
+fn should_colorize(output: &codelens_core::config::OutputConfig) -> bool {
+    use std::io::IsTerminal;
+    output.file.is_none() && io::stdout().is_terminal()
+}
+
 fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
     let output_options = OutputOptions {
         summary_only: output.summary_only,
         sort_by: output.sort_by,
         top_n: output.top_n,
-        colorize: !output.quiet,
+        colorize: should_colorize(output),
         show_git_info: false,
     };
     let formatter = create_output(output.format);
