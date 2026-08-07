@@ -65,7 +65,11 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     let start = Instant::now();
 
     // Initialize components
-    let registry = Arc::new(LanguageRegistry::with_builtin()?);
+    let mut registry = LanguageRegistry::with_builtin()?;
+    for (ext, lang) in &config.count_as {
+        registry.map_extension(ext, lang)?;
+    }
+    let registry = Arc::new(registry);
     let analyzer = Arc::new(FileAnalyzer::new(Arc::clone(&registry), config));
     let filter: Arc<dyn filter::Filter> = Arc::new(FilterChain::new(config)?);
     let walker = ParallelWalker::new(config.walker.clone());

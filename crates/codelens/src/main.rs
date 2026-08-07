@@ -229,6 +229,9 @@ fn resolve_config(
     if filter.all {
         config.filter.include_all = true;
     }
+    if let Some(ref count_as) = filter.count_as {
+        config.count_as = parse_count_as(count_as);
+    }
 
     if let Some(format) = output.format {
         config.output.format = format.into();
@@ -479,6 +482,21 @@ fn run_estimate_all(
     let comparison =
         codelens_core::insight::estimation::estimate_all(summary, &models, cost_config);
     write_report(Report::EstimationComparison(comparison), output)
+}
+
+/// Parse "jsp:html,tpl:php" into (extension, language) pairs.
+/// Entries without a ':' are ignored.
+fn parse_count_as(spec: &str) -> Vec<(String, String)> {
+    spec.split(',')
+        .filter_map(|pair| {
+            let (ext, lang) = pair.split_once(':')?;
+            let (ext, lang) = (ext.trim(), lang.trim());
+            if ext.is_empty() || lang.is_empty() {
+                return None;
+            }
+            Some((ext.to_string(), lang.to_string()))
+        })
+        .collect()
 }
 
 /// Colors belong on an interactive terminal only — never in an -O file,

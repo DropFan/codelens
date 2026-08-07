@@ -83,6 +83,24 @@ impl LanguageRegistry {
         self.load_toml(&content)
     }
 
+    /// Map an extra file extension onto an already-registered language
+    /// (the `--count-as jsp:html` feature).
+    pub fn map_extension(&mut self, ext: &str, lang_name: &str) -> Result<()> {
+        let lang = self
+            .get(lang_name)
+            .ok_or_else(|| crate::error::Error::InvalidLanguage {
+                name: lang_name.to_string(),
+                reason: "unknown language in --count-as mapping (see --list-languages)".to_string(),
+            })?;
+        let ext = if ext.starts_with('.') {
+            ext.to_lowercase()
+        } else {
+            format!(".{}", ext.to_lowercase())
+        };
+        self.by_extension.insert(ext, lang);
+        Ok(())
+    }
+
     /// Detect the language of a file by its path.
     pub fn detect(&self, path: &Path) -> Option<Arc<Language>> {
         // First, try to match by filename
@@ -165,6 +183,18 @@ mod tests {
         let path = Path::new("file.unknown_extension_xyz");
         let lang = registry.detect(path);
         assert!(lang.is_none());
+    }
+
+    #[test]
+    fn test_map_extension_count_as() {
+        let mut registry = LanguageRegistry::with_builtin().unwrap();
+        registry.map_extension("jsp", "html").unwrap();
+
+        let lang = registry.detect(Path::new("page.jsp")).unwrap();
+        assert_eq!(lang.name, "HTML");
+
+        // Unknown language must be a hard error, not a silent no-op
+        assert!(registry.map_extension("x", "no-such-language").is_err());
     }
 
     #[test]

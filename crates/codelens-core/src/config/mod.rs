@@ -15,6 +15,8 @@ pub struct Config {
     pub filter: FilterConfig,
     /// Output configuration.
     pub output: OutputConfig,
+    /// Extra extension → language mappings (`--count-as jsp:html`).
+    pub count_as: Vec<(String, String)>,
 }
 
 /// Filter configuration.

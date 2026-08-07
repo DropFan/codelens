@@ -242,6 +242,10 @@ pub struct FilterArgs {
     #[arg(short, long)]
     pub depth: Option<usize>,
 
+    /// Count extensions as another language, e.g. "jsp:html,tpl:php".
+    #[arg(long, value_name = "EXT:LANG,...")]
+    pub count_as: Option<String>,
+
     /// Include all files (including dependencies).
     #[arg(short, long)]
     pub all: bool,

@@ -27,6 +27,8 @@ pub struct PartialConfig {
     pub exclude_dirs: Option<String>,
     /// Target languages.
     pub lang: Option<String>,
+    /// Extension → language mappings, e.g. "jsp:html,tpl:php".
+    pub count_as: Option<String>,
     /// Minimum lines.
     pub min_lines: Option<usize>,
     /// Maximum lines.
@@ -92,6 +94,15 @@ impl PartialConfig {
         }
         if let Some(ref v) = self.lang {
             config.filter.languages = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.count_as {
+            config.count_as = v
+                .split(',')
+                .filter_map(|pair| {
+                    let (ext, lang) = pair.split_once(':')?;
+                    Some((ext.trim().to_string(), lang.trim().to_string()))
+                })
+                .collect();
         }
         if let Some(min_lines) = self.min_lines {
             config.filter.min_lines = Some(min_lines);
