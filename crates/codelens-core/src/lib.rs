@@ -97,8 +97,9 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         )?;
     }
 
-    // Build summary
-    let summary = Summary::from_file_stats(&all_stats);
+    // Build summary, ordered by the configured sort key
+    let mut summary = Summary::from_file_stats(&all_stats);
+    summary.sort_languages(config.output.sort_by);
     let elapsed = start.elapsed();
 
     Ok(AnalysisResult {

@@ -228,6 +228,24 @@ impl Summary {
 
         summary
     }
+
+    /// Re-order the per-language table according to `sort_by`.
+    ///
+    /// Formatters iterate `by_language` in map order, so this defines the
+    /// output order for every format (console, JSON, CSV, ...).
+    pub fn sort_languages(&mut self, sort_by: crate::config::SortBy) {
+        use crate::config::SortBy;
+
+        let mut entries: Vec<_> = std::mem::take(&mut self.by_language).into_iter().collect();
+        match sort_by {
+            SortBy::Lines => entries.sort_by(|a, b| b.1.lines.total.cmp(&a.1.lines.total)),
+            SortBy::Files => entries.sort_by(|a, b| b.1.files.cmp(&a.1.files)),
+            SortBy::Code => entries.sort_by(|a, b| b.1.lines.code.cmp(&a.1.lines.code)),
+            SortBy::Name => entries.sort_by(|a, b| a.0.cmp(&b.0)),
+            SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
+        }
+        self.by_language = entries.into_iter().collect();
+    }
 }
 
 /// Complete analysis result.
@@ -269,6 +287,64 @@ mod duration_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn summary_with_langs() -> Summary {
+        let mut summary = Summary::default();
+        // Go: few files, many total lines, small size
+        summary.by_language.insert(
+            "Go".to_string(),
+            LanguageSummary {
+                files: 1,
+                lines: LineStats {
+                    total: 900,
+                    code: 100,
+                    ..Default::default()
+                },
+                size: 10,
+                ..Default::default()
+            },
+        );
+        // Rust: many files, few total lines, big size
+        summary.by_language.insert(
+            "Rust".to_string(),
+            LanguageSummary {
+                files: 5,
+                lines: LineStats {
+                    total: 300,
+                    code: 200,
+                    ..Default::default()
+                },
+                size: 999,
+                ..Default::default()
+            },
+        );
+        summary
+    }
+
+    fn lang_order(summary: &Summary) -> Vec<&str> {
+        summary.by_language.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn test_sort_languages_by_each_key() {
+        use crate::config::SortBy;
+
+        let mut s = summary_with_langs();
+        s.sort_languages(SortBy::Lines);
+        assert_eq!(lang_order(&s), ["Go", "Rust"], "total lines desc");
+
+        s.sort_languages(SortBy::Files);
+        assert_eq!(lang_order(&s), ["Rust", "Go"], "files desc");
+
+        s.sort_languages(SortBy::Code);
+        assert_eq!(lang_order(&s), ["Rust", "Go"], "code lines desc");
+
+        s.sort_languages(SortBy::Name);
+        assert_eq!(lang_order(&s), ["Go", "Rust"], "name asc");
+
+        s.sort_languages(SortBy::Size);
+        assert_eq!(lang_order(&s), ["Rust", "Go"], "size desc");
+    }
 
     #[test]
     fn test_line_stats_default() {
