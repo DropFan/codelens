@@ -12,7 +12,7 @@ use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
-use codelens_core::config::Config;
+use codelens_core::config::{Config, PartialConfig};
 use codelens_core::git::{self, GitClient};
 use codelens_core::insight::scoring::default::DefaultModel;
 use codelens_core::insight::{health, hotspot, trend};
@@ -65,20 +65,20 @@ fn run() -> Result<()> {
     // Run analysis
     let result = analyze(&paths, &config).context("Analysis failed")?;
 
-    // Prepare output options
+    // Prepare output options from the merged config (defaults → file → CLI)
     let output_options = OutputOptions {
-        summary_only: cli.output.summary,
-        sort_by: cli.output.sort.into(),
-        top_n: cli.output.top,
-        colorize: !cli.output.quiet,
-        show_git_info: cli.advanced.git_info,
+        summary_only: config.output.summary_only,
+        sort_by: config.output.sort_by,
+        top_n: config.output.top_n,
+        colorize: !config.output.quiet,
+        show_git_info: config.output.show_git_info,
     };
 
     // Get output formatter
-    let formatter = create_output(cli.output.format.into());
+    let formatter = create_output(config.output.format);
 
     // Write output
-    if cli.output.quiet {
+    if config.output.quiet {
         return Ok(());
     }
 
@@ -90,7 +90,7 @@ fn run() -> Result<()> {
     if let Report::Analysis(ref analysis) = report {
         // Health
         let scoring_model = DefaultModel::new();
-        let health_top_n = cli.output.top.unwrap_or(10);
+        let health_top_n = config.output.top_n.unwrap_or(10);
         let health_report = health::score(analysis, &scoring_model, health_top_n);
         reports.push(Report::Health(health_report));
 
@@ -110,7 +110,7 @@ fn run() -> Result<()> {
         reports.push(Report::EstimationComparison(comparison));
     }
 
-    if let Some(ref path) = cli.output.output_file {
+    if let Some(ref path) = config.output.file {
         let file = File::create(path).context("Failed to create output file")?;
         let mut writer = BufWriter::new(file);
         for r in &reports {
@@ -164,74 +164,115 @@ fn list_languages() -> Result<()> {
     Ok(())
 }
 
+/// Load the config file specified by `--config`, or search default locations.
+///
+/// Unlike the previous behavior, a config file that exists but fails to parse
+/// is a hard error even when found via the default search path — silently
+/// ignoring it made bad configs undiagnosable.
+fn load_partial_config(advanced: &cli::AdvancedArgs) -> Result<Option<PartialConfig>> {
+    if advanced.no_config {
+        return Ok(None);
+    }
+    if let Some(ref path) = advanced.config {
+        return Ok(Some(codelens_core::config::load_config_file(path)?));
+    }
+    let default_path = PathBuf::from(".codelens.toml");
+    if default_path.exists() {
+        return Ok(Some(codelens_core::config::load_config_file(
+            &default_path,
+        )?));
+    }
+    Ok(None)
+}
+
+/// Merge configuration from three layers, later layers winning:
+/// built-in defaults → config file → explicitly passed CLI arguments.
+fn resolve_config(
+    filter: &cli::FilterArgs,
+    output: &cli::OutputArgs,
+    advanced: &cli::AdvancedArgs,
+    partial: Option<&PartialConfig>,
+) -> Config {
+    let mut config = Config::default();
+    config.walker.threads = num_cpus::get();
+    config.filter.smart_exclude = true;
+
+    if let Some(partial) = partial {
+        partial.apply_to(&mut config);
+    }
+
+    // CLI overrides: only fields the user explicitly passed.
+    if let Some(threads) = advanced.threads {
+        config.walker.threads = threads;
+    }
+    if filter.no_gitignore {
+        config.walker.use_gitignore = false;
+    }
+    if let Some(depth) = filter.depth {
+        config.walker.max_depth = Some(depth);
+    }
+
+    if let Some(ref excludes) = filter.exclude {
+        config.filter.excludes = excludes.clone();
+    }
+    if let Some(ref pattern) = filter.exclude_files {
+        config.filter.exclude_files = vec![pattern.clone()];
+    }
+    if let Some(ref pattern) = filter.include_files {
+        config.filter.include_files = vec![pattern.clone()];
+    }
+    if let Some(ref langs) = filter.lang {
+        config.filter.languages = langs.clone();
+    }
+    if let Some(min_lines) = filter.min_lines {
+        config.filter.min_lines = Some(min_lines);
+    }
+    if let Some(max_lines) = filter.max_lines {
+        config.filter.max_lines = Some(max_lines);
+    }
+    if filter.no_smart_exclude {
+        config.filter.smart_exclude = false;
+    }
+    if filter.all {
+        config.filter.include_all = true;
+    }
+
+    if let Some(format) = output.format {
+        config.output.format = format.into();
+    }
+    if let Some(ref path) = output.output_file {
+        config.output.file = Some(path.clone());
+    }
+    if output.summary {
+        config.output.summary_only = true;
+    }
+    if let Some(sort) = output.sort {
+        config.output.sort_by = sort.into();
+    }
+    if let Some(top) = output.top {
+        config.output.top_n = Some(top);
+    }
+    if output.verbose {
+        config.output.verbose = true;
+    }
+    if output.quiet {
+        config.output.quiet = true;
+    }
+    if advanced.git_info {
+        config.output.show_git_info = true;
+    }
+
+    config
+}
+
 fn build_config(cli: &Cli) -> Result<Config> {
-    use codelens_core::config::{FilterConfig, OutputConfig};
-    use codelens_core::walker::WalkerConfig;
-
-    // Load config file if specified
-    let base_config = if !cli.advanced.no_config {
-        if let Some(ref path) = cli.advanced.config {
-            Some(codelens_core::config::load_config_file(path)?)
-        } else {
-            // Try to load default config files
-            let default_paths = [".codelens.toml", ".code_stats.yaml", ".code_stats.yml"];
-            default_paths.iter().find_map(|p| {
-                let path = PathBuf::from(p);
-                if path.exists() {
-                    codelens_core::config::load_config_file(&path).ok()
-                } else {
-                    None
-                }
-            })
-        }
-    } else {
-        None
-    };
-
-    let mut config = base_config.unwrap_or_default();
-
-    // Override with CLI arguments
-    config.walker = WalkerConfig {
-        threads: cli.advanced.threads.unwrap_or_else(num_cpus::get),
-        use_gitignore: !cli.filter.no_gitignore,
-        max_depth: cli.filter.depth,
-        ..config.walker
-    };
-
-    config.filter = FilterConfig {
-        excludes: cli.filter.exclude.clone().unwrap_or_default(),
-        exclude_files: cli
-            .filter
-            .exclude_files
-            .as_ref()
-            .map(|s| vec![s.clone()])
-            .unwrap_or_default(),
-        include_files: cli
-            .filter
-            .include_files
-            .as_ref()
-            .map(|s| vec![s.clone()])
-            .unwrap_or_default(),
-        languages: cli.filter.lang.clone().unwrap_or_default(),
-        min_lines: cli.filter.min_lines,
-        max_lines: cli.filter.max_lines,
-        smart_exclude: !cli.filter.no_smart_exclude,
-        include_all: cli.filter.all,
-        ..config.filter
-    };
-
-    config.output = OutputConfig {
-        format: cli.output.format.into(),
-        file: cli.output.output_file.clone(),
-        summary_only: cli.output.summary,
-        sort_by: cli.output.sort.into(),
-        top_n: cli.output.top,
-        verbose: cli.output.verbose,
-        quiet: cli.output.quiet,
-        show_git_info: cli.advanced.git_info,
-    };
-
-    Ok(config)
+    let partial = load_partial_config(&cli.advanced)?;
+    Ok(resolve_config(
+        &cli.filter,
+        &cli.output,
+        &cli.advanced,
+        partial.as_ref(),
+    ))
 }
 
 fn run_health(args: &cli::HealthArgs) -> Result<()> {
@@ -395,12 +436,12 @@ fn run_estimate_all(
 fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
     let output_options = OutputOptions {
         summary_only: output_args.summary,
-        sort_by: output_args.sort.into(),
+        sort_by: output_args.sort.unwrap_or_default().into(),
         top_n: output_args.top,
         colorize: !output_args.quiet,
         show_git_info: false,
     };
-    let formatter = create_output(output_args.format.into());
+    let formatter = create_output(output_args.format.unwrap_or_default().into());
 
     if output_args.quiet {
         return Ok(());
@@ -473,5 +514,70 @@ impl From<cli::ProjectTypeArg> for codelens_core::ProjectType {
             cli::ProjectTypeArg::SemiDetached => Self::SemiDetached,
             cli::ProjectTypeArg::Embedded => Self::Embedded,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codelens_core::config::OutputFormatType;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).unwrap()
+    }
+
+    fn partial(toml_src: &str) -> PartialConfig {
+        toml::from_str(toml_src).unwrap()
+    }
+
+    #[test]
+    fn config_file_values_survive_when_cli_args_absent() {
+        let cli = parse(&["codelens"]);
+        let p = partial(
+            r#"
+            output = "json"
+            lang = "rust,go"
+            excludes = "vendor"
+            threads = 3
+            sort = "code"
+            quiet = true
+        "#,
+        );
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+
+        assert_eq!(config.output.format, OutputFormatType::Json);
+        assert_eq!(config.filter.languages, vec!["rust", "go"]);
+        assert_eq!(config.filter.excludes, vec!["vendor"]);
+        assert_eq!(config.walker.threads, 3);
+        assert_eq!(config.output.sort_by, codelens_core::config::SortBy::Code);
+        assert!(config.output.quiet);
+    }
+
+    #[test]
+    fn explicit_cli_args_override_config_file() {
+        let cli = parse(&["codelens", "-f", "csv", "-l", "python", "-j", "8"]);
+        let p = partial(
+            r#"
+            output = "json"
+            lang = "rust"
+            threads = 3
+        "#,
+        );
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+
+        assert_eq!(config.output.format, OutputFormatType::Csv);
+        assert_eq!(config.filter.languages, vec!["python"]);
+        assert_eq!(config.walker.threads, 8);
+    }
+
+    #[test]
+    fn defaults_apply_without_config_file() {
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
+
+        assert_eq!(config.output.format, OutputFormatType::Console);
+        assert!(config.filter.languages.is_empty());
+        assert!(config.filter.smart_exclude);
+        assert!(config.walker.use_gitignore);
     }
 }

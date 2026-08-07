@@ -6,123 +6,161 @@ use serde::Deserialize;
 
 use crate::error::{Error, Result};
 
-use super::{Config, FilterConfig, OutputConfig, OutputFormatType, SortBy};
-use crate::walker::WalkerConfig;
+use super::{Config, OutputFormatType, SortBy};
 
-/// Configuration file structure.
+/// Partially-specified configuration loaded from a config file.
+///
+/// Every field is `Option`: `None` means "not specified in the file", so the
+/// value can fall back to CLI arguments or built-in defaults during merging.
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-struct ConfigFile {
+pub struct PartialConfig {
     /// Exclude patterns.
-    excludes: Option<String>,
+    pub excludes: Option<String>,
     /// Include patterns.
-    includes: Option<String>,
+    pub includes: Option<String>,
     /// Exclude file regex.
-    exclude_files: Option<String>,
+    pub exclude_files: Option<String>,
     /// Include file regex.
-    include_files: Option<String>,
+    pub include_files: Option<String>,
     /// Exclude directory regex.
-    exclude_dirs: Option<String>,
+    pub exclude_dirs: Option<String>,
     /// Target languages.
-    lang: Option<String>,
+    pub lang: Option<String>,
     /// Minimum lines.
-    min_lines: Option<usize>,
+    pub min_lines: Option<usize>,
     /// Maximum lines.
-    max_lines: Option<usize>,
+    pub max_lines: Option<usize>,
     /// Output format.
-    output: Option<String>,
+    pub output: Option<String>,
     /// Output file.
-    output_file: Option<String>,
+    pub output_file: Option<String>,
     /// Number of threads.
-    threads: Option<usize>,
+    pub threads: Option<usize>,
     /// Maximum depth.
-    depth: Option<usize>,
+    pub depth: Option<usize>,
     /// Sort by.
-    sort: Option<String>,
+    pub sort: Option<String>,
     /// Top N results.
-    top: Option<usize>,
+    pub top: Option<usize>,
     /// Show git info.
-    git_info: Option<bool>,
+    pub git_info: Option<bool>,
     /// Use gitignore.
-    no_gitignore: Option<bool>,
+    pub no_gitignore: Option<bool>,
     /// Use smart exclude.
-    no_smart_exclude: Option<bool>,
+    pub no_smart_exclude: Option<bool>,
     /// Parallel processing.
-    parallel: Option<bool>,
+    pub parallel: Option<bool>,
     /// Summary only.
-    summary: Option<bool>,
+    pub summary: Option<bool>,
     /// Verbose output.
-    verbose: Option<bool>,
+    pub verbose: Option<bool>,
     /// Quiet mode.
-    quiet: Option<bool>,
+    pub quiet: Option<bool>,
 }
 
-/// Load configuration from a TOML file.
-pub fn load_config_file(path: &Path) -> Result<Config> {
+impl PartialConfig {
+    /// Apply every specified (non-`None`) field onto `config`, leaving
+    /// unspecified fields untouched.
+    pub fn apply_to(&self, config: &mut Config) {
+        if let Some(threads) = self.threads {
+            config.walker.threads = threads;
+        }
+        if let Some(no_gitignore) = self.no_gitignore {
+            config.walker.use_gitignore = !no_gitignore;
+        }
+        if let Some(depth) = self.depth {
+            config.walker.max_depth = Some(depth);
+        }
+
+        if let Some(ref v) = self.excludes {
+            config.filter.excludes = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.includes {
+            config.filter.includes = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.exclude_files {
+            config.filter.exclude_files = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.include_files {
+            config.filter.include_files = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.exclude_dirs {
+            config.filter.exclude_dirs = parse_comma_list(v);
+        }
+        if let Some(ref v) = self.lang {
+            config.filter.languages = parse_comma_list(v);
+        }
+        if let Some(min_lines) = self.min_lines {
+            config.filter.min_lines = Some(min_lines);
+        }
+        if let Some(max_lines) = self.max_lines {
+            config.filter.max_lines = Some(max_lines);
+        }
+        if let Some(no_smart_exclude) = self.no_smart_exclude {
+            config.filter.smart_exclude = !no_smart_exclude;
+        }
+
+        if let Some(ref v) = self.output {
+            config.output.format = parse_format(v);
+        }
+        if let Some(ref v) = self.output_file {
+            config.output.file = Some(v.into());
+        }
+        if let Some(ref v) = self.sort {
+            config.output.sort_by = parse_sort(v);
+        }
+        if let Some(top) = self.top {
+            config.output.top_n = Some(top);
+        }
+        if let Some(git_info) = self.git_info {
+            config.output.show_git_info = git_info;
+        }
+        if let Some(summary) = self.summary {
+            config.output.summary_only = summary;
+        }
+        if let Some(verbose) = self.verbose {
+            config.output.verbose = verbose;
+        }
+        if let Some(quiet) = self.quiet {
+            config.output.quiet = quiet;
+        }
+    }
+}
+
+/// Load a partial configuration from a TOML file.
+pub fn load_config_file(path: &Path) -> Result<PartialConfig> {
     let content = std::fs::read_to_string(path).map_err(|e| Error::FileRead {
         path: path.to_path_buf(),
         source: e,
     })?;
 
-    let file: ConfigFile = toml::from_str(&content).map_err(|e| Error::ConfigParse {
+    toml::from_str(&content).map_err(|e| Error::ConfigParse {
         path: path.to_path_buf(),
         source: e,
-    })?;
-
-    Ok(Config {
-        walker: WalkerConfig {
-            threads: file.threads.unwrap_or_else(num_cpus::get),
-            use_gitignore: !file.no_gitignore.unwrap_or(false),
-            max_depth: file.depth,
-            ..Default::default()
-        },
-        filter: FilterConfig {
-            excludes: parse_comma_list(&file.excludes),
-            includes: parse_comma_list(&file.includes),
-            exclude_files: parse_comma_list(&file.exclude_files),
-            include_files: parse_comma_list(&file.include_files),
-            exclude_dirs: parse_comma_list(&file.exclude_dirs),
-            languages: parse_comma_list(&file.lang),
-            min_lines: file.min_lines,
-            max_lines: file.max_lines,
-            smart_exclude: !file.no_smart_exclude.unwrap_or(false),
-            ..Default::default()
-        },
-        output: OutputConfig {
-            format: parse_format(&file.output),
-            file: file.output_file.map(Into::into),
-            sort_by: parse_sort(&file.sort),
-            top_n: file.top,
-            show_git_info: file.git_info.unwrap_or(false),
-            summary_only: file.summary.unwrap_or(false),
-            verbose: file.verbose.unwrap_or(false),
-            quiet: file.quiet.unwrap_or(false),
-        },
     })
 }
 
-fn parse_comma_list(s: &Option<String>) -> Vec<String> {
-    s.as_ref()
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
-        .unwrap_or_default()
+fn parse_comma_list(s: &str) -> Vec<String> {
+    s.split(',').map(|p| p.trim().to_string()).collect()
 }
 
-fn parse_format(s: &Option<String>) -> OutputFormatType {
-    match s.as_deref() {
-        Some("json") => OutputFormatType::Json,
-        Some("csv") => OutputFormatType::Csv,
-        Some("markdown") | Some("md") => OutputFormatType::Markdown,
-        Some("html") => OutputFormatType::Html,
+fn parse_format(s: &str) -> OutputFormatType {
+    match s {
+        "json" => OutputFormatType::Json,
+        "csv" => OutputFormatType::Csv,
+        "markdown" | "md" => OutputFormatType::Markdown,
+        "html" => OutputFormatType::Html,
         _ => OutputFormatType::Console,
     }
 }
 
-fn parse_sort(s: &Option<String>) -> SortBy {
-    match s.as_deref() {
-        Some("files") => SortBy::Files,
-        Some("code") => SortBy::Code,
-        Some("name") => SortBy::Name,
-        Some("size") => SortBy::Size,
+fn parse_sort(s: &str) -> SortBy {
+    match s {
+        "files" => SortBy::Files,
+        "code" => SortBy::Code,
+        "name" => SortBy::Name,
+        "size" => SortBy::Size,
         _ => SortBy::Lines,
     }
 }
@@ -149,7 +187,10 @@ mod tests {
         )
         .unwrap();
 
-        let config = load_config_file(file.path()).unwrap();
+        let partial = load_config_file(file.path()).unwrap();
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+
         assert_eq!(config.filter.excludes, vec!["*test*", "*mock*"]);
         assert_eq!(config.filter.languages, vec!["rust", "go"]);
         assert_eq!(config.output.format, OutputFormatType::Json);
@@ -159,11 +200,26 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_to_leaves_unspecified_fields_untouched() {
+        // A config file that only sets `lang` must not reset other fields.
+        let partial: PartialConfig = toml::from_str(r#"lang = "rust""#).unwrap();
+
+        let mut config = Config::default();
+        config.filter.excludes = vec!["vendor".to_string()];
+        config.output.format = OutputFormatType::Html;
+        config.walker.threads = 7;
+
+        partial.apply_to(&mut config);
+
+        assert_eq!(config.filter.languages, vec!["rust"]);
+        // Untouched by the partial config:
+        assert_eq!(config.filter.excludes, vec!["vendor"]);
+        assert_eq!(config.output.format, OutputFormatType::Html);
+        assert_eq!(config.walker.threads, 7);
+    }
+
+    #[test]
     fn test_parse_comma_list() {
-        assert_eq!(
-            parse_comma_list(&Some("a, b, c".to_string())),
-            vec!["a", "b", "c"]
-        );
-        assert!(parse_comma_list(&None).is_empty());
+        assert_eq!(parse_comma_list("a, b, c"), vec!["a", "b", "c"]);
     }
 }

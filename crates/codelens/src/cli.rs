@@ -255,9 +255,12 @@ pub struct FilterArgs {
 /// Output options.
 #[derive(Args, Debug)]
 pub struct OutputArgs {
-    /// Output format.
-    #[arg(short, long, value_enum, default_value = "console")]
-    pub format: OutputFormatArg,
+    /// Output format [default: console].
+    ///
+    /// Left as `Option` so config-file values are only overridden when the
+    /// user explicitly passes the flag.
+    #[arg(short, long, value_enum)]
+    pub format: Option<OutputFormatArg>,
 
     /// Output file path.
     #[arg(short = 'O', long)]
@@ -275,9 +278,9 @@ pub struct OutputArgs {
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Sort order.
-    #[arg(long, value_enum, default_value = "lines")]
-    pub sort: SortByArg,
+    /// Sort order [default: lines].
+    #[arg(long, value_enum)]
+    pub sort: Option<SortByArg>,
 
     /// Show only top N results.
     #[arg(long)]

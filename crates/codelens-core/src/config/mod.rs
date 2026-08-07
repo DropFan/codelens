@@ -2,7 +2,7 @@
 
 mod file;
 
-pub use file::load_config_file;
+pub use file::{load_config_file, PartialConfig};
 
 use crate::walker::WalkerConfig;
 
