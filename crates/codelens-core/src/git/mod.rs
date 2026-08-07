@@ -135,9 +135,45 @@ impl GitClient {
     }
 }
 
+/// Parse a numstat rename path (`old => new` or `pre{old => new}post`)
+/// into the full (old, new) path pair.
+fn parse_rename(raw: &str) -> Option<(PathBuf, PathBuf)> {
+    if !raw.contains(" => ") {
+        return None;
+    }
+
+    let join = |s: String| -> PathBuf {
+        // Collapse artifacts from empty rename sides: "a//b" or leading "/"
+        PathBuf::from(s.replace("//", "/").trim_start_matches('/'))
+    };
+
+    if let (Some(open), Some(close)) = (raw.find('{'), raw.find('}')) {
+        if open < close {
+            let prefix = &raw[..open];
+            let suffix = &raw[close + 1..];
+            let inner = &raw[open + 1..close];
+            if let Some((old_mid, new_mid)) = inner.split_once(" => ") {
+                return Some((
+                    join(format!("{prefix}{old_mid}{suffix}")),
+                    join(format!("{prefix}{new_mid}{suffix}")),
+                ));
+            }
+        }
+    }
+
+    raw.split_once(" => ")
+        .map(|(old, new)| (PathBuf::from(old), PathBuf::from(new)))
+}
+
 /// Parse `git log --numstat` output into per-file churn data.
+///
+/// Rename entries (`old => new`) are followed so that a renamed file's
+/// full history is aggregated under its current name. Relies on git log
+/// listing commits newest-first, so a rename is seen before the renamed
+/// file's older entries.
 fn parse_numstat(output: &str) -> Vec<FileChurn> {
-    let mut file_map: HashMap<PathBuf, (usize, usize, usize)> = HashMap::new();
+    let mut final_name: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut records: Vec<(usize, usize, PathBuf)> = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
@@ -149,13 +185,26 @@ fn parse_numstat(output: &str) -> Vec<FileChurn> {
         if parts.len() == 3 {
             let added = parts[0].parse::<usize>().unwrap_or(0);
             let deleted = parts[1].parse::<usize>().unwrap_or(0);
-            let path = PathBuf::from(parts[2]);
 
-            let entry = file_map.entry(path).or_insert((0, 0, 0));
-            entry.0 += 1;
-            entry.1 += added;
-            entry.2 += deleted;
+            if let Some((old, new)) = parse_rename(parts[2]) {
+                // Chained renames resolve to the newest name because newer
+                // commits (and their rename entries) were processed first.
+                let target = final_name.get(&new).cloned().unwrap_or(new);
+                final_name.insert(old, target.clone());
+                records.push((added, deleted, target));
+            } else {
+                records.push((added, deleted, PathBuf::from(parts[2])));
+            }
         }
+    }
+
+    let mut file_map: HashMap<PathBuf, (usize, usize, usize)> = HashMap::new();
+    for (added, deleted, path) in records {
+        let key = final_name.get(&path).cloned().unwrap_or(path);
+        let entry = file_map.entry(key).or_insert((0, 0, 0));
+        entry.0 += 1;
+        entry.1 += added;
+        entry.2 += deleted;
     }
 
     let mut churns: Vec<FileChurn> = file_map
@@ -251,6 +300,63 @@ mod tests {
             .unwrap();
         assert_eq!(png.commits, 1);
         assert_eq!(png.lines_added, 0);
+    }
+
+    #[test]
+    fn test_parse_rename_brace_form() {
+        let (old, new) = parse_rename("docs/{plans => design}/a.md").unwrap();
+        assert_eq!(old, PathBuf::from("docs/plans/a.md"));
+        assert_eq!(new, PathBuf::from("docs/design/a.md"));
+    }
+
+    #[test]
+    fn test_parse_rename_brace_empty_side() {
+        let (old, new) = parse_rename("{ => sub}/a.md").unwrap();
+        assert_eq!(old, PathBuf::from("a.md"));
+        assert_eq!(new, PathBuf::from("sub/a.md"));
+    }
+
+    #[test]
+    fn test_parse_rename_whole_path() {
+        let (old, new) = parse_rename("old.rs => new.rs").unwrap();
+        assert_eq!(old, PathBuf::from("old.rs"));
+        assert_eq!(new, PathBuf::from("new.rs"));
+    }
+
+    #[test]
+    fn test_parse_rename_not_a_rename() {
+        assert!(parse_rename("src/main.rs").is_none());
+    }
+
+    #[test]
+    fn test_parse_numstat_rename_merges_history() {
+        // newest-first: rename commit, then older history under the old name
+        let input = "\
+aaa111\n3\t1\tsrc/new.rs\n\n\
+bbb222\n0\t0\tsrc/{old.rs => new.rs}\n\n\
+ccc333\n10\t2\tsrc/old.rs\n\n\
+ddd444\n5\t0\tsrc/old.rs\n";
+        let result = parse_numstat(input);
+        assert_eq!(result.len(), 1, "old and new names must merge: {result:?}");
+        let f = &result[0];
+        assert_eq!(f.path, PathBuf::from("src/new.rs"));
+        assert_eq!(f.commits, 4);
+        assert_eq!(f.lines_added, 18);
+        assert_eq!(f.lines_deleted, 3);
+    }
+
+    #[test]
+    fn test_parse_numstat_chained_rename() {
+        // b => c (newer), then a => b (older): everything lands on c
+        let input = "\
+aaa\n0\t0\tb.rs => c.rs\n\n\
+bbb\n0\t0\ta.rs => b.rs\n\n\
+ccc\n7\t1\ta.rs\n";
+        let result = parse_numstat(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, PathBuf::from("c.rs"));
+        assert_eq!(result[0].commits, 3);
+        assert_eq!(result[0].lines_added, 7);
     }
 
     #[test]
