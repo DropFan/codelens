@@ -90,6 +90,12 @@ impl FileAnalyzer {
             return Ok(None);
         }
 
+        // Strip a UTF-8 BOM so it isn't counted as line content
+        // (otherwise a leading comment/blank line is misclassified as code)
+        let content = content
+            .strip_prefix(b"\xEF\xBB\xBF".as_slice())
+            .unwrap_or(content);
+
         // Count lines using byte-level state machine
         let (trie, mask) = language.tokens();
         let lines: LineStats = counter::count_stats(content, trie, *mask);
@@ -182,6 +188,25 @@ mod tests {
             .analyze_from_bytes(Path::new("b.py"), b"print(1)\n")
             .unwrap();
         assert!(filtered.is_none(), "-l rust must drop Python files");
+    }
+
+    #[test]
+    fn test_utf8_bom_stripped_before_counting() {
+        let registry = make_rust_registry();
+        let analyzer = FileAnalyzer::new(registry, &Config::default());
+
+        let content = b"\xEF\xBB\xBF// comment\nfn main() {}\n";
+        let result = analyzer
+            .analyze_from_bytes(Path::new("bom.rs"), content)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.lines.total, 2);
+        assert_eq!(
+            result.lines.comment, 1,
+            "BOM must not turn a comment line into code"
+        );
+        assert_eq!(result.lines.code, 1);
     }
 
     #[test]
