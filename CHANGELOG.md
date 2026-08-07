@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`-l` language filtering now works** — the flag was parsed but never
+  applied (dead `target_languages` field); filtering now happens at
+  language detection, case-insensitively
+- **Config files now take effect** — values were unconditionally
+  overwritten by CLI defaults; loading now merges three layers
+  (defaults → config file → explicit CLI args). A broken TOML found via
+  the default search path is a hard error instead of silently ignored;
+  the never-parseable `.code_stats.yaml` candidates were dropped
+- **`--sort` now reorders the language table** (was hardcoded to
+  code-lines-descending)
+- Subcommands accept global args (`-j`, `--config`, `--git-info`), no
+  longer drop `--exclude-files`/`--include-files`/`--min-lines`/`--max-lines`,
+  and read config files; `trend --save` uses the same filter semantics
+  as the main command
+- **Machine formats are valid again**: the default command's three
+  reports (stats + health + estimation) are emitted as ONE document —
+  single JSON object, single combined HTML page, analysis-only CSV
+- `-q` no longer suppresses writing an explicitly requested `-O` file
+- `-O` files and piped output no longer contain ANSI color codes
+- CSV text fields are quoted per RFC 4180
+- **Line counting accuracy** (now matches scc exactly on this repo):
+  string delimiters are per-language config instead of hardcoded `"`+`'`
+  (Rust lifetimes/YAML apostrophes no longer misclassify whole sections),
+  code after an inline `/* */` close is counted as code, string escapes
+  no longer swallow newlines, nested block comments are tracked by depth,
+  Ruby `=begin` requires line start and its fake docstring was removed,
+  UTF-8 BOM is stripped
+- **hotspot works from subdirectories and with absolute paths** (analysis
+  paths are rewritten repo-root-relative to match git); renamed files
+  keep their full churn history (`{old => new}` parsing with chains);
+  an empty `--since` window warns instead of silently printing nothing
+- Read/traversal failures are counted separately from filtered files and
+  shown in the console footer as `(N skipped, M errors)`
+
+### Added
+- `--by-file` per-file statistics table (console/markdown append it,
+  CSV replaces the language table), respecting `--sort` and `--top`
+- `.codelensignore` project ignore files (gitignore syntax)
+- `--count-as ext:lang,...` extension remapping (also `count_as` in
+  config files)
+- Shebang detection for extensionless scripts (`#!/usr/bin/env python`)
+- `--no-duplicates` content-hash dedup of identical files
+- `--no-min-gen` minified/generated file detection (long average line
+  length or generated-code markers)
+- `--locomo-preset large|medium|small|local` pricing tiers matching scc
+- `-f openmetrics` (Prometheus text exposition) and `-f badge`
+  (shields.io endpoint JSON) output formats
+
 ## [0.1.3] - 2026-04-12
 
 ### Added

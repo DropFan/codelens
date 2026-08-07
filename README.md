@@ -125,10 +125,26 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 | CSV | `-f csv` | Spreadsheet compatible |
 | Markdown | `-f markdown` | Documentation friendly |
 | HTML | `-f html` | Interactive report with charts |
+| OpenMetrics | `-f openmetrics` | Prometheus text format for scraping |
+| Badge | `-f badge` | shields.io endpoint JSON (`codelens health -f badge` → live code-health badge) |
+
+## Filtering & Detection
+
+```bash
+codelens --by-file --top 20         # Per-file statistics (respects --sort/--top)
+codelens --count-as jsp:html        # Count .jsp files as HTML
+codelens --no-duplicates            # Skip files with identical content
+codelens --no-min-gen               # Skip minified/generated files
+```
+
+- Extensionless scripts are detected via shebang (`#!/usr/bin/env python`).
+- Drop a `.codelensignore` file (gitignore syntax) anywhere in the tree to
+  exclude paths, like scc's `.sccignore` / tokei's `.tokeignore`.
 
 ## Configuration
 
-Create `.codelens.toml` in your project root:
+Create `.codelens.toml` in your project root. CLI flags override config file
+values, which override built-in defaults:
 
 ```toml
 # Exclude patterns
@@ -137,8 +153,14 @@ excludes = "*test*,*mock*"
 # Target languages
 lang = "rust,go,python"
 
+# Extension remapping
+count_as = "jsp:html,tpl:php"
+
 # Output format
 output = "json"
+
+# Per-file statistics
+by_file = true
 
 # Threading
 threads = 8
