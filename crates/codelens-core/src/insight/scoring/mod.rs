@@ -85,11 +85,21 @@ impl RawMetrics {
         } else {
             0.0
         };
+
+        // Average function length considers only files that HAVE functions:
+        // documents (Markdown/HTML/TOML) contribute code lines but never
+        // functions, and would otherwise inflate the average.
+        let func_file_code: usize = files
+            .iter()
+            .filter(|f| f.complexity.functions > 0)
+            .map(|f| f.lines.code)
+            .sum();
         let avg_func_lines = if total_functions > 0 {
-            total_code as f64 / total_functions as f64
+            func_file_code as f64 / total_functions as f64
         } else {
             0.0
         };
+
         let comment_ratio = if total_code > 0 {
             total_comment as f64 / total_code as f64
         } else {
@@ -108,43 +118,8 @@ impl RawMetrics {
     }
 
     pub fn from_files(files: &[FileStats]) -> Self {
-        if files.is_empty() {
-            return Self::default();
-        }
-        let total_functions: usize = files.iter().map(|f| f.complexity.functions).sum();
-        let total_cyclomatic: usize = files.iter().map(|f| f.complexity.cyclomatic).sum();
-        let total_code: usize = files.iter().map(|f| f.lines.code).sum();
-        let total_comment: usize = files.iter().map(|f| f.lines.comment).sum();
-        let total_lines: usize = files.iter().map(|f| f.lines.total).sum();
-
-        let mut depths: Vec<usize> = files.iter().map(|f| f.complexity.max_depth).collect();
-        let depth = percentile_90(&mut depths);
-
-        let avg_cyclomatic = if total_functions > 0 {
-            total_cyclomatic as f64 / total_functions as f64
-        } else {
-            0.0
-        };
-        let avg_func_lines = if total_functions > 0 {
-            total_code as f64 / total_functions as f64
-        } else {
-            0.0
-        };
-        let comment_ratio = if total_code > 0 {
-            total_comment as f64 / total_code as f64
-        } else {
-            0.0
-        };
-        let avg_file_lines = total_lines as f64 / files.len() as f64;
-
-        Self {
-            avg_cyclomatic,
-            avg_func_lines,
-            comment_ratio,
-            depth,
-            avg_file_lines,
-            total_files: files.len(),
-        }
+        let refs: Vec<&FileStats> = files.iter().collect();
+        Self::from_file_refs(&refs)
     }
 }
 
@@ -217,6 +192,48 @@ mod tests {
         assert!((metrics.avg_cyclomatic - 3.0).abs() < 0.01);
         assert!((metrics.comment_ratio - 0.125).abs() < 0.01);
         assert_eq!(metrics.depth, 3);
+    }
+
+    #[test]
+    fn test_avg_func_lines_ignores_files_without_functions() {
+        // A Rust file: 200 code lines, 10 functions → avg 20
+        let code = FileStats {
+            path: PathBuf::from("lib.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats {
+                total: 220,
+                code: 200,
+                comment: 10,
+                blank: 10,
+            },
+            size: 5000,
+            complexity: Complexity {
+                functions: 10,
+                cyclomatic: 20,
+                max_depth: 3,
+                avg_func_lines: 20.0,
+            },
+        };
+        // A big Markdown doc: lots of "code" lines, zero functions
+        let doc = FileStats {
+            path: PathBuf::from("README.md"),
+            language: "Markdown".to_string(),
+            lines: LineStats {
+                total: 3000,
+                code: 2800,
+                comment: 0,
+                blank: 200,
+            },
+            size: 90_000,
+            complexity: Complexity::default(),
+        };
+
+        let metrics = RawMetrics::from_files(&[code, doc]);
+        assert!(
+            (metrics.avg_func_lines - 20.0).abs() < 0.01,
+            "document lines must not inflate avg function length, got {}",
+            metrics.avg_func_lines
+        );
     }
 
     #[test]
