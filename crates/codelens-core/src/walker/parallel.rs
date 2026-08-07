@@ -120,82 +120,22 @@ impl ParallelWalker {
                 let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
 
                 Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
-                    let entry = match entry {
-                        Ok(e) => e,
-                        Err(_) => {
-                            // Traversal error (permissions, broken symlink, ...)
-                            let _ = tx.send(WalkResult::Skipped(
-                                std::path::PathBuf::new(),
-                                SkipReason::Error,
-                            ));
-                            return WalkState::Continue;
+                    match classify_entry(entry, filter.as_ref()) {
+                        EntryAction::SkipDir => WalkState::Skip,
+                        EntryAction::Ignore => WalkState::Continue,
+                        EntryAction::Report(result) => {
+                            let _ = tx.send(result);
+                            WalkState::Continue
                         }
-                    };
-
-                    let path = entry.path();
-                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-                    // Apply custom filter
-                    if !filter.should_include(path, is_dir) {
-                        if is_dir {
-                            return WalkState::Skip;
-                        }
-                        let _ = tx.send(WalkResult::Skipped(
-                            path.to_path_buf(),
-                            SkipReason::Filtered,
-                        ));
-                        return WalkState::Continue;
-                    }
-
-                    // Skip directories (they're handled by the walker)
-                    if is_dir {
-                        return WalkState::Continue;
-                    }
-
-                    // Skip non-files
-                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        return WalkState::Continue;
-                    }
-
-                    // Read file into reusable buffer
-                    buf.clear();
-                    match std::fs::File::open(path).and_then(|mut f| {
-                        if let Ok(meta) = f.metadata() {
-                            buf.reserve(meta.len() as usize);
-                        }
-                        std::io::Read::read_to_end(&mut f, &mut buf)
-                    }) {
-                        Ok(_) => match analyzer.analyze_from_bytes(path, &buf) {
-                            Ok(Some(stats)) => {
-                                let _ = tx.send(WalkResult::File(stats));
+                        EntryAction::Analyze(path) => {
+                            let _ = tx.send(read_and_analyze(&path, &analyzer, &mut buf));
+                            // Shrink buffer if it grew too large from a single file
+                            if buf.capacity() > 1_048_576 {
+                                buf = Vec::with_capacity(64 * 1024);
                             }
-                            Ok(None) => {
-                                // Unrecognized language, binary, or line filter
-                                let _ = tx.send(WalkResult::Skipped(
-                                    path.to_path_buf(),
-                                    SkipReason::Filtered,
-                                ));
-                            }
-                            Err(_) => {
-                                let _ = tx.send(WalkResult::Skipped(
-                                    path.to_path_buf(),
-                                    SkipReason::Error,
-                                ));
-                            }
-                        },
-                        Err(_) => {
-                            // Read failure (permissions, vanished file, ...)
-                            let _ =
-                                tx.send(WalkResult::Skipped(path.to_path_buf(), SkipReason::Error));
+                            WalkState::Continue
                         }
                     }
-
-                    // Shrink buffer if it grew too large from a single file
-                    if buf.capacity() > 1_048_576 {
-                        buf = Vec::with_capacity(64 * 1024);
-                    }
-
-                    WalkState::Continue
                 })
             });
 
@@ -213,6 +153,74 @@ impl ParallelWalker {
 impl Default for ParallelWalker {
     fn default() -> Self {
         Self::new(WalkerConfig::default())
+    }
+}
+
+/// What the walker should do with one directory entry.
+enum EntryAction {
+    /// A file that passed all filters — read and analyze it.
+    Analyze(std::path::PathBuf),
+    /// An excluded directory — prune the subtree.
+    SkipDir,
+    /// A directory or non-file entry — nothing to do.
+    Ignore,
+    /// A skip/error outcome to report to the consumer.
+    Report(WalkResult),
+}
+
+/// Decide what to do with a walked entry: prune, ignore, report, or analyze.
+fn classify_entry(
+    entry: std::result::Result<DirEntry, ignore::Error>,
+    filter: &dyn Filter,
+) -> EntryAction {
+    let entry = match entry {
+        Ok(e) => e,
+        // Traversal error (permissions, broken symlink, ...)
+        Err(_) => {
+            let result = WalkResult::Skipped(std::path::PathBuf::new(), SkipReason::Error);
+            return EntryAction::Report(result);
+        }
+    };
+
+    let path = entry.path();
+    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+    // Apply custom filter
+    if !filter.should_include(path, is_dir) {
+        if is_dir {
+            return EntryAction::SkipDir;
+        }
+        let result = WalkResult::Skipped(path.to_path_buf(), SkipReason::Filtered);
+        return EntryAction::Report(result);
+    }
+
+    // Directories are handled by the walker itself; skip non-files too
+    if is_dir || !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+        return EntryAction::Ignore;
+    }
+
+    EntryAction::Analyze(path.to_path_buf())
+}
+
+/// Read one file into the reusable buffer and analyze it, translating
+/// the outcome into the WalkResult to send to the consumer.
+fn read_and_analyze(path: &Path, analyzer: &FileAnalyzer, buf: &mut Vec<u8>) -> WalkResult {
+    buf.clear();
+    let read = std::fs::File::open(path).and_then(|mut f| {
+        if let Ok(meta) = f.metadata() {
+            buf.reserve(meta.len() as usize);
+        }
+        std::io::Read::read_to_end(&mut f, buf)
+    });
+    // Read failure (permissions, vanished file, ...)
+    if read.is_err() {
+        return WalkResult::Skipped(path.to_path_buf(), SkipReason::Error);
+    }
+    match analyzer.analyze_from_bytes(path, buf) {
+        Ok(Some(stats)) => WalkResult::File(stats),
+        // Unrecognized language, binary, or line filter
+        Ok(None) => WalkResult::Skipped(path.to_path_buf(), SkipReason::Filtered),
+        Err(_) => WalkResult::Skipped(path.to_path_buf(), SkipReason::Error),
     }
 }
 

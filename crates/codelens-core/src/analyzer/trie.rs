@@ -176,27 +176,25 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
     // quote cannot poison the rest of the file.
     if lang.string_delimiters.is_empty() {
         for delim in [b"\"".as_slice(), b"'".as_slice()] {
-            trie.insert(
-                delim,
-                TokenMatch {
-                    escape: Some(b'\\'),
-                    ..TokenMatch::new(TokenType::StringDelimiter, Some(delim.to_vec()))
-                },
-            );
+            let token = TokenMatch {
+                escape: Some(b'\\'),
+                ..TokenMatch::new(TokenType::StringDelimiter, Some(delim.to_vec()))
+            };
+            trie.insert(delim, token);
         }
     } else {
         for sd in &lang.string_delimiters {
-            trie.insert(
-                sd.start.as_bytes(),
-                TokenMatch {
-                    multiline: sd.multiline,
-                    escape: sd
-                        .escape
-                        .as_ref()
-                        .and_then(|e| e.as_bytes().first().copied()),
-                    ..TokenMatch::new(TokenType::StringDelimiter, Some(sd.end.as_bytes().to_vec()))
-                },
-            );
+            let escape = sd
+                .escape
+                .as_ref()
+                .and_then(|e| e.as_bytes().first().copied());
+            let close = Some(sd.end.as_bytes().to_vec());
+            let token = TokenMatch {
+                multiline: sd.multiline,
+                escape,
+                ..TokenMatch::new(TokenType::StringDelimiter, close)
+            };
+            trie.insert(sd.start.as_bytes(), token);
         }
     }
 

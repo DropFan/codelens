@@ -153,10 +153,9 @@ fn parse_rename(raw: &str) -> Option<(PathBuf, PathBuf)> {
             let suffix = &raw[close + 1..];
             let inner = &raw[open + 1..close];
             if let Some((old_mid, new_mid)) = inner.split_once(" => ") {
-                return Some((
-                    join(format!("{prefix}{old_mid}{suffix}")),
-                    join(format!("{prefix}{new_mid}{suffix}")),
-                ));
+                let old = join(format!("{prefix}{old_mid}{suffix}"));
+                let new = join(format!("{prefix}{new_mid}{suffix}"));
+                return Some((old, new));
             }
         }
     }

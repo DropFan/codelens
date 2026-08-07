@@ -19,6 +19,14 @@ impl ComplexityAnalyzer {
         let mut complexity = Complexity::default();
         let patterns = lang.complexity_patterns();
 
+        // Languages without any complexity signals configured (documents
+        // and data formats like Markdown/HTML/JSON) get no complexity
+        // metrics: bracket depth in a JSON file or a Markdown code block
+        // is not a code-nesting signal.
+        if patterns.function_re.is_none() && patterns.keywords_re.is_none() {
+            return complexity;
+        }
+
         // Count functions
         if let Some(ref re) = patterns.function_re {
             complexity.functions = re.find_iter(content).count();
@@ -177,21 +185,38 @@ fn main() {
     }
 
     #[test]
+    fn test_no_complexity_for_document_languages() {
+        let analyzer = ComplexityAnalyzer::new();
+        // Markdown-like language: no function pattern, no keywords
+        let lang = Language {
+            name: "Markdown".to_string(),
+            extensions: vec![".md".to_string()],
+            ..Default::default()
+        };
+
+        let content = "# Title\n```json\n{\"a\":{\"b\":{\"c\":{\"d\":1}}}}\n```\n";
+        let complexity = analyzer.analyze(content, &lang);
+        assert_eq!(
+            complexity.max_depth, 0,
+            "documents must not report nesting depth"
+        );
+        assert_eq!(complexity.cyclomatic, 0);
+    }
+
+    #[test]
     fn test_max_depth_ignores_brackets_in_strings_and_comments() {
         let analyzer = ComplexityAnalyzer::new();
         let lang = make_rust_lang();
 
         // Unbalanced brackets inside strings, char literals, and comments
-        // must not count toward nesting depth
-        let content = r#"
-fn main() {
-    let ansi = "\x1b[1;32m[[[[[";
-    let c = '[';
-    // opening brackets in a comment: [[[ (((
-    println!("(((((");
-}
-"#;
-        let complexity = analyzer.analyze(content, &lang);
+        // must not count toward nesting depth. Built at runtime so this
+        // source file itself contains no unbalanced bracket runs.
+        let opens = "[".repeat(5);
+        let parens = "(".repeat(5);
+        let content = format!(
+            "fn main() {{\n    let ansi = \"\\x1b[1;32m{opens}\";\n    let c = '[';\n    // brackets in a comment: {opens} {parens}\n    println!(\"{parens}\");\n}}\n",
+        );
+        let complexity = analyzer.analyze(&content, &lang);
         assert!(
             complexity.max_depth <= 3,
             "string/comment brackets must be ignored, got depth {}",

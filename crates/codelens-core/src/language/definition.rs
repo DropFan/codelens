@@ -156,16 +156,11 @@ where
     D: serde::Deserializer<'de>,
 {
     let raw: Vec<Vec<String>> = Vec::deserialize(deserializer)?;
-    Ok(raw
-        .into_iter()
-        .filter_map(|pair| {
-            if pair.len() >= 2 {
-                Some((pair[0].clone(), pair[1].clone()))
-            } else {
-                None
-            }
-        })
-        .collect())
+    let to_pair = |pair: Vec<String>| match &pair[..] {
+        [open, close, ..] => Some((open.clone(), close.clone())),
+        _ => None,
+    };
+    Ok(raw.into_iter().filter_map(to_pair).collect())
 }
 
 #[cfg(test)]

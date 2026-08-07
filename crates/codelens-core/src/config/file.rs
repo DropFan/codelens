@@ -96,13 +96,7 @@ impl PartialConfig {
             config.filter.languages = parse_comma_list(v);
         }
         if let Some(ref v) = self.count_as {
-            config.count_as = v
-                .split(',')
-                .filter_map(|pair| {
-                    let (ext, lang) = pair.split_once(':')?;
-                    Some((ext.trim().to_string(), lang.trim().to_string()))
-                })
-                .collect();
+            config.count_as = parse_count_as_list(v);
         }
         if let Some(min_lines) = self.min_lines {
             config.filter.min_lines = Some(min_lines);
@@ -159,6 +153,15 @@ pub fn load_config_file(path: &Path) -> Result<PartialConfig> {
 
 fn parse_comma_list(s: &str) -> Vec<String> {
     s.split(',').map(|p| p.trim().to_string()).collect()
+}
+
+/// Parse "jsp:html,tpl:php" into (extension, language) pairs.
+fn parse_count_as_list(s: &str) -> Vec<(String, String)> {
+    let to_pair = |pair: &str| {
+        let (ext, lang) = pair.split_once(':')?;
+        Some((ext.trim().to_string(), lang.trim().to_string()))
+    };
+    s.split(',').filter_map(to_pair).collect()
 }
 
 fn parse_format(s: &str) -> OutputFormatType {
