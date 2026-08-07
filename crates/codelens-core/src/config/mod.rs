@@ -42,6 +42,8 @@ pub struct FilterConfig {
     pub smart_exclude: bool,
     /// Include all files (including dependencies).
     pub include_all: bool,
+    /// Skip files whose content duplicates an already-seen file.
+    pub no_duplicates: bool,
 }
 
 impl FilterConfig {

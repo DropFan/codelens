@@ -229,6 +229,9 @@ fn resolve_config(
     if filter.all {
         config.filter.include_all = true;
     }
+    if filter.no_duplicates {
+        config.filter.no_duplicates = true;
+    }
     if let Some(ref count_as) = filter.count_as {
         config.count_as = parse_count_as(count_as);
     }

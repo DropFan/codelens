@@ -257,6 +257,10 @@ pub struct FilterArgs {
     /// Disable smart directory exclusion.
     #[arg(long)]
     pub no_smart_exclude: bool,
+
+    /// Skip files whose content duplicates an already-counted file.
+    #[arg(long)]
+    pub no_duplicates: bool,
 }
 
 /// Output options.

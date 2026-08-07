@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::error::Result;
@@ -24,6 +24,8 @@ pub struct FileAnalyzer {
     max_lines: Option<usize>,
     /// Lowercased language names from `-l`/config; `None` = no filtering.
     allowed_languages: Option<HashSet<String>>,
+    /// Content hashes of seen files when `--no-duplicates` is on.
+    seen_hashes: Option<Mutex<HashSet<u64>>>,
 }
 
 impl FileAnalyzer {
@@ -47,6 +49,10 @@ impl FileAnalyzer {
             min_lines: config.filter.min_lines,
             max_lines: config.filter.max_lines,
             allowed_languages,
+            seen_hashes: config
+                .filter
+                .no_duplicates
+                .then(|| Mutex::new(HashSet::new())),
         }
     }
 
@@ -95,6 +101,16 @@ impl FileAnalyzer {
         let content = content
             .strip_prefix(b"\xEF\xBB\xBF".as_slice())
             .unwrap_or(content);
+
+        // Duplicate-content detection (--no-duplicates): first seen wins
+        if let Some(ref seen) = self.seen_hashes {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            content.hash(&mut hasher);
+            if !seen.lock().unwrap().insert(hasher.finish()) {
+                return Ok(None);
+            }
+        }
 
         // Count lines using byte-level state machine
         let (trie, mask) = language.tokens();
@@ -188,6 +204,31 @@ mod tests {
             .analyze_from_bytes(Path::new("b.py"), b"print(1)\n")
             .unwrap();
         assert!(filtered.is_none(), "-l rust must drop Python files");
+    }
+
+    #[test]
+    fn test_no_duplicates_skips_identical_content() {
+        let mut config = Config::default();
+        config.filter.no_duplicates = true;
+        let analyzer = FileAnalyzer::new(make_rust_registry(), &config);
+
+        let content = b"fn main() {}\n";
+        assert!(analyzer
+            .analyze_from_bytes(Path::new("a.rs"), content)
+            .unwrap()
+            .is_some());
+        assert!(
+            analyzer
+                .analyze_from_bytes(Path::new("copy_of_a.rs"), content)
+                .unwrap()
+                .is_none(),
+            "identical content must be skipped with --no-duplicates"
+        );
+        // Different content still counts
+        assert!(analyzer
+            .analyze_from_bytes(Path::new("b.rs"), b"fn other() {}\n")
+            .unwrap()
+            .is_some());
     }
 
     #[test]
