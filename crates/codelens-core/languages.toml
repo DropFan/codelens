@@ -8,6 +8,8 @@
 #   function_pattern = "regex"
 #   complexity_keywords = ["if", "for"]
 #   nested_comments = false
+#   string_delimiters = [{ start = '"', end = '"', escape = "\\", multiline = false }]
+#     （未配置时默认插入单行的 " 和 '；escape 缺省为无转义，multiline 缺省 false）
 
 # ============================================================================
 # Systems Programming
@@ -21,6 +23,10 @@ block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(pub\\s+)?(async\\s+)?fn\\s+\\w+"
 complexity_keywords = ["if", "else", "for", "while", "loop", "match", "?", "&&", "||"]
 nested_comments = true
+# ' 是生命周期/char 字面量，不是字符串定界符
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\", multiline = true },
+]
 
 [c]
 name = "C"
@@ -29,6 +35,10 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*\\w+\\s+\\w+\\s*\\([^)]*\\)\\s*\\{"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "?", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [cpp]
 name = "C++"
@@ -37,6 +47,10 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(template\\s*<[^>]*>\\s*)?(\\w+\\s+)+\\w+\\s*\\([^)]*\\)\\s*(const)?\\s*\\{"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [zig]
 name = "Zig"
@@ -56,6 +70,11 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*func\\s+"
 complexity_keywords = ["if", "else", "for", "switch", "select", "case", "&&", "||"]
+# ' 是 rune 字面量；反引号 raw string 可跨行且无转义
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "`", end = "`", multiline = true },
+]
 
 # ============================================================================
 # JVM Languages
@@ -68,6 +87,10 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(public|private|protected)?\\s*(static)?\\s*\\w+\\s+\\w+\\s*\\("
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [kotlin]
 name = "Kotlin"
@@ -104,6 +127,10 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(public|private|protected|internal)?\\s*(static|async)?\\s*\\w+\\s+\\w+\\s*\\("
 complexity_keywords = ["if", "else", "for", "foreach", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [fsharp]
 name = "F#"
@@ -132,6 +159,11 @@ line_comments = ["#"]
 block_comments = [["\"\"\"", "\"\"\""], ["'''", "'''"]]
 function_pattern = "(?m)^\\s*(async\\s+)?def\\s+\\w+"
 complexity_keywords = ["if", "elif", "else", "for", "while", "except", "with", "and", "or", "not"]
+# 三引号由 docstring 机制处理；' 和 " 均支持反斜杠转义
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [ruby]
 name = "Ruby"
@@ -141,6 +173,10 @@ line_comments = ["#"]
 block_comments = [["=begin", "=end"]]
 function_pattern = "(?m)^\\s*def\\s+\\w+"
 complexity_keywords = ["if", "elsif", "else", "unless", "for", "while", "until", "case", "when", "rescue", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+]
 
 [perl]
 name = "Perl"
@@ -177,6 +213,11 @@ filenames = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout"]
 line_comments = ["#"]
 function_pattern = "(?m)^\\s*(function\\s+)?\\w+\\s*\\(\\s*\\)"
 complexity_keywords = ["if", "elif", "else", "for", "while", "until", "case", "&&", "||"]
+# 单引号字符串无转义
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'" },
+]
 
 [zsh]
 name = "Zsh"
@@ -185,6 +226,11 @@ filenames = [".zshrc", ".zprofile", ".zlogin", ".zlogout"]
 line_comments = ["#"]
 function_pattern = "(?m)^\\s*(function\\s+)?\\w+\\s*\\(\\s*\\)"
 complexity_keywords = ["if", "elif", "else", "for", "while", "until", "case", "&&", "||"]
+# 单引号字符串无转义
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'" },
+]
 
 [fish]
 name = "Fish"
@@ -212,6 +258,11 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+    { start = "`", end = "`", escape = "\\", multiline = true },
+]
 
 [typescript]
 name = "TypeScript"
@@ -220,6 +271,11 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'", escape = "\\" },
+    { start = "`", end = "`", escape = "\\", multiline = true },
+]
 
 [html]
 name = "HTML"
@@ -272,6 +328,11 @@ extensions = [".json", ".jsonc", ".json5"]
 name = "YAML"
 extensions = [".yml", ".yaml"]
 line_comments = ["#"]
+# 单引号字符串用 '' 表示引号本身，无反斜杠转义
+string_delimiters = [
+    { start = '"', end = '"', escape = "\\" },
+    { start = "'", end = "'" },
+]
 
 [toml]
 name = "TOML"
@@ -302,6 +363,10 @@ extensions = [".sql"]
 line_comments = ["--"]
 block_comments = [["/*", "*/"]]
 complexity_keywords = ["CASE", "WHEN", "IF", "ELSE", "AND", "OR"]
+# 标准 SQL 用 '' 表示引号本身，无反斜杠转义
+string_delimiters = [
+    { start = "'", end = "'" },
+]
 
 [plsql]
 name = "PL/SQL"

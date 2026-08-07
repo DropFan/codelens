@@ -25,6 +25,8 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
     let mut stats = LineStats::default();
     let mut state = State::Blank;
     let mut close_bytes: Vec<u8> = Vec::new();
+    // 当前字符串定界符是否允许跨行（非跨行的未闭合字符串在行尾复位）
+    let mut string_multiline = false;
     let mut index: usize = 0;
 
     while index < len {
@@ -36,7 +38,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             classify_line(&state, &mut stats);
             state = match state {
                 State::BlockComment | State::BlockCommentAfterCode => State::BlockComment,
-                State::InString => State::InString,
+                State::InString if string_multiline => State::InString,
                 State::InDocString => State::InDocString,
                 _ => State::Blank,
             };
@@ -66,6 +68,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             }
                             TokenType::StringDelimiter => {
                                 close_bytes = m.close.unwrap_or_default();
+                                string_multiline = m.multiline;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -100,6 +103,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             }
                             TokenType::StringDelimiter => {
                                 close_bytes = m.close.unwrap_or_default();
+                                string_multiline = m.multiline;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -107,6 +111,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             TokenType::DocStringDelimiter => {
                                 // Triple-quote after code = string assignment, not docstring
                                 close_bytes = m.close.unwrap_or_default();
+                                string_multiline = m.multiline;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -197,7 +202,7 @@ fn content_matches_at(content: &[u8], pos: usize, pattern: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::analyzer::trie::build_from_language;
-    use crate::language::Language;
+    use crate::language::{Language, LanguageRegistry, StringDelimiter};
 
     fn rust_lang() -> Language {
         Language {
@@ -205,7 +210,37 @@ mod tests {
             extensions: vec![".rs".to_string()],
             line_comments: vec!["//".to_string()],
             block_comments: vec![("/*".to_string(), "*/".to_string())],
+            // 与 languages.toml 保持一致：Rust 只有 " 定界符（' 是生命周期/char）
+            string_delimiters: vec![StringDelimiter {
+                start: "\"".to_string(),
+                end: "\"".to_string(),
+                escape: Some("\\".to_string()),
+                multiline: true,
+            }],
             nested_comments: true,
+            ..Default::default()
+        }
+    }
+
+    fn yaml_lang() -> Language {
+        Language {
+            name: "YAML".to_string(),
+            extensions: vec![".yml".to_string()],
+            line_comments: vec!["#".to_string()],
+            string_delimiters: vec![
+                StringDelimiter {
+                    start: "\"".to_string(),
+                    end: "\"".to_string(),
+                    escape: Some("\\".to_string()),
+                    multiline: false,
+                },
+                StringDelimiter {
+                    start: "'".to_string(),
+                    end: "'".to_string(),
+                    escape: None,
+                    multiline: false,
+                },
+            ],
             ..Default::default()
         }
     }
@@ -372,6 +407,76 @@ mod tests {
         let stats = count("let c = 'a';\n// comment\n", &rust_lang());
         assert_eq!(stats.total, 2);
         assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_rust_lifetime_apostrophe_not_string() {
+        // 生命周期的 ' 不是字符串定界符，后续注释不能被误判为代码
+        let stats = count(
+            "fn f() -> &'static str {\n    \"x\"\n}\n// comment 1\n// comment 2\n",
+            &rust_lang(),
+        );
+        assert_eq!(stats.total, 5);
+        assert_eq!(stats.code, 3);
+        assert_eq!(stats.comment, 2);
+    }
+
+    #[test]
+    fn test_yaml_apostrophe_does_not_poison_file() {
+        // 普通文本里的撇号不能把后续注释拖进字符串状态
+        let stats = count(
+            "title: Tiger's guide\n# a comment\nkey: value\n",
+            &yaml_lang(),
+        );
+        assert_eq!(stats.total, 3);
+        assert_eq!(stats.code, 2);
+        assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_unclosed_default_quote_resets_at_newline() {
+        // 未配置 string_delimiters 的语言：默认 "/' 定界符不跨行，
+        // 未闭合引号只影响当前行
+        let lang = Language {
+            name: "X".to_string(),
+            line_comments: vec!["//".to_string()],
+            ..Default::default()
+        };
+        let stats = count("let s = 'oops\n// comment\n\ncode();\n", &lang);
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.code, 2);
+        assert_eq!(stats.comment, 1);
+        assert_eq!(stats.blank, 1);
+    }
+
+    #[test]
+    fn test_builtin_rust_lifetime_acceptance() {
+        // 验收用例：真实 languages.toml 的 Rust 配置
+        let registry = LanguageRegistry::with_builtin().unwrap();
+        let lang = registry.get("Rust").unwrap();
+        let (trie, mask) = lang.tokens();
+        let stats = count_stats(
+            "fn f() -> &'static str {\n    \"x\"\n}\n// comment 1\n// comment 2\n".as_bytes(),
+            trie,
+            *mask,
+        );
+        assert_eq!(stats.code, 3);
+        assert_eq!(stats.comment, 2);
+    }
+
+    #[test]
+    fn test_builtin_yaml_apostrophe_acceptance() {
+        // 验收用例：真实 languages.toml 的 YAML 配置
+        let registry = LanguageRegistry::with_builtin().unwrap();
+        let lang = registry.get("YAML").unwrap();
+        let (trie, mask) = lang.tokens();
+        let stats = count_stats(
+            "title: Tiger's guide\n# a comment\nkey: value\n".as_bytes(),
+            trie,
+            *mask,
+        );
+        assert_eq!(stats.code, 2);
         assert_eq!(stats.comment, 1);
     }
 }

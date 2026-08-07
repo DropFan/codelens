@@ -25,6 +25,21 @@ pub struct TokenMatch {
     pub close: Option<Vec<u8>>,
     /// How many bytes to advance past the matched token (set by insert).
     pub advance: usize,
+    /// Whether the token content may span multiple lines
+    /// (string delimiters only; docstrings are always multiline).
+    pub multiline: bool,
+}
+
+impl TokenMatch {
+    /// Create a token match with default flags (advance is set by `insert`).
+    pub fn new(token_type: TokenType, close: Option<Vec<u8>>) -> Self {
+        Self {
+            token_type,
+            close,
+            advance: 0,
+            multiline: false,
+        }
+    }
 }
 
 struct TrieNode {
@@ -117,52 +132,49 @@ impl std::fmt::Debug for TokenTrie {
 /// Build a `TokenTrie` from a `Language` definition.
 ///
 /// Inserts line comments, block comment starts (with close bytes),
-/// string delimiters (`"` and `'`), and for Python/Ruby also
-/// triple-quote doc-string delimiters (`"""` and `'''`).
+/// string delimiters from the language's `string_delimiters` config
+/// (falling back to single-line `"` and `'` when unconfigured), and
+/// for Python/Ruby also triple-quote doc-string delimiters (`"""` and `'''`).
 pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) {
     let mut trie = TokenTrie::new();
 
     // Line comments
     for lc in &lang.line_comments {
-        trie.insert(
-            lc.as_bytes(),
-            TokenMatch {
-                token_type: TokenType::LineComment,
-                close: None,
-                advance: 0,
-            },
-        );
+        trie.insert(lc.as_bytes(), TokenMatch::new(TokenType::LineComment, None));
     }
 
     // Block comments
     for (open, close) in &lang.block_comments {
         trie.insert(
             open.as_bytes(),
-            TokenMatch {
-                token_type: TokenType::BlockCommentStart,
-                close: Some(close.as_bytes().to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(
+                TokenType::BlockCommentStart,
+                Some(close.as_bytes().to_vec()),
+            ),
         );
     }
 
-    // String delimiters: always " and '
-    trie.insert(
-        b"\"",
-        TokenMatch {
-            token_type: TokenType::StringDelimiter,
-            close: Some(b"\"".to_vec()),
-            advance: 0,
-        },
-    );
-    trie.insert(
-        b"'",
-        TokenMatch {
-            token_type: TokenType::StringDelimiter,
-            close: Some(b"'".to_vec()),
-            advance: 0,
-        },
-    );
+    // String delimiters: use the language config when present; otherwise
+    // fall back to `"` and `'`, treated as single-line so an unclosed
+    // quote cannot poison the rest of the file.
+    if lang.string_delimiters.is_empty() {
+        for delim in [b"\"".as_slice(), b"'".as_slice()] {
+            trie.insert(
+                delim,
+                TokenMatch::new(TokenType::StringDelimiter, Some(delim.to_vec())),
+            );
+        }
+    } else {
+        for sd in &lang.string_delimiters {
+            trie.insert(
+                sd.start.as_bytes(),
+                TokenMatch {
+                    multiline: sd.multiline,
+                    ..TokenMatch::new(TokenType::StringDelimiter, Some(sd.end.as_bytes().to_vec()))
+                },
+            );
+        }
+    }
 
     // Doc-string delimiters for Python and Ruby (longest-match wins over single quotes)
     let name = lang.name.as_str();
@@ -170,17 +182,15 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
         trie.insert(
             b"\"\"\"",
             TokenMatch {
-                token_type: TokenType::DocStringDelimiter,
-                close: Some(b"\"\"\"".to_vec()),
-                advance: 0,
+                multiline: true,
+                ..TokenMatch::new(TokenType::DocStringDelimiter, Some(b"\"\"\"".to_vec()))
             },
         );
         trie.insert(
             b"'''",
             TokenMatch {
-                token_type: TokenType::DocStringDelimiter,
-                close: Some(b"'''".to_vec()),
-                advance: 0,
+                multiline: true,
+                ..TokenMatch::new(TokenType::DocStringDelimiter, Some(b"'''".to_vec()))
             },
         );
     }
@@ -213,14 +223,7 @@ mod tests {
     #[test]
     fn test_single_line_comment() {
         let mut trie = TokenTrie::new();
-        trie.insert(
-            b"//",
-            TokenMatch {
-                token_type: TokenType::LineComment,
-                close: None,
-                advance: 0,
-            },
-        );
+        trie.insert(b"//", TokenMatch::new(TokenType::LineComment, None));
         let m = trie.match_at(b"// comment", 0).unwrap();
         assert_eq!(m.token_type, TokenType::LineComment);
         assert_eq!(m.advance, 2);
@@ -232,11 +235,7 @@ mod tests {
         let mut trie = TokenTrie::new();
         trie.insert(
             b"/*",
-            TokenMatch {
-                token_type: TokenType::BlockCommentStart,
-                close: Some(b"*/".to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(TokenType::BlockCommentStart, Some(b"*/".to_vec())),
         );
         let m = trie.match_at(b"/* block */", 0).unwrap();
         assert_eq!(m.token_type, TokenType::BlockCommentStart);
@@ -247,14 +246,7 @@ mod tests {
     #[test]
     fn test_no_match_at_wrong_position() {
         let mut trie = TokenTrie::new();
-        trie.insert(
-            b"//",
-            TokenMatch {
-                token_type: TokenType::LineComment,
-                close: None,
-                advance: 0,
-            },
-        );
+        trie.insert(b"//", TokenMatch::new(TokenType::LineComment, None));
         assert_eq!(trie.match_at(b"x // y", 0), None);
         let m = trie.match_at(b"x // y", 2).unwrap();
         assert_eq!(m.token_type, TokenType::LineComment);
@@ -265,11 +257,7 @@ mod tests {
         let mut trie = TokenTrie::new();
         trie.insert(
             b"\"",
-            TokenMatch {
-                token_type: TokenType::StringDelimiter,
-                close: Some(b"\"".to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(TokenType::StringDelimiter, Some(b"\"".to_vec())),
         );
         let m = trie.match_at(b"\"hello\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::StringDelimiter);
@@ -279,21 +267,10 @@ mod tests {
     #[test]
     fn test_process_mask_filters_correctly() {
         let mut trie = TokenTrie::new();
-        trie.insert(
-            b"//",
-            TokenMatch {
-                token_type: TokenType::LineComment,
-                close: None,
-                advance: 0,
-            },
-        );
+        trie.insert(b"//", TokenMatch::new(TokenType::LineComment, None));
         trie.insert(
             b"\"",
-            TokenMatch {
-                token_type: TokenType::StringDelimiter,
-                close: Some(b"\"".to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(TokenType::StringDelimiter, Some(b"\"".to_vec())),
         );
         let mask = trie.process_mask();
         assert!(should_process(b'/', mask));
@@ -307,19 +284,11 @@ mod tests {
         let mut trie = TokenTrie::new();
         trie.insert(
             b"\"",
-            TokenMatch {
-                token_type: TokenType::StringDelimiter,
-                close: Some(b"\"".to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(TokenType::StringDelimiter, Some(b"\"".to_vec())),
         );
         trie.insert(
             b"\"\"\"",
-            TokenMatch {
-                token_type: TokenType::DocStringDelimiter,
-                close: Some(b"\"\"\"".to_vec()),
-                advance: 0,
-            },
+            TokenMatch::new(TokenType::DocStringDelimiter, Some(b"\"\"\"".to_vec())),
         );
         let m = trie.match_at(b"\"\"\"hello\"\"\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::DocStringDelimiter);
@@ -351,6 +320,51 @@ mod tests {
         assert_eq!(m.token_type, TokenType::StringDelimiter);
 
         assert_ne!(mask, 0);
+    }
+
+    #[test]
+    fn test_configured_string_delimiters_override_defaults() {
+        use crate::language::{Language, StringDelimiter};
+
+        // Rust 风格配置：只有 "，' 不是字符串定界符
+        let lang = Language {
+            name: "Rust".to_string(),
+            line_comments: vec!["//".to_string()],
+            string_delimiters: vec![StringDelimiter {
+                start: "\"".to_string(),
+                end: "\"".to_string(),
+                escape: Some("\\".to_string()),
+                multiline: true,
+            }],
+            ..Default::default()
+        };
+        let (trie, _mask) = build_from_language(&lang);
+
+        // ' 不再被识别为字符串定界符
+        assert_eq!(trie.match_at(b"'a'", 0), None);
+
+        let m = trie.match_at(b"\"s\"", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+        assert!(m.multiline);
+    }
+
+    #[test]
+    fn test_default_string_delimiters_are_single_line() {
+        use crate::language::Language;
+
+        let lang = Language {
+            name: "X".to_string(),
+            ..Default::default()
+        };
+        let (trie, _mask) = build_from_language(&lang);
+
+        let m = trie.match_at(b"\"s\"", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+        assert!(!m.multiline);
+
+        let m = trie.match_at(b"'s'", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+        assert!(!m.multiline);
     }
 
     #[test]

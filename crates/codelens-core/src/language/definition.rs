@@ -144,6 +144,10 @@ pub struct StringDelimiter {
     /// Escape character (if any).
     #[serde(default)]
     pub escape: Option<String>,
+    /// Whether the string literal may span multiple lines
+    /// (e.g., Rust `"..."`, JS backtick, Go backtick).
+    #[serde(default)]
+    pub multiline: bool,
 }
 
 /// Custom deserializer for block comments that handles TOML array format.
