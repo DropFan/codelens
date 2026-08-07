@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-08
+
 ### Fixed
 - **`-l` language filtering now works** — the flag was parsed but never
   applied (dead `target_languages` field); filtering now happens at
