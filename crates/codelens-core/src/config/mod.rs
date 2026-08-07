@@ -44,6 +44,9 @@ pub struct FilterConfig {
     pub include_all: bool,
     /// Skip files whose content duplicates an already-seen file.
     pub no_duplicates: bool,
+    /// Skip minified/generated files (long average line length or a
+    /// generated-code marker in the first line).
+    pub no_min_gen: bool,
 }
 
 impl FilterConfig {

@@ -278,6 +278,10 @@ pub struct FilterArgs {
     /// Skip files whose content duplicates an already-counted file.
     #[arg(long)]
     pub no_duplicates: bool,
+
+    /// Skip minified/generated files (long lines or generated markers).
+    #[arg(long)]
+    pub no_min_gen: bool,
 }
 
 /// Output options.
