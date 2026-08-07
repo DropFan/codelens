@@ -31,6 +31,8 @@ pub struct TokenMatch {
     /// Escape byte inside the token content (e.g., `\` for most strings).
     /// None when the delimiter has no escape (e.g., shell `'`, Go backtick).
     pub escape: Option<u8>,
+    /// Whether this block comment may nest (from `nested_comments` config).
+    pub nested: bool,
 }
 
 impl TokenMatch {
@@ -42,6 +44,7 @@ impl TokenMatch {
             advance: 0,
             multiline: false,
             escape: None,
+            nested: false,
         }
     }
 }
@@ -151,10 +154,13 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
     for (open, close) in &lang.block_comments {
         trie.insert(
             open.as_bytes(),
-            TokenMatch::new(
-                TokenType::BlockCommentStart,
-                Some(close.as_bytes().to_vec()),
-            ),
+            TokenMatch {
+                nested: lang.nested_comments,
+                ..TokenMatch::new(
+                    TokenType::BlockCommentStart,
+                    Some(close.as_bytes().to_vec()),
+                )
+            },
         );
     }
 

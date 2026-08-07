@@ -32,6 +32,10 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
     let mut string_multiline = false;
     // 当前字符串定界符的转义字节（None 表示无转义，如 shell 单引号）
     let mut string_escape: Option<u8> = None;
+    // 当前块注释的开启序列、是否可嵌套及嵌套深度
+    let mut open_bytes: Vec<u8> = Vec::new();
+    let mut comment_nested = false;
+    let mut comment_depth: usize = 0;
     let mut index: usize = 0;
 
     while index < len {
@@ -67,6 +71,9 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             }
                             TokenType::BlockCommentStart => {
                                 close_bytes = m.close.unwrap_or_default();
+                                open_bytes = content[index..index + m.advance].to_vec();
+                                comment_nested = m.nested;
+                                comment_depth = 0;
                                 state = State::BlockComment;
                                 index += m.advance;
                                 continue;
@@ -103,6 +110,9 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             }
                             TokenType::BlockCommentStart => {
                                 close_bytes = m.close.unwrap_or_default();
+                                open_bytes = content[index..index + m.advance].to_vec();
+                                comment_nested = m.nested;
+                                comment_depth = 0;
                                 state = State::BlockCommentAfterCode;
                                 index += m.advance;
                                 continue;
@@ -138,12 +148,22 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             State::BlockComment | State::BlockCommentAfterCode => {
                 if content_matches_at(content, index, &close_bytes) {
                     index += close_bytes.len();
+                    // 嵌套注释：先弹出内层，深度归零才真正闭合
+                    if comment_depth > 0 {
+                        comment_depth -= 1;
+                        continue;
+                    }
                     state = match state {
                         State::BlockCommentAfterCode => State::Code,
                         // 行首开始的块注释闭合后继续扫描，
                         // 行尾按是否出现过代码再分类
                         _ => State::AfterBlockComment,
                     };
+                    continue;
+                }
+                if comment_nested && content_matches_at(content, index, &open_bytes) {
+                    comment_depth += 1;
+                    index += open_bytes.len();
                     continue;
                 }
                 index += 1;
@@ -498,6 +518,43 @@ mod tests {
         assert_eq!(stats.total, 2);
         assert_eq!(stats.code, 1);
         assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_nested_block_comments() {
+        // Rust 支持嵌套块注释：内层 */ 不能提前闭合外层
+        let stats = count(
+            "/* outer /* inner */\nstill comment */\nlet x = 1;\n",
+            &rust_lang(),
+        );
+        assert_eq!(stats.total, 3);
+        assert_eq!(stats.comment, 2);
+        assert_eq!(stats.code, 1);
+    }
+
+    #[test]
+    fn test_nested_block_comment_inline() {
+        // 同一行内嵌套开启并全部闭合
+        let stats = count("/* a /* b */ c */ let x = 1;\n// done\n", &rust_lang());
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_non_nested_language_closes_at_first_end() {
+        // C 不支持嵌套：第一个 */ 即闭合
+        let c = Language {
+            name: "C".to_string(),
+            line_comments: vec!["//".to_string()],
+            block_comments: vec![("/*".to_string(), "*/".to_string())],
+            nested_comments: false,
+            ..Default::default()
+        };
+        let stats = count("/* outer /* inner */ int x = 1;\n", &c);
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 0);
     }
 
     #[test]
