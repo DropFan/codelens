@@ -276,6 +276,7 @@ dependencies = [
  "indicatif",
  "num_cpus",
  "tempfile",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
