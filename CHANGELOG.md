@@ -7,10 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-08
+
 ### Added
 - `codelens health --fail-under <GRADE|SCORE>` — CI quality gate: exits
   non-zero when project health is below a grade (A/B/C/D) or numeric
   score, so a PR can be blocked on declining code health
+
+### Fixed
+- Health metrics no longer distorted by false signals:
+  - nesting depth ignored brackets inside string literals, char
+    literals, and line comments (an ANSI-colored help string alone
+    produced a fake depth of 126)
+  - average function length divided ALL code lines (including
+    Markdown/HTML documents that have no functions) by the function
+    count; only files containing functions now contribute
+  - document and data formats (Markdown/HTML/JSON/TOML/YAML/CSS) no
+    longer report complexity metrics at all — bracket depth in a JSON
+    file is not a code-nesting signal
+
+### Changed
+- Flattened deeply nested code in the parallel walker (extracted
+  `classify_entry` dispatch), git rename parsing, and trie construction
 
 ## [0.1.4] - 2026-08-08
 
