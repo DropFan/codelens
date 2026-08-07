@@ -42,13 +42,13 @@ fn run() -> Result<()> {
         return list_languages();
     }
 
-    // Handle subcommands
+    // Handle subcommands (they share config loading with the main command)
     if let Some(ref command) = cli.command {
         return match command {
-            cli::Command::Health(args) => run_health(args),
-            cli::Command::Hotspot(args) => run_hotspot(args),
-            cli::Command::Trend(args) => run_trend(args),
-            cli::Command::Estimate(args) => run_estimate(args),
+            cli::Command::Health(args) => run_health(args, &cli.advanced),
+            cli::Command::Hotspot(args) => run_hotspot(args, &cli.advanced),
+            cli::Command::Trend(args) => run_trend(args, &cli.advanced),
+            cli::Command::Estimate(args) => run_estimate(args, &cli.advanced),
         };
     }
 
@@ -275,28 +275,30 @@ fn build_config(cli: &Cli) -> Result<Config> {
     ))
 }
 
-fn run_health(args: &cli::HealthArgs) -> Result<()> {
-    let config = build_config_from_args(&args.filter, &args.output)?;
+fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
     let model = DefaultModel::new();
-    let top_n = args.output.top.unwrap_or(10);
+    let top_n = config.output.top_n.unwrap_or(10);
     let report = health::score(&result, &model, top_n);
-    write_report(Report::Health(report), &args.output)
+    write_report(Report::Health(report), &config.output)
 }
 
-fn run_hotspot(args: &cli::HotspotArgs) -> Result<()> {
-    let config = build_config_from_args(&args.filter, &args.output)?;
+fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let git_client = GitClient::detect(&args.paths[0]).context("Not a git repository")?;
     let since = git::parse_since(&args.since);
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
     let churns = git_client.file_churn(&since)?;
     let total_commits = git_client.commit_count(&since)?;
-    let top_n = args.output.top.unwrap_or(20);
+    let top_n = config.output.top_n.unwrap_or(20);
     let report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
-    write_report(Report::Hotspot(report), &args.output)
+    write_report(Report::Hotspot(report), &config.output)
 }
 
-fn run_trend(args: &cli::TrendArgs) -> Result<()> {
+fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
     let project_root = args
         .paths
         .first()
@@ -324,7 +326,10 @@ fn run_trend(args: &cli::TrendArgs) -> Result<()> {
     }
 
     if args.save {
-        let config = Config::default();
+        // Use the same filter semantics as the main command so snapshot
+        // numbers stay comparable with `codelens` output.
+        let partial = load_partial_config(advanced)?;
+        let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
         let result = analyze(&[&project_root], &config).context("Analysis failed")?;
         let (git_commit, git_branch) = GitClient::detect(&project_root)
             .and_then(|c| c.repo_info())
@@ -348,11 +353,32 @@ fn run_trend(args: &cli::TrendArgs) -> Result<()> {
     };
 
     let report = trend::diff(&project_root, from_ref, to_ref)?;
-    write_report(Report::Trend(report), &args.output)
+    let output_config = trend_output_config(args);
+    write_report(Report::Trend(report), &output_config)
 }
 
-fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
-    let config = build_config_from_args(&args.filter, &args.output)?;
+/// Trend's list/diff paths don't run an analysis; build output settings
+/// directly from CLI args.
+fn trend_output_config(args: &cli::TrendArgs) -> codelens_core::config::OutputConfig {
+    let mut output = codelens_core::config::OutputConfig::default();
+    if let Some(format) = args.output.format {
+        output.format = format.into();
+    }
+    if let Some(ref path) = args.output.output_file {
+        output.file = Some(path.clone());
+    }
+    if let Some(sort) = args.output.sort {
+        output.sort_by = sort.into();
+    }
+    output.summary_only = args.output.summary;
+    output.top_n = args.output.top;
+    output.quiet = args.output.quiet;
+    output
+}
+
+fn run_estimate(args: &cli::EstimateArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
 
     let cost_config = codelens_core::CostConfig {
@@ -361,14 +387,14 @@ fn run_estimate(args: &cli::EstimateArgs) -> Result<()> {
     };
 
     if matches!(args.model, cli::ModelArg::All) {
-        return run_estimate_all(&result.summary, args, &cost_config);
+        return run_estimate_all(&result.summary, args, &cost_config, &config.output);
     }
 
     let model: Box<dyn codelens_core::EstimationModel> = build_model(args);
 
     let report =
         codelens_core::insight::estimation::estimate(&result.summary, model.as_ref(), &cost_config);
-    write_report(Report::Estimation(report), &args.output)
+    write_report(Report::Estimation(report), &config.output)
 }
 
 fn build_model(args: &cli::EstimateArgs) -> Box<dyn codelens_core::EstimationModel> {
@@ -405,6 +431,7 @@ fn run_estimate_all(
     summary: &codelens_core::Summary,
     args: &cli::EstimateArgs,
     cost_config: &codelens_core::CostConfig,
+    output: &codelens_core::config::OutputConfig,
 ) -> Result<()> {
     let cocomo_basic = codelens_core::CocomoBasicModel {
         project_type: args.project_type.into(),
@@ -430,24 +457,24 @@ fn run_estimate_all(
         vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
     let comparison =
         codelens_core::insight::estimation::estimate_all(summary, &models, cost_config);
-    write_report(Report::EstimationComparison(comparison), &args.output)
+    write_report(Report::EstimationComparison(comparison), output)
 }
 
-fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
+fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
     let output_options = OutputOptions {
-        summary_only: output_args.summary,
-        sort_by: output_args.sort.unwrap_or_default().into(),
-        top_n: output_args.top,
-        colorize: !output_args.quiet,
+        summary_only: output.summary_only,
+        sort_by: output.sort_by,
+        top_n: output.top_n,
+        colorize: !output.quiet,
         show_git_info: false,
     };
-    let formatter = create_output(output_args.format.unwrap_or_default().into());
+    let formatter = create_output(output.format);
 
-    if output_args.quiet {
+    if output.quiet {
         return Ok(());
     }
 
-    if let Some(ref path) = output_args.output_file {
+    if let Some(ref path) = output.file {
         let file = File::create(path).context("Failed to create output file")?;
         let mut writer = BufWriter::new(file);
         formatter.write(&report, &output_options, &mut writer)?;
@@ -459,28 +486,6 @@ fn write_report(report: Report, output_args: &cli::OutputArgs) -> Result<()> {
         formatter.write(&report, &output_options, &mut writer)?;
     }
     Ok(())
-}
-
-fn build_config_from_args(filter: &cli::FilterArgs, _output: &cli::OutputArgs) -> Result<Config> {
-    use codelens_core::config::FilterConfig;
-    use codelens_core::walker::WalkerConfig;
-
-    Ok(Config {
-        walker: WalkerConfig {
-            threads: num_cpus::get(),
-            use_gitignore: !filter.no_gitignore,
-            max_depth: filter.depth,
-            ..WalkerConfig::default()
-        },
-        filter: FilterConfig {
-            excludes: filter.exclude.clone().unwrap_or_default(),
-            languages: filter.lang.clone().unwrap_or_default(),
-            smart_exclude: !filter.no_smart_exclude,
-            include_all: filter.all,
-            ..FilterConfig::default()
-        },
-        ..Config::default()
-    })
 }
 
 impl From<OutputFormatArg> for codelens_core::config::OutputFormatType {
@@ -568,6 +573,25 @@ mod tests {
         assert_eq!(config.output.format, OutputFormatType::Csv);
         assert_eq!(config.filter.languages, vec!["python"]);
         assert_eq!(config.walker.threads, 8);
+    }
+
+    #[test]
+    fn subcommands_accept_global_advanced_args() {
+        // -j and --config used to be rejected after a subcommand.
+        let cli = parse(&["codelens", "health", ".", "-j", "2", "--no-config"]);
+        assert_eq!(cli.advanced.threads, Some(2));
+        assert!(cli.advanced.no_config);
+    }
+
+    #[test]
+    fn subcommand_filter_args_reach_config() {
+        // --min-lines & co. used to be accepted but silently dropped.
+        let cli = parse(&["codelens", "health", ".", "--min-lines", "5"]);
+        let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected health subcommand");
+        };
+        let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
+        assert_eq!(config.filter.min_lines, Some(5));
     }
 
     #[test]

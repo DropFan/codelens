@@ -130,6 +130,9 @@ pub struct TrendArgs {
     pub list: bool,
 
     #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
     pub output: OutputArgs,
 }
 
@@ -288,22 +291,25 @@ pub struct OutputArgs {
 }
 
 /// Advanced options.
+///
+/// Most of these are `global` so they also work after a subcommand,
+/// e.g. `codelens health . -j 4 --config my.toml`.
 #[derive(Args, Debug)]
 pub struct AdvancedArgs {
     /// Number of threads (defaults to CPU count).
-    #[arg(short = 'j', long)]
+    #[arg(short = 'j', long, global = true)]
     pub threads: Option<usize>,
 
     /// Configuration file path.
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub config: Option<PathBuf>,
 
     /// Don't load configuration files.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub no_config: bool,
 
     /// Show git repository information.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub git_info: bool,
 
     /// List supported languages.
