@@ -1,5 +1,6 @@
 //! Single file analyzer.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -21,16 +22,31 @@ pub struct FileAnalyzer {
     complexity_analyzer: ComplexityAnalyzer,
     min_lines: Option<usize>,
     max_lines: Option<usize>,
+    /// Lowercased language names from `-l`/config; `None` = no filtering.
+    allowed_languages: Option<HashSet<String>>,
 }
 
 impl FileAnalyzer {
     /// Create a new file analyzer.
     pub fn new(registry: Arc<LanguageRegistry>, config: &Config) -> Self {
+        let allowed_languages = if config.filter.languages.is_empty() {
+            None
+        } else {
+            Some(
+                config
+                    .filter
+                    .languages
+                    .iter()
+                    .map(|l| l.to_lowercase())
+                    .collect(),
+            )
+        };
         Self {
             registry,
             complexity_analyzer: ComplexityAnalyzer::new(),
             min_lines: config.filter.min_lines,
             max_lines: config.filter.max_lines,
+            allowed_languages,
         }
     }
 
@@ -60,6 +76,13 @@ impl FileAnalyzer {
             Some(lang) => lang,
             None => return Ok(None),
         };
+
+        // Apply the language filter (-l / config `lang`), case-insensitively
+        if let Some(ref allowed) = self.allowed_languages {
+            if !allowed.contains(&language.name.to_lowercase()) {
+                return Ok(None);
+            }
+        }
 
         // Detect binary files: check first 10KB for null bytes
         let check_len = content.len().min(BINARY_CHECK_LEN);
@@ -121,6 +144,57 @@ mod tests {
             )
             .unwrap();
         Arc::new(registry)
+    }
+
+    fn make_multi_registry() -> Arc<LanguageRegistry> {
+        let mut registry = LanguageRegistry::empty();
+        registry
+            .load_toml(
+                r##"
+                [rust]
+                name = "Rust"
+                extensions = [".rs"]
+                line_comments = ["//"]
+
+                [python]
+                name = "Python"
+                extensions = [".py"]
+                line_comments = ["#"]
+            "##,
+            )
+            .unwrap();
+        Arc::new(registry)
+    }
+
+    #[test]
+    fn test_language_filter_only_keeps_selected_languages() {
+        let mut config = Config::default();
+        config.filter.languages = vec!["rust".to_string()]; // lowercase on purpose
+
+        let analyzer = FileAnalyzer::new(make_multi_registry(), &config);
+
+        let kept = analyzer
+            .analyze_from_bytes(Path::new("a.rs"), b"fn main() {}\n")
+            .unwrap();
+        assert!(kept.is_some(), "-l rust must keep Rust files");
+
+        let filtered = analyzer
+            .analyze_from_bytes(Path::new("b.py"), b"print(1)\n")
+            .unwrap();
+        assert!(filtered.is_none(), "-l rust must drop Python files");
+    }
+
+    #[test]
+    fn test_empty_language_filter_keeps_everything() {
+        let analyzer = FileAnalyzer::new(make_multi_registry(), &Config::default());
+        assert!(analyzer
+            .analyze_from_bytes(Path::new("a.rs"), b"fn main() {}\n")
+            .unwrap()
+            .is_some());
+        assert!(analyzer
+            .analyze_from_bytes(Path::new("b.py"), b"print(1)\n")
+            .unwrap()
+            .is_some());
     }
 
     #[test]

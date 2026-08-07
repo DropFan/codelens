@@ -22,9 +22,6 @@ pub struct PatternFilter {
     include_file_regex: Vec<Regex>,
     /// Regex patterns to exclude directories.
     exclude_dir_regex: Vec<Regex>,
-    /// Target languages (empty = all). Reserved for future use.
-    #[allow(dead_code)]
-    target_languages: Vec<String>,
 }
 
 impl PatternFilter {
@@ -43,7 +40,6 @@ impl PatternFilter {
             exclude_file_regex,
             include_file_regex,
             exclude_dir_regex,
-            target_languages: config.languages.clone(),
         })
     }
 
