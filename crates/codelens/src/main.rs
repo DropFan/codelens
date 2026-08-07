@@ -68,6 +68,7 @@ fn run() -> Result<()> {
     // Prepare output options from the merged config (defaults → file → CLI)
     let output_options = OutputOptions {
         summary_only: config.output.summary_only,
+        by_file: config.output.by_file,
         sort_by: config.output.sort_by,
         top_n: config.output.top_n,
         colorize: should_colorize(&config.output),
@@ -237,6 +238,9 @@ fn resolve_config(
     }
     if output.summary {
         config.output.summary_only = true;
+    }
+    if output.by_file {
+        config.output.by_file = true;
     }
     if let Some(sort) = output.sort {
         config.output.sort_by = sort.into();
@@ -487,6 +491,7 @@ fn should_colorize(output: &codelens_core::config::OutputConfig) -> bool {
 fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
     let output_options = OutputOptions {
         summary_only: output.summary_only,
+        by_file: output.by_file,
         sort_by: output.sort_by,
         top_n: output.top_n,
         colorize: should_colorize(output),

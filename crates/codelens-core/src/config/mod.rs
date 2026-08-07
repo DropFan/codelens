@@ -63,6 +63,8 @@ pub struct OutputConfig {
     pub file: Option<std::path::PathBuf>,
     /// Show only summary.
     pub summary_only: bool,
+    /// Show per-file statistics.
+    pub by_file: bool,
     /// Sort order.
     pub sort_by: SortBy,
     /// Limit results to top N.
@@ -81,6 +83,7 @@ impl Default for OutputConfig {
             format: OutputFormatType::Console,
             file: None,
             summary_only: false,
+            by_file: false,
             sort_by: SortBy::Lines,
             top_n: None,
             verbose: false,

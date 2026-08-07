@@ -69,9 +69,28 @@ impl CsvOutput {
     fn write_analysis(
         &self,
         result: &AnalysisResult,
-        _options: &OutputOptions,
+        options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        // --by-file replaces the per-language table (matching scc/cloc)
+        if options.by_file {
+            writeln!(writer, "File,Language,Code,Comment,Blank,Total,Size")?;
+            for f in super::format::sorted_files(&result.files, options.sort_by, options.top_n) {
+                writeln!(
+                    writer,
+                    "{},{},{},{},{},{},{}",
+                    csv_field(&f.path.display().to_string()),
+                    csv_field(&f.language),
+                    f.lines.code,
+                    f.lines.comment,
+                    f.lines.blank,
+                    f.lines.total,
+                    f.size
+                )?;
+            }
+            return Ok(());
+        }
+
         // Header
         writeln!(writer, "Language,Files,Code,Comment,Blank,Total,Size")?;
 

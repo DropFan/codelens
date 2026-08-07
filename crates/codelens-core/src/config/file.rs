@@ -53,6 +53,8 @@ pub struct PartialConfig {
     pub parallel: Option<bool>,
     /// Summary only.
     pub summary: Option<bool>,
+    /// Per-file statistics.
+    pub by_file: Option<bool>,
     /// Verbose output.
     pub verbose: Option<bool>,
     /// Quiet mode.
@@ -118,6 +120,9 @@ impl PartialConfig {
         }
         if let Some(summary) = self.summary {
             config.output.summary_only = summary;
+        }
+        if let Some(by_file) = self.by_file {
+            config.output.by_file = by_file;
         }
         if let Some(verbose) = self.verbose {
             config.output.verbose = verbose;

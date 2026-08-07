@@ -288,6 +288,10 @@ pub struct OutputArgs {
     /// Show only top N results.
     #[arg(long)]
     pub top: Option<usize>,
+
+    /// Show per-file statistics (respects --sort and --top).
+    #[arg(long)]
+    pub by_file: bool,
 }
 
 /// Advanced options.

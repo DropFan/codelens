@@ -32,6 +32,30 @@ pub struct CombinedReport {
     pub estimation: EstimationComparison,
 }
 
+/// Sort file stats by the given key (descending for numeric keys,
+/// ascending for names) and truncate to `top_n`. Shared by the
+/// formatters that render per-file tables (`--by-file`).
+pub fn sorted_files<'a>(
+    files: &'a [crate::analyzer::stats::FileStats],
+    sort_by: SortBy,
+    top_n: Option<usize>,
+) -> Vec<&'a crate::analyzer::stats::FileStats> {
+    use std::cmp::Reverse;
+
+    let mut sorted: Vec<_> = files.iter().collect();
+    match sort_by {
+        // `Files` has no per-file meaning; fall back to total lines
+        SortBy::Lines | SortBy::Files => sorted.sort_by_key(|f| Reverse(f.lines.total)),
+        SortBy::Code => sorted.sort_by_key(|f| Reverse(f.lines.code)),
+        SortBy::Name => sorted.sort_by(|a, b| a.path.cmp(&b.path)),
+        SortBy::Size => sorted.sort_by_key(|f| Reverse(f.size)),
+    }
+    if let Some(n) = top_n {
+        sorted.truncate(n);
+    }
+    sorted
+}
+
 /// Trait for output formatters.
 pub trait OutputFormat: Send + Sync {
     /// Get the format name.
@@ -50,6 +74,8 @@ pub trait OutputFormat: Send + Sync {
 pub struct OutputOptions {
     /// Show only summary.
     pub summary_only: bool,
+    /// Show per-file statistics.
+    pub by_file: bool,
     /// Sort order.
     pub sort_by: SortBy,
     /// Limit to top N results.
@@ -64,6 +90,7 @@ impl Default for OutputOptions {
     fn default() -> Self {
         Self {
             summary_only: false,
+            by_file: false,
             sort_by: SortBy::Lines,
             top_n: None,
             colorize: true,

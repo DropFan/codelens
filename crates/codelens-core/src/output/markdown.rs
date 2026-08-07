@@ -115,6 +115,33 @@ impl MarkdownOutput {
             writeln!(writer)?;
         }
 
+        // Per-file breakdown (--by-file)
+        if options.by_file && !result.files.is_empty() {
+            writeln!(writer, "## By File")?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "| File | Language | Code | Comment | Blank | Total |"
+            )?;
+            writeln!(
+                writer,
+                "|------|----------|------|---------|-------|-------|"
+            )?;
+            for f in super::format::sorted_files(&result.files, options.sort_by, options.top_n) {
+                writeln!(
+                    writer,
+                    "| {} | {} | {} | {} | {} | {} |",
+                    f.path.display(),
+                    f.language,
+                    f.lines.code,
+                    f.lines.comment,
+                    f.lines.blank,
+                    f.lines.total
+                )?;
+            }
+            writeln!(writer)?;
+        }
+
         writeln!(writer, "---")?;
         writeln!(
             writer,

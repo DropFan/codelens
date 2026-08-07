@@ -235,6 +235,39 @@ impl ConsoleOutput {
             writeln!(writer)?;
         }
 
+        // Per-file breakdown (--by-file)
+        if options.by_file && !result.files.is_empty() {
+            writeln!(writer, "{}", "By File".bold())?;
+            writeln!(writer)?;
+
+            let mut file_table = Table::new();
+            file_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            file_table.set_header(vec![
+                Cell::new("File").add_attribute(Attribute::Bold),
+                Cell::new("Language").add_attribute(Attribute::Bold),
+                Cell::new("Code").add_attribute(Attribute::Bold),
+                Cell::new("Comment").add_attribute(Attribute::Bold),
+                Cell::new("Blank").add_attribute(Attribute::Bold),
+                Cell::new("Total").add_attribute(Attribute::Bold),
+            ]);
+
+            for f in super::format::sorted_files(&result.files, options.sort_by, options.top_n) {
+                file_table.add_row(vec![
+                    Cell::new(f.path.display().to_string()),
+                    Cell::new(&f.language).fg(Color::Cyan),
+                    Cell::new(Self::format_number(f.lines.code)).fg(Color::Green),
+                    Cell::new(Self::format_number(f.lines.comment)).fg(Color::Yellow),
+                    Cell::new(Self::format_number(f.lines.blank)).fg(Color::DarkGrey),
+                    Cell::new(Self::format_number(f.lines.total)),
+                ]);
+            }
+
+            writeln!(writer, "{file_table}")?;
+            writeln!(writer)?;
+        }
+
         // Footer — surface skipped/failed counts so partial results are visible
         writeln!(writer, "{}", "─".repeat(60).dimmed())?;
         let mut extras = Vec::new();
