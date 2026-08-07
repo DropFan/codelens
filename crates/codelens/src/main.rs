@@ -4,7 +4,7 @@ mod cli;
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -282,12 +282,37 @@ fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let git_client = GitClient::detect(&args.paths[0]).context("Not a git repository")?;
     let since = git::parse_since(&args.since);
-    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
+
+    // git numstat paths are repo-root-relative; analysis paths are relative
+    // to the walk root (or absolute). Rewrite them so the two sides match
+    // even when running from a subdirectory or with absolute paths.
+    rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+
     let churns = git_client.file_churn(&since)?;
     let total_commits = git_client.commit_count(&since)?;
+    if total_commits == 0 {
+        eprintln!(
+            "{}: no commits found since '{}'; check the --since format (e.g. 30d, 4w, 6m, 1y, YYYY-MM-DD)",
+            "warning".yellow().bold(),
+            args.since
+        );
+    }
     let top_n = config.output.top_n.unwrap_or(20);
     let report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
     write_report(Report::Hotspot(report), &config.output)
+}
+
+/// Rewrite analysis file paths to be repo-root-relative.
+fn rewrite_paths_repo_relative(files: &mut [codelens_core::FileStats], repo_root: &Path) {
+    let repo_root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    for f in files {
+        if let Ok(abs) = std::fs::canonicalize(&f.path) {
+            if let Ok(rel) = abs.strip_prefix(&repo_root) {
+                f.path = rel.to_path_buf();
+            }
+        }
+    }
 }
 
 fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
