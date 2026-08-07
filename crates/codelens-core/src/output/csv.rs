@@ -55,6 +55,16 @@ impl OutputFormat for CsvOutput {
     }
 }
 
+/// Quote a text field per RFC 4180: wrap in double quotes when it contains
+/// a comma, quote, or newline, doubling any embedded quotes.
+fn csv_field(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 impl CsvOutput {
     fn write_analysis(
         &self,
@@ -70,7 +80,7 @@ impl CsvOutput {
             writeln!(
                 writer,
                 "{},{},{},{},{},{},{}",
-                name,
+                csv_field(name),
                 stats.files,
                 stats.lines.code,
                 stats.lines.comment,
@@ -94,10 +104,10 @@ impl CsvOutput {
             writeln!(
                 writer,
                 "{},{:.1},{},{}",
-                file.path.display(),
+                csv_field(&file.path.display().to_string()),
                 file.score,
                 file.grade,
-                file.top_issue,
+                csv_field(&file.top_issue.to_string()),
             )?;
         }
         Ok(())
@@ -114,7 +124,7 @@ impl CsvOutput {
             writeln!(
                 writer,
                 "{},{},{},{},{},{},{:.2},{}",
-                file.path.display(),
+                csv_field(&file.path.display().to_string()),
                 file.churn.commits,
                 file.churn.lines_added,
                 file.churn.lines_deleted,
@@ -168,7 +178,10 @@ impl CsvOutput {
             writeln!(
                 writer,
                 "{},{},{:.2},{:.2}",
-                lang.language, lang.code_lines, lang.effort_months, lang.cost,
+                csv_field(&lang.language),
+                lang.code_lines,
+                lang.effort_months,
+                lang.cost,
             )?;
         }
         Ok(())
@@ -184,7 +197,7 @@ impl CsvOutput {
             writeln!(
                 writer,
                 "{},{},{:.2},{:.2},{:.2},{:.2}",
-                r.model,
+                csv_field(&r.model),
                 r.total_sloc,
                 r.effort_months,
                 r.schedule_months,
@@ -203,6 +216,14 @@ mod tests {
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn test_csv_field_quoting() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field("has,comma"), "\"has,comma\"");
+        assert_eq!(csv_field("has\"quote"), "\"has\"\"quote\"");
+        assert_eq!(csv_field("multi\nline"), "\"multi\nline\"");
+    }
 
     fn make_test_result() -> AnalysisResult {
         let files = vec![
