@@ -117,6 +117,7 @@ mod tests {
     fn test_output_options_custom() {
         let options = OutputOptions {
             summary_only: true,
+            by_file: false,
             sort_by: SortBy::Code,
             top_n: Some(10),
             colorize: false,

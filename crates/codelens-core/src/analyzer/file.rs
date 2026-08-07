@@ -71,8 +71,8 @@ impl FileAnalyzer {
     ///
     /// Returns `None` if the file's language is not recognized or the file is binary.
     pub fn analyze_from_bytes(&self, path: &Path, content: &[u8]) -> Result<Option<FileStats>> {
-        // Detect language
-        let language = match self.registry.detect(path) {
+        // Detect language (extension/filename, then shebang fallback)
+        let language = match self.registry.detect_with_content(path, content) {
             Some(lang) => lang,
             None => return Ok(None),
         };
