@@ -260,8 +260,12 @@ pub struct AnalysisResult {
     pub elapsed: Duration,
     /// Number of files scanned.
     pub scanned_files: usize,
-    /// Number of files skipped.
+    /// Number of files skipped (filters, unrecognized language, binary).
     pub skipped_files: usize,
+    /// Number of files that failed to read or analyze.
+    /// `serde(default)` keeps snapshots from older versions loadable.
+    #[serde(default)]
+    pub error_files: usize,
 }
 
 mod duration_serde {

@@ -2,4 +2,4 @@
 
 mod parallel;
 
-pub use parallel::{ParallelWalker, WalkerConfig};
+pub use parallel::{ParallelWalker, SkipReason, WalkerConfig};

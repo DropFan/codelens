@@ -74,6 +74,7 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     let mut all_stats = Vec::new();
     let mut scanned_files = 0;
     let mut skipped_files = 0;
+    let mut error_files = 0;
 
     for path in paths {
         let path = path.as_ref();
@@ -91,8 +92,9 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
                 all_stats.push(stats);
                 scanned_files += 1;
             },
-            |_| {
-                skipped_files += 1;
+            |_, reason| match reason {
+                walker::SkipReason::Filtered => skipped_files += 1,
+                walker::SkipReason::Error => error_files += 1,
             },
         )?;
     }
@@ -108,6 +110,7 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         elapsed,
         scanned_files,
         skipped_files,
+        error_files,
     })
 }
 

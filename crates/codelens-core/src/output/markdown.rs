@@ -426,6 +426,7 @@ mod tests {
             elapsed: Duration::from_secs(1),
             scanned_files: 2,
             skipped_files: 0,
+            error_files: 0,
         }
     }
 

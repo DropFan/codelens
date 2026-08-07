@@ -320,6 +320,7 @@ mod tests {
             elapsed: Duration::from_millis(50),
             scanned_files: files,
             skipped_files: 0,
+            error_files: 0,
         }
     }
 

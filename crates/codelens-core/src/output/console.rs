@@ -235,13 +235,30 @@ impl ConsoleOutput {
             writeln!(writer)?;
         }
 
-        // Footer
+        // Footer — surface skipped/failed counts so partial results are visible
         writeln!(writer, "{}", "─".repeat(60).dimmed())?;
+        let mut extras = Vec::new();
+        if result.skipped_files > 0 {
+            extras.push(format!("{} skipped", result.skipped_files));
+        }
+        if result.error_files > 0 {
+            extras.push(format!("{} errors", result.error_files));
+        }
+        let extras_text = if extras.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", extras.join(", "))
+        };
         writeln!(
             writer,
-            "Scanned {} files in {:.2}s",
+            "Scanned {} files in {:.2}s{}",
             result.scanned_files.to_string().green(),
-            result.elapsed.as_secs_f64()
+            result.elapsed.as_secs_f64(),
+            if result.error_files > 0 {
+                extras_text.yellow().to_string()
+            } else {
+                extras_text.dimmed().to_string()
+            }
         )?;
 
         Ok(())
@@ -729,6 +746,7 @@ mod tests {
             elapsed: Duration::from_millis(5),
             scanned_files: 1,
             skipped_files: 0,
+            error_files: 0,
         }
     }
 

@@ -103,6 +103,7 @@ fn make_realistic_result() -> AnalysisResult {
         elapsed: Duration::from_millis(50),
         scanned_files: 5,
         skipped_files: 0,
+        error_files: 0,
     }
 }
 

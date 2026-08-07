@@ -52,7 +52,7 @@ impl ParallelWalker {
     /// Walk directories and analyze files in parallel.
     ///
     /// Calls `on_file` for each successfully analyzed file,
-    /// and `on_skip` for each skipped file.
+    /// and `on_skip` (with the reason) for each skipped file.
     pub fn walk_and_analyze<F, S>(
         &self,
         root: &Path,
@@ -63,7 +63,7 @@ impl ParallelWalker {
     ) -> Result<()>
     where
         F: FnMut(FileStats) + Send,
-        S: FnMut(&Path) + Send,
+        S: FnMut(&Path, SkipReason) + Send,
     {
         let (tx, rx) = bounded::<WalkResult>(1000);
 
@@ -101,7 +101,7 @@ impl ParallelWalker {
                 for result in &rx {
                     match result {
                         WalkResult::File(stats) => on_file(stats),
-                        WalkResult::Skipped(path) => on_skip(&path),
+                        WalkResult::Skipped(path, reason) => on_skip(&path, reason),
                     }
                 }
             });
@@ -117,7 +117,14 @@ impl ParallelWalker {
                 Box::new(move |entry: std::result::Result<DirEntry, ignore::Error>| {
                     let entry = match entry {
                         Ok(e) => e,
-                        Err(_) => return WalkState::Continue,
+                        Err(_) => {
+                            // Traversal error (permissions, broken symlink, ...)
+                            let _ = tx.send(WalkResult::Skipped(
+                                std::path::PathBuf::new(),
+                                SkipReason::Error,
+                            ));
+                            return WalkState::Continue;
+                        }
                     };
 
                     let path = entry.path();
@@ -128,7 +135,10 @@ impl ParallelWalker {
                         if is_dir {
                             return WalkState::Skip;
                         }
-                        let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                        let _ = tx.send(WalkResult::Skipped(
+                            path.to_path_buf(),
+                            SkipReason::Filtered,
+                        ));
                         return WalkState::Continue;
                     }
 
@@ -155,14 +165,23 @@ impl ParallelWalker {
                                 let _ = tx.send(WalkResult::File(stats));
                             }
                             Ok(None) => {
-                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                                // Unrecognized language, binary, or line filter
+                                let _ = tx.send(WalkResult::Skipped(
+                                    path.to_path_buf(),
+                                    SkipReason::Filtered,
+                                ));
                             }
                             Err(_) => {
-                                let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                                let _ = tx.send(WalkResult::Skipped(
+                                    path.to_path_buf(),
+                                    SkipReason::Error,
+                                ));
                             }
                         },
                         Err(_) => {
-                            let _ = tx.send(WalkResult::Skipped(path.to_path_buf()));
+                            // Read failure (permissions, vanished file, ...)
+                            let _ =
+                                tx.send(WalkResult::Skipped(path.to_path_buf(), SkipReason::Error));
                         }
                     }
 
@@ -192,12 +211,22 @@ impl Default for ParallelWalker {
     }
 }
 
+/// Why a file was skipped during the walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// Excluded by filters, unrecognized language, or binary content.
+    Filtered,
+    /// Read, traversal, or analysis failure — the file SHOULD have been
+    /// counted but couldn't be.
+    Error,
+}
+
 /// Result from walking a single entry.
 enum WalkResult {
     /// Successfully analyzed file.
     File(FileStats),
-    /// Skipped file.
-    Skipped(std::path::PathBuf),
+    /// Skipped file with the reason.
+    Skipped(std::path::PathBuf, SkipReason),
 }
 
 #[cfg(test)]
@@ -241,7 +270,7 @@ mod tests {
                 |_| {
                     count.fetch_add(1, Ordering::SeqCst);
                 },
-                |_| {},
+                |_, _| {},
             )
             .unwrap();
 
@@ -276,7 +305,7 @@ mod tests {
                 |_| {
                     analyzed.fetch_add(1, Ordering::SeqCst);
                 },
-                |_| {},
+                |_, _| {},
             )
             .unwrap();
 

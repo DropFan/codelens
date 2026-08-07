@@ -208,6 +208,7 @@ mod tests {
             elapsed: Duration::from_millis(50),
             scanned_files: 3,
             skipped_files: 0,
+            error_files: 0,
         }
     }
 
@@ -282,6 +283,7 @@ mod tests {
             elapsed: Duration::from_millis(1),
             scanned_files: 0,
             skipped_files: 0,
+            error_files: 0,
         };
         let model = DefaultModel::new();
         let report = score(&result, &model, 10);
