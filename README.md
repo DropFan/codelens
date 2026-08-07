@@ -73,7 +73,12 @@ Score code health across five dimensions (complexity, function size, comment rat
 codelens health .               # Project, directory, and file-level report
 codelens health . --top 20      # Show top 20 worst files
 codelens health . -f json       # Output as JSON
+codelens health . --fail-under B   # CI gate: exit 1 if health is below B
 ```
+
+`--fail-under` accepts a grade (`A`/`B`/`C`/`D`) or a numeric score
+(`75`), turning the health report into a CI quality gate — fail a PR
+when project health drops below your threshold.
 
 ### Hotspot Detection
 

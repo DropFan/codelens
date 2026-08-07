@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `codelens health --fail-under <GRADE|SCORE>` — CI quality gate: exits
+  non-zero when project health is below a grade (A/B/C/D) or numeric
+  score, so a PR can be blocked on declining code health
+
 ## [0.1.4] - 2026-08-08
 
 ### Fixed

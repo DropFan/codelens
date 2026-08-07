@@ -23,7 +23,7 @@ use crate::cli::{Cli, OutputFormatArg, SortByArg};
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(e) => {
             eprintln!("{}: {e:#}", "error".red().bold());
             ExitCode::FAILURE
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
 
     // Initialize logging
@@ -39,16 +39,21 @@ fn run() -> Result<()> {
 
     // Handle special commands
     if cli.advanced.list_languages {
-        return list_languages();
+        return list_languages().map(|()| ExitCode::SUCCESS);
     }
 
     // Handle subcommands (they share config loading with the main command)
     if let Some(ref command) = cli.command {
         return match command {
+            // health owns its exit code: --fail-under can gate CI
             cli::Command::Health(args) => run_health(args, &cli.advanced),
-            cli::Command::Hotspot(args) => run_hotspot(args, &cli.advanced),
-            cli::Command::Trend(args) => run_trend(args, &cli.advanced),
-            cli::Command::Estimate(args) => run_estimate(args, &cli.advanced),
+            cli::Command::Hotspot(args) => {
+                run_hotspot(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
+            }
+            cli::Command::Trend(args) => run_trend(args, &cli.advanced).map(|()| ExitCode::SUCCESS),
+            cli::Command::Estimate(args) => {
+                run_estimate(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
+            }
         };
     }
 
@@ -80,7 +85,7 @@ fn run() -> Result<()> {
 
     // Quiet suppresses terminal output only; an explicit -O file is still written
     if config.output.quiet && config.output.file.is_none() {
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     // Bundle stats + health + estimation into ONE report so machine
@@ -119,7 +124,7 @@ fn run() -> Result<()> {
         formatter.write(&report, &output_options, &mut writer)?;
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 fn init_tracing(verbose: bool) {
@@ -280,14 +285,58 @@ fn build_config(cli: &Cli) -> Result<Config> {
     ))
 }
 
-fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
+fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<ExitCode> {
+    // Validate the threshold BEFORE the (potentially long) analysis
+    let threshold = args
+        .fail_under
+        .as_deref()
+        .map(parse_fail_under)
+        .transpose()?;
+
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let result = analyze(&args.paths, &config).context("Analysis failed")?;
     let model = DefaultModel::new();
     let top_n = config.output.top_n.unwrap_or(10);
     let report = health::score(&result, &model, top_n);
-    write_report(Report::Health(report), &config.output)
+    let score = report.score;
+    let grade = report.grade;
+    write_report(Report::Health(report), &config.output)?;
+
+    if let Some(threshold) = threshold {
+        if score < threshold {
+            eprintln!(
+                "{}: health score {:.1} (grade {}) is below --fail-under threshold {}",
+                "gate failed".red().bold(),
+                score,
+                grade,
+                args.fail_under.as_deref().unwrap_or_default(),
+            );
+            return Ok(ExitCode::FAILURE);
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Parse a `--fail-under` threshold: a grade letter (A/B/C/D, using the
+/// scoring model's grade boundaries) or a numeric score (0-100).
+fn parse_fail_under(input: &str) -> Result<f64> {
+    match input.trim() {
+        "A" | "a" => Ok(90.0),
+        "B" | "b" => Ok(80.0),
+        "C" | "c" => Ok(70.0),
+        "D" | "d" => Ok(60.0),
+        other => {
+            if let Ok(score) = other.parse::<f64>() {
+                if (0.0..=100.0).contains(&score) {
+                    return Ok(score);
+                }
+            }
+            anyhow::bail!(
+                "invalid --fail-under value '{other}': expected a grade (A/B/C/D) or a score between 0 and 100"
+            )
+        }
+    }
 }
 
 fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
@@ -657,6 +706,22 @@ mod tests {
         };
         let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
         assert_eq!(config.filter.min_lines, Some(5));
+    }
+
+    #[test]
+    fn fail_under_accepts_grades_and_scores() {
+        assert_eq!(parse_fail_under("A").unwrap(), 90.0);
+        assert_eq!(parse_fail_under("b").unwrap(), 80.0);
+        assert_eq!(parse_fail_under("C").unwrap(), 70.0);
+        assert_eq!(parse_fail_under("D").unwrap(), 60.0);
+        assert_eq!(parse_fail_under("75").unwrap(), 75.0);
+        assert_eq!(parse_fail_under("62.5").unwrap(), 62.5);
+
+        // F would always pass — reject it along with garbage and out-of-range
+        assert!(parse_fail_under("F").is_err());
+        assert!(parse_fail_under("great").is_err());
+        assert!(parse_fail_under("101").is_err());
+        assert!(parse_fail_under("-1").is_err());
     }
 
     #[test]

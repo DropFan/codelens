@@ -83,6 +83,11 @@ pub struct HealthArgs {
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
+    /// Exit non-zero if the project health is below this grade (A/B/C/D)
+    /// or numeric score (0-100). Turns health into a CI quality gate.
+    #[arg(long, value_name = "GRADE|SCORE")]
+    pub fail_under: Option<String>,
+
     #[command(flatten)]
     pub filter: FilterArgs,
 
