@@ -77,8 +77,8 @@ fn run() -> Result<()> {
     // Get output formatter
     let formatter = create_output(config.output.format);
 
-    // Write output
-    if config.output.quiet {
+    // Quiet suppresses terminal output only; an explicit -O file is still written
+    if config.output.quiet && config.output.file.is_none() {
         return Ok(());
     }
 
@@ -109,7 +109,9 @@ fn run() -> Result<()> {
         let mut writer = BufWriter::new(file);
         formatter.write(&report, &output_options, &mut writer)?;
         writer.flush()?;
-        println!("Output written to: {}", path.display().to_string().green());
+        if !config.output.quiet {
+            println!("Output written to: {}", path.display().to_string().green());
+        }
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
@@ -460,7 +462,8 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
     };
     let formatter = create_output(output.format);
 
-    if output.quiet {
+    // Quiet suppresses terminal output only; an explicit -O file is still written
+    if output.quiet && output.file.is_none() {
         return Ok(());
     }
 
@@ -469,7 +472,9 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
         let mut writer = BufWriter::new(file);
         formatter.write(&report, &output_options, &mut writer)?;
         writer.flush()?;
-        println!("Output written to: {}", path.display().to_string().green());
+        if !output.quiet {
+            println!("Output written to: {}", path.display().to_string().green());
+        }
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
