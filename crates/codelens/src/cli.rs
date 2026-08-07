@@ -176,15 +176,18 @@ pub struct EstimateArgs {
     pub d0: f64,
 
     // ── LOCOMO params ──
-    /// LLM input price per 1M tokens.
-    #[arg(long, default_value = "3.0")]
-    pub llm_input_price: f64,
-    /// LLM output price per 1M tokens.
-    #[arg(long, default_value = "15.0")]
-    pub llm_output_price: f64,
-    /// LLM tokens per second.
-    #[arg(long, default_value = "50")]
-    pub llm_tps: f64,
+    /// LOCOMO pricing preset [default: medium].
+    #[arg(long, value_enum)]
+    pub locomo_preset: Option<LocomoPresetArg>,
+    /// LLM input price per 1M tokens (overrides preset) [default: 3.0].
+    #[arg(long)]
+    pub llm_input_price: Option<f64>,
+    /// LLM output price per 1M tokens (overrides preset) [default: 15.0].
+    #[arg(long)]
+    pub llm_output_price: Option<f64>,
+    /// LLM tokens per second (overrides preset) [default: 50].
+    #[arg(long)]
+    pub llm_tps: Option<f64>,
 
     #[command(flatten)]
     pub filter: FilterArgs,
@@ -209,6 +212,20 @@ pub enum ProjectTypeArg {
     Organic,
     SemiDetached,
     Embedded,
+}
+
+/// LOCOMO pricing tiers (values match scc's --locomo-preset).
+#[derive(ValueEnum, Clone, Copy, Debug, Default)]
+pub enum LocomoPresetArg {
+    /// Frontier models: $10/$30 per 1M tokens, 30 TPS.
+    Large,
+    /// Balanced models: $3/$15 per 1M tokens, 50 TPS.
+    #[default]
+    Medium,
+    /// Fast/cheap models: $0.50/$2 per 1M tokens, 100 TPS.
+    Small,
+    /// Self-hosted models: free, 15 TPS.
+    Local,
 }
 
 /// Filter options.

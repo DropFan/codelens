@@ -445,12 +445,24 @@ fn build_model(args: &cli::EstimateArgs) -> Box<dyn codelens_core::EstimationMod
             ck: args.ck,
             d0: args.d0,
         }),
-        cli::ModelArg::Locomo => Box::new(codelens_core::LocomoModel {
-            input_price_per_m: args.llm_input_price,
-            output_price_per_m: args.llm_output_price,
-            tokens_per_second: args.llm_tps,
-            ..Default::default()
-        }),
+        cli::ModelArg::Locomo => Box::new(build_locomo_model(args)),
+    }
+}
+
+/// Resolve LOCOMO pricing: preset base values (matching scc), overridden
+/// by any explicitly passed --llm-* flag.
+fn build_locomo_model(args: &cli::EstimateArgs) -> codelens_core::LocomoModel {
+    let (base_in, base_out, base_tps) = match args.locomo_preset.unwrap_or_default() {
+        cli::LocomoPresetArg::Large => (10.0, 30.0, 30.0),
+        cli::LocomoPresetArg::Medium => (3.0, 15.0, 50.0),
+        cli::LocomoPresetArg::Small => (0.5, 2.0, 100.0),
+        cli::LocomoPresetArg::Local => (0.0, 0.0, 15.0),
+    };
+    codelens_core::LocomoModel {
+        input_price_per_m: args.llm_input_price.unwrap_or(base_in),
+        output_price_per_m: args.llm_output_price.unwrap_or(base_out),
+        tokens_per_second: args.llm_tps.unwrap_or(base_tps),
+        ..Default::default()
     }
 }
 
@@ -473,12 +485,7 @@ fn run_estimate_all(
         ck: args.ck,
         d0: args.d0,
     };
-    let locomo = codelens_core::LocomoModel {
-        input_price_per_m: args.llm_input_price,
-        output_price_per_m: args.llm_output_price,
-        tokens_per_second: args.llm_tps,
-        ..Default::default()
-    };
+    let locomo = build_locomo_model(args);
 
     let models: Vec<&dyn codelens_core::EstimationModel> =
         vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
