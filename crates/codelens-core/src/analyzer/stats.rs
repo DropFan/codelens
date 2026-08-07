@@ -235,14 +235,15 @@ impl Summary {
     /// output order for every format (console, JSON, CSV, ...).
     pub fn sort_languages(&mut self, sort_by: crate::config::SortBy) {
         use crate::config::SortBy;
+        use std::cmp::Reverse;
 
         let mut entries: Vec<_> = std::mem::take(&mut self.by_language).into_iter().collect();
         match sort_by {
-            SortBy::Lines => entries.sort_by(|a, b| b.1.lines.total.cmp(&a.1.lines.total)),
-            SortBy::Files => entries.sort_by(|a, b| b.1.files.cmp(&a.1.files)),
-            SortBy::Code => entries.sort_by(|a, b| b.1.lines.code.cmp(&a.1.lines.code)),
+            SortBy::Lines => entries.sort_by_key(|e| Reverse(e.1.lines.total)),
+            SortBy::Files => entries.sort_by_key(|e| Reverse(e.1.files)),
+            SortBy::Code => entries.sort_by_key(|e| Reverse(e.1.lines.code)),
             SortBy::Name => entries.sort_by(|a, b| a.0.cmp(&b.0)),
-            SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
+            SortBy::Size => entries.sort_by_key(|e| Reverse(e.1.size)),
         }
         self.by_language = entries.into_iter().collect();
     }
