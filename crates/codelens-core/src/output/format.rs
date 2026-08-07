@@ -19,6 +19,17 @@ pub enum Report {
     Trend(TrendReport),
     Estimation(EstimationReport),
     EstimationComparison(EstimationComparison),
+    /// Default-command bundle: stats + health + estimation as ONE document,
+    /// so machine formats (JSON/HTML/CSV) stay parseable.
+    Combined(Box<CombinedReport>),
+}
+
+/// The default command's combined output.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CombinedReport {
+    pub analysis: AnalysisResult,
+    pub health: HealthReport,
+    pub estimation: EstimationComparison,
 }
 
 /// Trait for output formatters.

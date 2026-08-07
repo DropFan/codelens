@@ -43,6 +43,12 @@ impl OutputFormat for MarkdownOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            // Concatenated sections are valid Markdown
+            Report::Combined(combined) => {
+                self.write_analysis(&combined.analysis, options, writer)?;
+                self.write_health(&combined.health, options, writer)?;
+                self.write_estimation_comparison(&combined.estimation, writer)
+            }
             Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)

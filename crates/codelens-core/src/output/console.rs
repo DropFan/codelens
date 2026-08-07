@@ -78,6 +78,11 @@ impl OutputFormat for ConsoleOutput {
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
             }
+            Report::Combined(combined) => {
+                self.write_analysis(&combined.analysis, options, writer)?;
+                self.write_health(&combined.health, options, writer)?;
+                self.write_estimation_comparison(&combined.estimation, writer)
+            }
         }
     }
 }

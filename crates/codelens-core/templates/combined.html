@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+            --accent-red: #f85149;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            border: 1px solid var(--bg-tertiary);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent-green);
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .charts-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid var(--bg-tertiary);
+        }
+
+        .chart-container h3 {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            border-radius: 4px;
+        }
+
+        .grade-badge {
+            display: inline-block;
+            font-size: 1.6rem;
+            font-weight: bold;
+            padding: 0.3rem 1.2rem;
+            border-radius: 10px;
+            margin-top: 0.6rem;
+        }
+        .grade-A { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+        .grade-B { background: rgba(88,166,255,0.15); color: var(--accent-blue); }
+        .grade-C { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+        .grade-D { background: rgba(240,136,62,0.15); color: #f0883e; }
+        .grade-F { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+
+        section.report-block {
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--bg-tertiary);
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--bg-tertiary);
+            margin-top: 3rem;
+        }
+
+        h2 {
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{{ title }}</h1>
+            <p>Generated: {{ generated_at }}</p>
+        </header>
+
+        <!-- ── Statistics ─────────────────────────────── -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="value">{{ summary.total_files }}</div>
+                <div class="label">Code Files</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ summary.lines.code }}</div>
+                <div class="label">Code Lines</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ summary.lines.comment }}</div>
+                <div class="label">Comment Lines</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ summary.lines.blank }}</div>
+                <div class="label">Blank Lines</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ by_language.len() }}</div>
+                <div class="label">Languages</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ summary.complexity.functions }}</div>
+                <div class="label">Functions</div>
+            </div>
+        </section>
+
+        <section class="charts-section">
+            <div class="chart-container">
+                <h3>Language Distribution</h3>
+                <canvas id="languageChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Code vs Comments</h3>
+                <canvas id="codeCommentChart"></canvas>
+            </div>
+        </section>
+
+        <section>
+            <h2>By Language</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Language</th>
+                        <th>Files</th>
+                        <th>Code</th>
+                        <th>Comment</th>
+                        <th>Blank</th>
+                        <th>Share</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for (name, stats) in by_language %}
+                    <tr>
+                        <td><strong>{{ name }}</strong></td>
+                        <td>{{ stats.files }}</td>
+                        <td>{{ stats.lines.code }}</td>
+                        <td>{{ stats.lines.comment }}</td>
+                        <td>{{ stats.lines.blank }}</td>
+                        <td>
+                            <div class="progress-bar">
+                                {% if summary.lines.code > 0 %}
+                                <div class="fill" style="width: {{ stats.lines.code * 100 / summary.lines.code }}%"></div>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <!-- ── Health ─────────────────────────────────── -->
+        <section class="report-block">
+            <h2 style="text-align:center">Code Health</h2>
+            <div style="text-align:center; margin-bottom: 2rem;">
+                <div class="grade-badge grade-{{ health_grade }}">{{ health_grade }}</div>
+                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Score: {{ health_score }} / 100 | Model: {{ health_model }}</div>
+            </div>
+
+            <div class="stats-grid">
+                {% for dim in dimensions %}
+                <div class="stat-card">
+                    <div class="value">{{ dim.score_display }}</div>
+                    <div class="label">{{ dim.dimension }} ({{ dim.grade }})</div>
+                    <div class="progress-bar" style="margin-top: 0.5rem">
+                        <div class="fill" style="width: {{ dim.score_display }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% if !worst_files.is_empty() %}
+            <h2>Worst Files</h2>
+            <table>
+                <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Top Issue</th></tr></thead>
+                <tbody>
+                {% for file in worst_files %}
+                <tr>
+                    <td><strong>{{ file.path }}</strong></td>
+                    <td>{{ file.score_display }}</td>
+                    <td>{{ file.grade }}</td>
+                    <td>{{ file.top_issue }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </section>
+
+        <!-- ── Cost Estimation ────────────────────────── -->
+        <section class="report-block">
+            <h2 style="text-align:center">Cost Estimation Comparison</h2>
+            <p style="text-align:center; color: var(--text-secondary); margin-bottom: 2rem;">Total SLOC: {{ total_sloc }}</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Effort (PM)</th>
+                        <th>Schedule (M)</th>
+                        <th>People</th>
+                        <th>Cost ($)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in estimation_rows %}
+                    <tr>
+                        <td><strong>{{ row.model }}</strong></td>
+                        <td>{{ row.effort_months }}</td>
+                        <td>{{ row.schedule_months }}</td>
+                        <td>{{ row.people_required }}</td>
+                        <td>{{ row.estimated_cost }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <footer>
+            <p>Generated by <a href="https://github.com/DropFan/codelens" style="color: var(--accent-blue)"><strong>Codelens</strong></a> by <a href="https://github.com/DropFan" style="color: var(--accent-blue)">Tiger</a> in {{ elapsed_secs }}s | High-performance code analysis tool powered by Rust</p>
+        </footer>
+    </div>
+
+    <script>
+        const langData = [
+            {% for (name, stats) in by_language %}
+            { name: "{{ name }}", code: {{ stats.lines.code }} },
+            {% endfor %}
+        ];
+
+        new Chart(document.getElementById('languageChart'), {
+            type: 'doughnut',
+            data: {
+                labels: langData.map(d => d.name),
+                datasets: [{
+                    data: langData.map(d => d.code),
+                    backgroundColor: [
+                        '#58a6ff', '#3fb950', '#d29922', '#a371f7',
+                        '#f85149', '#79c0ff', '#56d364', '#e3b341',
+                        '#ff7b72', '#7ee787', '#ffa657', '#d2a8ff'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: '#f0f6fc' }
+                    }
+                }
+            }
+        });
+
+        new Chart(document.getElementById('codeCommentChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Code', 'Comment', 'Blank'],
+                datasets: [{
+                    data: [{{ summary.lines.code }}, {{ summary.lines.comment }}, {{ summary.lines.blank }}],
+                    backgroundColor: ['#3fb950', '#d29922', '#8b949e']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+                    x: { ticks: { color: '#8b949e' }, grid: { display: false } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

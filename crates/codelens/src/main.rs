@@ -82,48 +82,38 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let report = Report::Analysis(result);
+    // Bundle stats + health + estimation into ONE report so machine
+    // formats (JSON/HTML) stay parseable as a single document.
+    let scoring_model = DefaultModel::new();
+    let health_top_n = config.output.top_n.unwrap_or(10);
+    let health_report = health::score(&result, &scoring_model, health_top_n);
 
-    // Collect all reports to write: analysis + health + estimation comparison
-    let mut reports = vec![report.clone()];
+    let cost_config = codelens_core::CostConfig::default();
+    let cocomo_basic = codelens_core::CocomoBasicModel::default();
+    let cocomo2 = codelens_core::CocomoIIModel::default();
+    let putnam = codelens_core::PutnamModel::default();
+    let locomo = codelens_core::LocomoModel::default();
+    let models: Vec<&dyn codelens_core::EstimationModel> =
+        vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
+    let comparison =
+        codelens_core::insight::estimation::estimate_all(&result.summary, &models, &cost_config);
 
-    if let Report::Analysis(ref analysis) = report {
-        // Health
-        let scoring_model = DefaultModel::new();
-        let health_top_n = config.output.top_n.unwrap_or(10);
-        let health_report = health::score(analysis, &scoring_model, health_top_n);
-        reports.push(Report::Health(health_report));
-
-        // Estimation comparison (all models)
-        let cost_config = codelens_core::CostConfig::default();
-        let cocomo_basic = codelens_core::CocomoBasicModel::default();
-        let cocomo2 = codelens_core::CocomoIIModel::default();
-        let putnam = codelens_core::PutnamModel::default();
-        let locomo = codelens_core::LocomoModel::default();
-        let models: Vec<&dyn codelens_core::EstimationModel> =
-            vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
-        let comparison = codelens_core::insight::estimation::estimate_all(
-            &analysis.summary,
-            &models,
-            &cost_config,
-        );
-        reports.push(Report::EstimationComparison(comparison));
-    }
+    let report = Report::Combined(Box::new(codelens_core::output::CombinedReport {
+        analysis: result,
+        health: health_report,
+        estimation: comparison,
+    }));
 
     if let Some(ref path) = config.output.file {
         let file = File::create(path).context("Failed to create output file")?;
         let mut writer = BufWriter::new(file);
-        for r in &reports {
-            formatter.write(r, &output_options, &mut writer)?;
-        }
+        formatter.write(&report, &output_options, &mut writer)?;
         writer.flush()?;
         println!("Output written to: {}", path.display().to_string().green());
     } else {
         let stdout = io::stdout();
         let mut writer = stdout.lock();
-        for r in &reports {
-            formatter.write(r, &output_options, &mut writer)?;
-        }
+        formatter.write(&report, &output_options, &mut writer)?;
     }
 
     Ok(())

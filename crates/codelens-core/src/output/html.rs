@@ -159,6 +159,25 @@ struct EstimationComparisonHtmlReport {
     rows: Vec<HtmlComparisonRow>,
 }
 
+// ── Combined (default command: stats + health + estimation) ──
+
+#[derive(Template)]
+#[template(path = "combined.html")]
+struct CombinedHtmlReport<'a> {
+    title: &'a str,
+    generated_at: String,
+    summary: &'a Summary,
+    by_language: Vec<(&'a str, &'a LanguageSummary)>,
+    elapsed_secs: f64,
+    health_grade: String,
+    health_score: u32,
+    health_model: String,
+    dimensions: Vec<HtmlDimensionScore>,
+    worst_files: Vec<HtmlFileHealth>,
+    total_sloc: usize,
+    estimation_rows: Vec<HtmlComparisonRow>,
+}
+
 // ── OutputFormat impl ────────────────────────────────────
 
 pub struct HtmlOutput;
@@ -199,6 +218,7 @@ impl OutputFormat for HtmlOutput {
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
             }
+            Report::Combined(combined) => self.write_combined(combined, options, writer),
         }
     }
 }
@@ -230,6 +250,72 @@ impl HtmlOutput {
         };
 
         write!(writer, "{}", report.render()?)?;
+        Ok(())
+    }
+
+    fn write_combined(
+        &self,
+        combined: &crate::output::format::CombinedReport,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let result = &combined.analysis;
+        let health = &combined.health;
+        let estimation = &combined.estimation;
+
+        let mut by_language: Vec<_> = result
+            .summary
+            .by_language
+            .iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect();
+        if let Some(n) = options.top_n {
+            by_language.truncate(n);
+        }
+
+        let html = CombinedHtmlReport {
+            title: "Codelens - Code Analysis Report",
+            generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            summary: &result.summary,
+            by_language,
+            elapsed_secs: result.elapsed.as_secs_f64(),
+            health_grade: health.grade.to_string(),
+            health_score: health.score as u32,
+            health_model: health.model.clone(),
+            dimensions: health
+                .dimensions
+                .iter()
+                .map(|d| HtmlDimensionScore {
+                    dimension: d.dimension.to_string(),
+                    score_display: d.score as u32,
+                    grade: d.grade,
+                })
+                .collect(),
+            worst_files: health
+                .worst_files
+                .iter()
+                .map(|f| HtmlFileHealth {
+                    path: f.path.display().to_string(),
+                    score_display: f.score as u32,
+                    grade: f.grade,
+                    top_issue: f.top_issue.to_string(),
+                })
+                .collect(),
+            total_sloc: estimation.total_sloc,
+            estimation_rows: estimation
+                .reports
+                .iter()
+                .map(|r| HtmlComparisonRow {
+                    model: r.model.clone(),
+                    effort_months: format!("{:.2}", r.effort_months),
+                    schedule_months: format!("{:.2}", r.schedule_months),
+                    people_required: format!("{:.2}", r.people_required),
+                    estimated_cost: format!("{:.2}", r.estimated_cost),
+                    cost_raw: r.estimated_cost,
+                })
+                .collect(),
+        };
+        write!(writer, "{}", html.render()?)?;
         Ok(())
     }
 

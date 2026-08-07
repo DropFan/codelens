@@ -9,7 +9,7 @@ mod markdown;
 
 pub use console::ConsoleOutput;
 pub use csv::CsvOutput;
-pub use format::{OutputFormat, OutputOptions, Report};
+pub use format::{CombinedReport, OutputFormat, OutputOptions, Report};
 pub use html::HtmlOutput;
 pub use json::JsonOutput;
 pub use markdown::MarkdownOutput;

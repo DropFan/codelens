@@ -41,6 +41,8 @@ impl OutputFormat for JsonOutput {
             Report::Trend(report) => self.write_json(report, writer),
             Report::Estimation(report) => self.write_json(report, writer),
             Report::EstimationComparison(report) => self.write_json(report, writer),
+            // One top-level object so the whole output parses as a single document
+            Report::Combined(combined) => self.write_json(combined, writer),
         }
     }
 }
@@ -145,6 +147,46 @@ mod tests {
         let json_str = String::from_utf8(buffer).unwrap();
         // Pretty JSON should have indentation
         assert!(json_str.contains("  "));
+    }
+
+    #[test]
+    fn test_combined_report_is_single_json_document() {
+        use crate::insight::estimation::EstimationComparison;
+        use crate::insight::health::HealthReport;
+        use crate::output::format::CombinedReport;
+
+        let output = JsonOutput::new(true);
+        let combined = CombinedReport {
+            analysis: make_test_result(),
+            health: HealthReport {
+                score: 90.0,
+                grade: crate::insight::Grade::A,
+                model: "default".to_string(),
+                dimensions: vec![],
+                by_directory: vec![],
+                worst_files: vec![],
+            },
+            estimation: EstimationComparison {
+                total_sloc: 80,
+                reports: vec![],
+            },
+        };
+
+        let mut buffer = Vec::new();
+        output
+            .write(
+                &Report::Combined(Box::new(combined)),
+                &OutputOptions::default(),
+                &mut buffer,
+            )
+            .unwrap();
+
+        // The whole output must parse as ONE JSON document with the
+        // three sections as top-level keys.
+        let parsed: serde_json::Value = serde_json::from_slice(&buffer).unwrap();
+        assert!(parsed.get("analysis").is_some());
+        assert!(parsed.get("health").is_some());
+        assert!(parsed.get("estimation").is_some());
     }
 
     #[test]

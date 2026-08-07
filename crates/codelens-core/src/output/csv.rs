@@ -43,6 +43,10 @@ impl OutputFormat for CsvOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            // CSV can't hold three differently-shaped tables in one file;
+            // emit the analysis table only (health/estimation are available
+            // via their subcommands).
+            Report::Combined(combined) => self.write_analysis(&combined.analysis, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
