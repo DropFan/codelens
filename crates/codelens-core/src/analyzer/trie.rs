@@ -28,6 +28,9 @@ pub struct TokenMatch {
     /// Whether the token content may span multiple lines
     /// (string delimiters only; docstrings are always multiline).
     pub multiline: bool,
+    /// Escape byte inside the token content (e.g., `\` for most strings).
+    /// None when the delimiter has no escape (e.g., shell `'`, Go backtick).
+    pub escape: Option<u8>,
 }
 
 impl TokenMatch {
@@ -38,6 +41,7 @@ impl TokenMatch {
             close,
             advance: 0,
             multiline: false,
+            escape: None,
         }
     }
 }
@@ -161,7 +165,10 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
         for delim in [b"\"".as_slice(), b"'".as_slice()] {
             trie.insert(
                 delim,
-                TokenMatch::new(TokenType::StringDelimiter, Some(delim.to_vec())),
+                TokenMatch {
+                    escape: Some(b'\\'),
+                    ..TokenMatch::new(TokenType::StringDelimiter, Some(delim.to_vec()))
+                },
             );
         }
     } else {
@@ -170,6 +177,10 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
                 sd.start.as_bytes(),
                 TokenMatch {
                     multiline: sd.multiline,
+                    escape: sd
+                        .escape
+                        .as_ref()
+                        .and_then(|e| e.as_bytes().first().copied()),
                     ..TokenMatch::new(TokenType::StringDelimiter, Some(sd.end.as_bytes().to_vec()))
                 },
             );
@@ -183,6 +194,7 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
             b"\"\"\"",
             TokenMatch {
                 multiline: true,
+                escape: Some(b'\\'),
                 ..TokenMatch::new(TokenType::DocStringDelimiter, Some(b"\"\"\"".to_vec()))
             },
         );
@@ -190,6 +202,7 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
             b"'''",
             TokenMatch {
                 multiline: true,
+                escape: Some(b'\\'),
                 ..TokenMatch::new(TokenType::DocStringDelimiter, Some(b"'''".to_vec()))
             },
         );

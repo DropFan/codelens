@@ -30,6 +30,8 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
     let mut close_bytes: Vec<u8> = Vec::new();
     // 当前字符串定界符是否允许跨行（非跨行的未闭合字符串在行尾复位）
     let mut string_multiline = false;
+    // 当前字符串定界符的转义字节（None 表示无转义，如 shell 单引号）
+    let mut string_escape: Option<u8> = None;
     let mut index: usize = 0;
 
     while index < len {
@@ -72,6 +74,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             TokenType::StringDelimiter => {
                                 close_bytes = m.close.unwrap_or_default();
                                 string_multiline = m.multiline;
+                                string_escape = m.escape;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -107,6 +110,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             TokenType::StringDelimiter => {
                                 close_bytes = m.close.unwrap_or_default();
                                 string_multiline = m.multiline;
+                                string_escape = m.escape;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -115,6 +119,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 // Triple-quote after code = string assignment, not docstring
                                 close_bytes = m.close.unwrap_or_default();
                                 string_multiline = m.multiline;
+                                string_escape = m.escape;
                                 state = State::InString;
                                 index += m.advance;
                                 continue;
@@ -145,8 +150,14 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             }
 
             State::InString => {
-                if byte == b'\\' {
-                    index += 2; // skip escaped char
+                if string_escape == Some(byte) {
+                    // 被转义的换行仍是物理行边界：只前进 1，
+                    // 让换行走行首的正常分类路径
+                    if index + 1 < len && content[index + 1] == b'\n' {
+                        index += 1;
+                    } else {
+                        index += 2; // skip escaped char
+                    }
                     continue;
                 }
                 if content_matches_at(content, index, &close_bytes) {
@@ -451,6 +462,42 @@ mod tests {
         assert_eq!(stats.total, 1);
         assert_eq!(stats.code, 1);
         assert_eq!(stats.comment, 0);
+    }
+
+    #[test]
+    fn test_escaped_newline_in_string_counts_both_lines() {
+        // 字符串内的 \<换行> 是续行，但物理行数必须都被统计
+        let stats = count("let s = \"a\\\nb\";\n", &rust_lang());
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 2);
+    }
+
+    #[test]
+    fn test_no_escape_delimiter_backslash_is_literal() {
+        // Go 反引号 raw string：\ 是普通字符，不能吞掉闭合定界符
+        let go = Language {
+            name: "Go".to_string(),
+            line_comments: vec!["//".to_string()],
+            string_delimiters: vec![
+                StringDelimiter {
+                    start: "\"".to_string(),
+                    end: "\"".to_string(),
+                    escape: Some("\\".to_string()),
+                    multiline: false,
+                },
+                StringDelimiter {
+                    start: "`".to_string(),
+                    end: "`".to_string(),
+                    escape: None,
+                    multiline: true,
+                },
+            ],
+            ..Default::default()
+        };
+        let stats = count("s := `a\\`\n// comment\n", &go);
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 1);
     }
 
     #[test]
