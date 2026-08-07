@@ -22,7 +22,8 @@ pub struct WalkerConfig {
     pub use_gitignore: bool,
     /// Maximum directory depth (None = unlimited).
     pub max_depth: Option<usize>,
-    /// Additional ignore patterns.
+    /// Additional ignore FILE NAMES (gitignore syntax files, like
+    /// ".myignore") — not patterns themselves.
     pub custom_ignores: Vec<String>,
 }
 
@@ -81,9 +82,13 @@ impl ParallelWalker {
             builder.max_depth(Some(depth));
         }
 
-        // Add custom ignore patterns
-        for pattern in &self.config.custom_ignores {
-            builder.add_custom_ignore_filename(pattern);
+        // Project-level ignore file with gitignore syntax (like .sccignore /
+        // .tokeignore), honored in any walked directory
+        builder.add_custom_ignore_filename(".codelensignore");
+
+        // Additional ignore file names from configuration
+        for filename in &self.config.custom_ignores {
+            builder.add_custom_ignore_filename(filename);
         }
 
         // Start parallel walk with concurrent consumer.
