@@ -33,6 +33,9 @@ pub struct TokenMatch {
     pub escape: Option<u8>,
     /// Whether this block comment may nest (from `nested_comments` config).
     pub nested: bool,
+    /// Whether the token (and its close sequence) only matches at the start
+    /// of a line, e.g. Ruby `=begin`/`=end` and Perl `=pod`/`=cut`.
+    pub line_start_only: bool,
 }
 
 impl TokenMatch {
@@ -45,6 +48,7 @@ impl TokenMatch {
             multiline: false,
             escape: None,
             nested: false,
+            line_start_only: false,
         }
     }
 }
@@ -141,7 +145,7 @@ impl std::fmt::Debug for TokenTrie {
 /// Inserts line comments, block comment starts (with close bytes),
 /// string delimiters from the language's `string_delimiters` config
 /// (falling back to single-line `"` and `'` when unconfigured), and
-/// for Python/Ruby also triple-quote doc-string delimiters (`"""` and `'''`).
+/// for Python also triple-quote doc-string delimiters (`"""` and `'''`).
 pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) {
     let mut trie = TokenTrie::new();
 
@@ -156,6 +160,9 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
             open.as_bytes(),
             TokenMatch {
                 nested: lang.nested_comments,
+                // 以 = 开头的块注释（Ruby =begin/=end、Perl =pod/=cut）
+                // 语言规范要求出现在列 0
+                line_start_only: open.starts_with('='),
                 ..TokenMatch::new(
                     TokenType::BlockCommentStart,
                     Some(close.as_bytes().to_vec()),
@@ -193,9 +200,10 @@ pub fn build_from_language(lang: &crate::language::Language) -> (TokenTrie, u8) 
         }
     }
 
-    // Doc-string delimiters for Python and Ruby (longest-match wins over single quotes)
-    let name = lang.name.as_str();
-    if name == "Python" || name == "Ruby" {
+    // Doc-string delimiters for Python (longest-match wins over single quotes).
+    // Ruby has no triple-quote syntax; its =begin/=end blocks come from
+    // block_comments above.
+    if lang.name.as_str() == "Python" {
         trie.insert(
             b"\"\"\"",
             TokenMatch {
@@ -384,6 +392,31 @@ mod tests {
         let m = trie.match_at(b"'s'", 0).unwrap();
         assert_eq!(m.token_type, TokenType::StringDelimiter);
         assert!(!m.multiline);
+    }
+
+    #[test]
+    fn test_ruby_has_no_triple_quote_docstring() {
+        use crate::language::Language;
+
+        // Ruby 没有三引号语法，不应注入 docstring 定界符
+        let lang = Language {
+            name: "Ruby".to_string(),
+            line_comments: vec!["#".to_string()],
+            block_comments: vec![("=begin".to_string(), "=end".to_string())],
+            ..Default::default()
+        };
+        let (trie, _mask) = build_from_language(&lang);
+
+        // ''' 应匹配到默认单引号字符串定界符，而不是 docstring
+        let m = trie.match_at(b"'''", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+        let m = trie.match_at(b"\"\"\"", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::StringDelimiter);
+
+        // =begin 必须带行首约束标记
+        let m = trie.match_at(b"=begin", 0).unwrap();
+        assert_eq!(m.token_type, TokenType::BlockCommentStart);
+        assert!(m.line_start_only);
     }
 
     #[test]

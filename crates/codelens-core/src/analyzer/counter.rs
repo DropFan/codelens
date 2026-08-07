@@ -36,6 +36,10 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
     let mut open_bytes: Vec<u8> = Vec::new();
     let mut comment_nested = false;
     let mut comment_depth: usize = 0;
+    // 当前块注释的开/闭序列是否要求出现在列 0（Ruby =begin/=end）
+    let mut comment_line_start_only = false;
+    // 行首标记：换行置 true，消费任何其他字节后清 false
+    let mut at_line_start = true;
     let mut index: usize = 0;
 
     while index < len {
@@ -51,9 +55,14 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                 State::InDocString => State::InDocString,
                 _ => State::Blank,
             };
+            at_line_start = true;
             index += 1;
             continue;
         }
+
+        // 本字节是否位于列 0（本轮消费后即失效）
+        let line_start = at_line_start;
+        at_line_start = false;
 
         match state {
             State::Blank | State::AfterBlockComment => {
@@ -62,7 +71,11 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                     continue;
                 }
                 if should_process(byte, mask) {
-                    if let Some(m) = trie.match_at(content, index) {
+                    // 行首约束的 token（如 Ruby =begin）不在行中生效
+                    if let Some(m) = trie
+                        .match_at(content, index)
+                        .filter(|m| !m.line_start_only || line_start)
+                    {
                         match m.token_type {
                             TokenType::LineComment => {
                                 state = State::LineComment;
@@ -74,6 +87,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 open_bytes = content[index..index + m.advance].to_vec();
                                 comment_nested = m.nested;
                                 comment_depth = 0;
+                                comment_line_start_only = m.line_start_only;
                                 state = State::BlockComment;
                                 index += m.advance;
                                 continue;
@@ -101,7 +115,11 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
 
             State::Code => {
                 if should_process(byte, mask) {
-                    if let Some(m) = trie.match_at(content, index) {
+                    // 行首约束的 token（如 Ruby =begin）不在行中生效
+                    if let Some(m) = trie
+                        .match_at(content, index)
+                        .filter(|m| !m.line_start_only || line_start)
+                    {
                         match m.token_type {
                             TokenType::LineComment => {
                                 state = State::LineCommentAfterCode;
@@ -113,6 +131,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 open_bytes = content[index..index + m.advance].to_vec();
                                 comment_nested = m.nested;
                                 comment_depth = 0;
+                                comment_line_start_only = m.line_start_only;
                                 state = State::BlockCommentAfterCode;
                                 index += m.advance;
                                 continue;
@@ -146,7 +165,9 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             }
 
             State::BlockComment | State::BlockCommentAfterCode => {
-                if content_matches_at(content, index, &close_bytes) {
+                // 行首约束的闭合序列（如 Ruby =end）只在列 0 生效
+                let anchored = !comment_line_start_only || line_start;
+                if anchored && content_matches_at(content, index, &close_bytes) {
                     index += close_bytes.len();
                     // 嵌套注释：先弹出内层，深度归零才真正闭合
                     if comment_depth > 0 {
@@ -161,7 +182,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                     };
                     continue;
                 }
-                if comment_nested && content_matches_at(content, index, &open_bytes) {
+                if comment_nested && anchored && content_matches_at(content, index, &open_bytes) {
                     comment_depth += 1;
                     index += open_bytes.len();
                     continue;
@@ -288,6 +309,30 @@ mod tests {
             name: "Python".to_string(),
             extensions: vec![".py".to_string()],
             line_comments: vec!["#".to_string()],
+            ..Default::default()
+        }
+    }
+
+    fn ruby_lang() -> Language {
+        Language {
+            name: "Ruby".to_string(),
+            extensions: vec![".rb".to_string()],
+            line_comments: vec!["#".to_string()],
+            block_comments: vec![("=begin".to_string(), "=end".to_string())],
+            string_delimiters: vec![
+                StringDelimiter {
+                    start: "\"".to_string(),
+                    end: "\"".to_string(),
+                    escape: Some("\\".to_string()),
+                    multiline: false,
+                },
+                StringDelimiter {
+                    start: "'".to_string(),
+                    end: "'".to_string(),
+                    escape: Some("\\".to_string()),
+                    multiline: false,
+                },
+            ],
             ..Default::default()
         }
     }
@@ -554,6 +599,45 @@ mod tests {
         let stats = count("/* outer /* inner */ int x = 1;\n", &c);
         assert_eq!(stats.total, 1);
         assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 0);
+    }
+
+    #[test]
+    fn test_ruby_begin_end_only_at_line_start() {
+        // =begin/=end 只在列 0 生效，行中出现不触发块注释
+        let stats = count(
+            "x=beginning_of_day\ny = 1\n# comment\nz=end_of_day\nw = 2\n",
+            &ruby_lang(),
+        );
+        assert_eq!(stats.total, 5);
+        assert_eq!(stats.code, 4);
+        assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_ruby_begin_end_block_comment() {
+        // 列 0 的 =begin/=end 正常构成块注释
+        let stats = count("=begin\ncomment here\n=end\nx = 1\n", &ruby_lang());
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.comment, 3);
+        assert_eq!(stats.code, 1);
+    }
+
+    #[test]
+    fn test_ruby_end_marker_mid_line_does_not_close() {
+        // 块注释内部行中的 =end 不闭合（Ruby 要求列 0）
+        let stats = count("=begin\nnot the =end of it\n=end\nx = 1\n", &ruby_lang());
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.comment, 3);
+        assert_eq!(stats.code, 1);
+    }
+
+    #[test]
+    fn test_ruby_indented_begin_does_not_open() {
+        // 缩进的 =begin 不是块注释
+        let stats = count("  =begin\nx = 1\n", &ruby_lang());
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 2);
         assert_eq!(stats.comment, 0);
     }
 
