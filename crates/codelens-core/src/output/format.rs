@@ -35,11 +35,11 @@ pub struct CombinedReport {
 /// Sort file stats by the given key (descending for numeric keys,
 /// ascending for names) and truncate to `top_n`. Shared by the
 /// formatters that render per-file tables (`--by-file`).
-pub fn sorted_files<'a>(
-    files: &'a [crate::analyzer::stats::FileStats],
+pub fn sorted_files(
+    files: &[crate::analyzer::stats::FileStats],
     sort_by: SortBy,
     top_n: Option<usize>,
-) -> Vec<&'a crate::analyzer::stats::FileStats> {
+) -> Vec<&crate::analyzer::stats::FileStats> {
     use std::cmp::Reverse;
 
     let mut sorted: Vec<_> = files.iter().collect();

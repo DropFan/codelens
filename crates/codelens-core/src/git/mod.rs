@@ -216,7 +216,7 @@ fn parse_numstat(output: &str) -> Vec<FileChurn> {
         })
         .collect();
 
-    churns.sort_by(|a, b| b.commits.cmp(&a.commits));
+    churns.sort_by_key(|c| std::cmp::Reverse(c.commits));
     churns
 }
 

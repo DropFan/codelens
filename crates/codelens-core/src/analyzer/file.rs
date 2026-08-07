@@ -265,7 +265,7 @@ mod tests {
 
         // Minified: one very long line
         let mut minified = b"fn main() { ".to_vec();
-        minified.extend(std::iter::repeat(b'x').take(600));
+        minified.extend(std::iter::repeat_n(b'x', 600));
         minified.extend(b" }\n");
         assert!(analyzer
             .analyze_from_bytes(Path::new("min.rs"), &minified)

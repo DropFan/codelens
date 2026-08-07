@@ -217,7 +217,7 @@ impl Summary {
 
         // Sort by code lines (descending)
         let mut sorted: Vec<_> = by_language.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.lines.code.cmp(&a.1.lines.code));
+        sorted.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.lines.code));
         summary.by_language = sorted.into_iter().collect();
 
         // Calculate average function lines

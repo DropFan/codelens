@@ -143,7 +143,7 @@ pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
         }
     }
 
-    metas.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    metas.sort_by_key(|m| m.timestamp);
     Ok(metas)
 }
 
