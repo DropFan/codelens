@@ -109,6 +109,10 @@ pub enum OutputFormatType {
     Csv,
     Markdown,
     Html,
+    /// Prometheus text exposition format.
+    OpenMetrics,
+    /// shields.io endpoint badge JSON.
+    Badge,
 }
 
 /// Sort order for results.

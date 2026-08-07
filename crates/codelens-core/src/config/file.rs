@@ -167,6 +167,8 @@ fn parse_format(s: &str) -> OutputFormatType {
         "csv" => OutputFormatType::Csv,
         "markdown" | "md" => OutputFormatType::Markdown,
         "html" => OutputFormatType::Html,
+        "openmetrics" => OutputFormatType::OpenMetrics,
+        "badge" => OutputFormatType::Badge,
         _ => OutputFormatType::Console,
     }
 }

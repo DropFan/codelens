@@ -359,6 +359,10 @@ pub enum OutputFormatArg {
     Csv,
     Markdown,
     Html,
+    /// Prometheus/OpenMetrics text format (for scraping).
+    Openmetrics,
+    /// shields.io endpoint badge JSON.
+    Badge,
 }
 
 /// Sort order argument.

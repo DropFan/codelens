@@ -559,6 +559,8 @@ impl From<OutputFormatArg> for codelens_core::config::OutputFormatType {
             OutputFormatArg::Csv => Self::Csv,
             OutputFormatArg::Markdown => Self::Markdown,
             OutputFormatArg::Html => Self::Html,
+            OutputFormatArg::Openmetrics => Self::OpenMetrics,
+            OutputFormatArg::Badge => Self::Badge,
         }
     }
 }
