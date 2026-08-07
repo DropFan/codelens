@@ -11,6 +11,9 @@ enum State {
     LineCommentAfterCode,
     BlockComment,
     BlockCommentAfterCode,
+    /// 块注释/文档字符串在行内闭合后继续扫描：
+    /// 若行尾前再无代码则整行算注释，出现代码则转为 Code。
+    AfterBlockComment,
     InString,
     InDocString,
 }
@@ -47,7 +50,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
         }
 
         match state {
-            State::Blank => {
+            State::Blank | State::AfterBlockComment => {
                 if byte.is_ascii_whitespace() {
                     index += 1;
                     continue;
@@ -132,8 +135,9 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                     index += close_bytes.len();
                     state = match state {
                         State::BlockCommentAfterCode => State::Code,
-                        // Line started blank; remember this was a comment line
-                        _ => State::LineComment,
+                        // 行首开始的块注释闭合后继续扫描，
+                        // 行尾按是否出现过代码再分类
+                        _ => State::AfterBlockComment,
                     };
                     continue;
                 }
@@ -156,8 +160,8 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             State::InDocString => {
                 if content_matches_at(content, index, &close_bytes) {
                     index += close_bytes.len();
-                    // Docstring closed; remember this line had a docstring
-                    state = State::LineComment;
+                    // docstring 闭合后继续扫描，同行代码算 code
+                    state = State::AfterBlockComment;
                     continue;
                 }
                 index += 1;
@@ -184,7 +188,10 @@ fn classify_line(state: &State, stats: &mut LineStats) {
         | State::BlockCommentAfterCode => {
             stats.code += 1;
         }
-        State::LineComment | State::BlockComment | State::InDocString => {
+        State::LineComment
+        | State::BlockComment
+        | State::AfterBlockComment
+        | State::InDocString => {
             stats.comment += 1;
         }
     }
@@ -408,6 +415,42 @@ mod tests {
         assert_eq!(stats.total, 2);
         assert_eq!(stats.code, 1);
         assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_code_after_inline_block_comment_close() {
+        // 块注释在行内闭合后，同行的代码必须算 code（对齐 scc/tokei）
+        let stats = count("/* c */ int x = 1;\nint y = 2;\n", &rust_lang());
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 2);
+        assert_eq!(stats.comment, 0);
+    }
+
+    #[test]
+    fn test_inline_block_comment_close_then_whitespace_only() {
+        // 闭合后只剩空白 → 仍是注释行
+        let stats = count("/* c */   \nlet x = 1;\n", &rust_lang());
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_inline_block_comment_close_then_line_comment() {
+        // 闭合后接行注释 → 仍是注释行
+        let stats = count("/* a */ // b\n", &rust_lang());
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.comment, 1);
+        assert_eq!(stats.code, 0);
+    }
+
+    #[test]
+    fn test_code_after_docstring_close_same_line() {
+        // docstring 行内闭合后出现代码 → code
+        let stats = count("\"\"\"doc\"\"\" x = 1\n", &python_lang());
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.code, 1);
+        assert_eq!(stats.comment, 0);
     }
 
     #[test]
