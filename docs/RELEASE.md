@@ -95,7 +95,13 @@ version = "0.1.0"
 
 ## 发布步骤
 
-### 手动发布流程
+> **推荐统一使用 cargo release 发版**（见下文「使用 cargo-release（推荐）」小节）。
+> cargo release 会自动 bump workspace 版本号，并按 release.toml 的替换规则更新
+> CHANGELOG.md 的 `[Unreleased]`、同步 README.md 和 `.pre-commit-hooks.yaml` 中的
+> `rev:` 示例、创建 tag，一条命令完成。手动流程仅作兜底，所有替换都必须人工逐项
+> 完成，容易遗漏。
+
+### 手动发布流程（兜底）
 
 #### 1. 检查清单
 
@@ -123,12 +129,24 @@ cargo doc --no-deps --all-features
 
 #### 2. 更新版本
 
+以下文件**必须逐一手动更新**。走 cargo release 时版本号由命令本身 bump，其余替换
+由 `crates/codelens/release.toml` 的 `pre-release-replacements` 自动完成；手动发版没有任何机制兜底
+（v0.1.6 手动发版时这些替换规则完全没有生效，全靠人工记得修改才没出错）：
+
+- [ ] 根 `Cargo.toml`：`[workspace.package]` 中的 `version`
+- [ ] `CHANGELOG.md`：将 `[Unreleased]` 改为 `[X.Y.Z] - YYYY-MM-DD`
+- [ ] `README.md`：pre-commit 示例中的 `rev: vX.Y.Z-rust`
+- [ ] `.pre-commit-hooks.yaml`：注释示例中的 `rev: vX.Y.Z-rust`
+
 ```bash
 # 编辑 Cargo.toml 中的版本号
 vim Cargo.toml
 
 # 更新 CHANGELOG.md
 vim CHANGELOG.md
+
+# 更新 README.md 与 .pre-commit-hooks.yaml 中的 rev:
+vim README.md .pre-commit-hooks.yaml
 
 # 更新 Cargo.lock
 cargo check
@@ -137,7 +155,7 @@ cargo check
 #### 3. 提交版本变更
 
 ```bash
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md README.md .pre-commit-hooks.yaml
 git commit -m "chore: bump version to 0.1.0"
 ```
 
@@ -151,9 +169,12 @@ git tag -a v0.1.0-rust -m "Release v0.1.0 (Rust)"
 git push origin v0.1.0-rust
 ```
 
-### 使用 cargo-release
+### 使用 cargo-release（推荐）
 
-更简便的方式：
+cargo release 会按 release.toml 的配置（workspace 级在仓库根，tag 和文件替换在
+`crates/codelens/release.toml`）自动完成上述全部手动步骤：bump workspace
+版本号、替换 CHANGELOG.md 的 `[Unreleased]`、同步 README.md 和
+`.pre-commit-hooks.yaml` 中的 `rev:`、提交并创建 tag：
 
 ```bash
 # 预览发布（不实际执行）
@@ -188,15 +209,22 @@ cargo release major --execute
 ### Release 流程 (release.yml)
 
 1. **Create Release** - 创建 GitHub Draft Release
-2. **Build** - 构建多平台二进制
+2. **Build** - 构建多平台二进制并上传到 Draft Release
    - `x86_64-unknown-linux-gnu`
    - `x86_64-unknown-linux-musl`
    - `aarch64-unknown-linux-gnu`
    - `x86_64-apple-darwin`
    - `aarch64-apple-darwin`
    - `x86_64-pc-windows-msvc`
-3. **Publish** - 发布到 crates.io
-4. **Homebrew** - 更新 Homebrew formula
+3. **Publish Release** - Build 全部完成后自动将 Draft Release 转正（正式发布）
+4. **Publish crates** - 发布到 crates.io
+5. **Homebrew** - 更新 Homebrew formula（依赖已转正的 Release：Draft 状态的资产
+   无法通过公开链接下载，转正后才能下载资产并计算校验和）
+
+> 兜底：若 publish-release job 失败，Release 会停留在 Draft 状态，Homebrew formula
+> 也不会更新。此时在 GitHub Releases 页面手动将 Draft 发布（Publish release），
+> 然后在 Actions 页面 re-run homebrew job；仍失败则参考[常见问题](#常见问题)手动
+> 更新 formula。
 
 ---
 
@@ -325,13 +353,15 @@ cargo release patch --execute
 - [ ] 所有测试通过
 - [ ] CHANGELOG.md 已更新
 - [ ] 版本号已更新
+- [ ] README.md 与 `.pre-commit-hooks.yaml` 中的 `rev:` 已指向新版本
+      （cargo release 自动处理，手动发版必须检查）
 - [ ] 文档已更新
 - [ ] 无安全漏洞 (`cargo audit`)
 - [ ] CI 全部通过
 
 发布后确认：
 
-- [ ] GitHub Release 创建成功
+- [ ] GitHub Release 已发布（Draft 由 publish-release job 自动转正）
 - [ ] 各平台二进制可下载
 - [ ] crates.io 发布成功
 - [ ] `cargo install codelens` 可正常安装
