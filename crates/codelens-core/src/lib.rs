@@ -40,6 +40,7 @@ pub use analyzer::stats::{
     AnalysisResult, Complexity, FileStats, LanguageSummary, LineStats, RepoStats, RepoSummary,
     SizeDistribution, Summary,
 };
+pub use analyzer::{ComplexityAnalyzer, FunctionSpan};
 pub use config::Config;
 pub use error::{Error, Result};
 pub use git::{CommitRecord, FileChange, FileChurn, GitClient};

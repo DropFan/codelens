@@ -44,6 +44,42 @@ pub struct FileHotspot {
     /// Days since the file's first commit (None when unknown).
     /// An old file that is still a hotspot signals chronic instability.
     pub age_days: Option<u64>,
+    /// Function-level breakdown (--functions), most-touched first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub functions: Option<Vec<FunctionHotspot>>,
+}
+
+/// How often one function was touched within the window (approximate:
+/// diff hunks intersected with heuristic function spans).
+#[derive(Debug, Clone, Serialize)]
+pub struct FunctionHotspot {
+    pub name: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub commits: usize,
+    pub cyclomatic: usize,
+}
+
+/// Count, per span, how many commits touched it: a commit touches a span
+/// when any of its changed ranges (start, len) overlaps the span's lines.
+pub fn count_function_touches(
+    spans: &[crate::analyzer::FunctionSpan],
+    per_commit_ranges: &[Vec<(usize, usize)>],
+) -> Vec<usize> {
+    spans
+        .iter()
+        .map(|span| {
+            per_commit_ranges
+                .iter()
+                .filter(|ranges| {
+                    ranges.iter().any(|&(start, len)| {
+                        let end = start + len.saturating_sub(1);
+                        start <= span.end_line && end >= span.start_line
+                    })
+                })
+                .count()
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +123,7 @@ pub fn analyze(
                 hotspot_score: 0.0,
                 risk: RiskLevel::Low,
                 age_days: None,
+                functions: None,
             })
         })
         .collect();
@@ -322,6 +359,31 @@ mod tests {
         let report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
         let risks: Vec<RiskLevel> = report.files.iter().map(|f| f.risk).collect();
         assert!(risks.contains(&RiskLevel::High));
+    }
+
+    #[test]
+    fn test_count_function_touches() {
+        use crate::analyzer::FunctionSpan;
+        let spans = vec![
+            FunctionSpan {
+                name: "alpha".into(),
+                start_line: 1,
+                end_line: 10,
+            },
+            FunctionSpan {
+                name: "beta".into(),
+                start_line: 11,
+                end_line: 30,
+            },
+        ];
+        let commits = vec![
+            vec![(5, 2)],           // touches alpha only
+            vec![(9, 5)],           // straddles the boundary: touches both
+            vec![(25, 1), (28, 2)], // touches beta only
+            vec![(100, 3)],         // touches nothing
+        ];
+        let touches = count_function_touches(&spans, &commits);
+        assert_eq!(touches, vec![2, 2]);
     }
 
     #[test]

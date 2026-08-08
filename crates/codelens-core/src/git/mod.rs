@@ -180,6 +180,38 @@ impl GitClient {
         Ok(output.parse::<usize>().unwrap_or(0))
     }
 
+    /// Per-commit changed line ranges (new-file side) for one file within
+    /// the time window: one entry per commit touching the file, each a list
+    /// of (start_line, line_count) pairs. Deletion-only hunks report the
+    /// anchor line with a count of 1 so the surrounding code still counts
+    /// as touched.
+    pub fn file_commit_hunks(&self, path: &Path, since: &str) -> Result<Vec<Vec<(usize, usize)>>> {
+        let output = Command::new("git")
+            .args([
+                "log",
+                "-p",
+                "-U0",
+                "--format=%x01%H",
+                &format!("--since={since}"),
+                "--",
+                &path.display().to_string(),
+            ])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| Error::GitError {
+                message: format!("failed to execute git log -p: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::GitError {
+                message: format!("git log -p failed: {stderr}"),
+            });
+        }
+
+        Ok(parse_hunk_ranges(&String::from_utf8_lossy(&output.stdout)))
+    }
+
     /// Check whether `reference` resolves to a commit in this repository.
     pub fn rev_exists(&self, reference: &str) -> bool {
         self.run_git(&[
@@ -376,6 +408,39 @@ fn parse_log(output: &str) -> Vec<CommitRecord> {
         }
     }
 
+    commits
+}
+
+/// Parse `git log -p -U0 --format=%x01%H` output into per-commit changed
+/// line ranges on the new-file side. Hunk headers look like
+/// `@@ -a,b +c,d @@` (`,b`/`,d` omitted when 1).
+fn parse_hunk_ranges(output: &str) -> Vec<Vec<(usize, usize)>> {
+    let mut commits: Vec<Vec<(usize, usize)>> = Vec::new();
+    for line in output.lines() {
+        if line.starts_with(HEADER_MARK) {
+            commits.push(Vec::new());
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("@@ ") else {
+            continue;
+        };
+        let Some(commit) = commits.last_mut() else {
+            continue;
+        };
+        // Take the "+c,d" part.
+        let Some(plus) = rest.split(' ').find(|part| part.starts_with('+')) else {
+            continue;
+        };
+        let mut nums = plus[1..].splitn(2, ',');
+        let Some(start) = nums.next().and_then(|n| n.parse::<usize>().ok()) else {
+            continue;
+        };
+        let count: usize = nums.next().and_then(|n| n.parse().ok()).unwrap_or(1);
+        // Deletion-only hunks (count 0, and start 0 when the deletion is at
+        // the top of the file) anchor to the nearest surviving line.
+        commit.push((start.max(1), count.max(1)));
+    }
+    commits.retain(|c| !c.is_empty());
     commits
 }
 
@@ -609,6 +674,30 @@ mod tests {
         );
         let commits = parse_log(&input);
         assert_eq!(commits[1].files[0].path, PathBuf::from("new.rs"));
+    }
+
+    #[test]
+    fn test_parse_hunk_ranges() {
+        let input = format!(
+            "{}\n@@ -10,3 +12,5 @@ fn foo()\n@@ -30 +40 @@\n\n{}\n@@ -1,2 +0,0 @@\n",
+            header("aaa", "Alice", 1),
+            header("bbb", "Bob", 2)
+        );
+        let ranges = parse_hunk_ranges(&input);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0], vec![(12, 5), (40, 1)]);
+        // Deletion-only hunk anchors to line 1 with count 1.
+        assert_eq!(ranges[1], vec![(1, 1)]);
+    }
+
+    #[test]
+    fn test_parse_hunk_ranges_skips_diff_noise() {
+        let input = format!(
+            "{}\ndiff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,2 @@\n+added line with @@ inside\n",
+            header("aaa", "Alice", 1)
+        );
+        let ranges = parse_hunk_ranges(&input);
+        assert_eq!(ranges, vec![vec![(1, 2)]]);
     }
 
     #[test]

@@ -125,6 +125,11 @@ pub struct HotspotArgs {
     #[arg(long, default_value = "90d")]
     pub since: String,
 
+    /// Break the top hotspot files down to function level (approximate:
+    /// diff hunks intersected with heuristic function spans).
+    #[arg(long)]
+    pub functions: bool,
+
     #[command(flatten)]
     pub filter: FilterArgs,
 

@@ -637,6 +637,35 @@ impl ConsoleOutput {
         writeln!(writer, "{table}")?;
         writeln!(writer)?;
 
+        // Function-level breakdown (--functions)
+        if report.files.iter().any(|f| f.functions.is_some()) {
+            writeln!(
+                writer,
+                "{} {}",
+                "Function Hotspots".bold(),
+                "(approximate spans)".dimmed()
+            )?;
+            writeln!(writer)?;
+            for file in report.files.iter().filter(|f| f.functions.is_some()) {
+                writeln!(
+                    writer,
+                    "  {}",
+                    file.path.display().to_string().cyan().bold()
+                )?;
+                for func in file.functions.as_deref().unwrap_or_default() {
+                    writeln!(
+                        writer,
+                        "    {:<32} L{:<9} {} commits  CC {}",
+                        func.name,
+                        format!("{}-{}", func.start_line, func.end_line),
+                        func.commits,
+                        func.cyclomatic,
+                    )?;
+                }
+            }
+            writeln!(writer)?;
+        }
+
         Ok(())
     }
 

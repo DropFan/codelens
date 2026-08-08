@@ -381,6 +381,29 @@ impl MarkdownOutput {
         }
         writeln!(writer)?;
 
+        // Function-level breakdown (--functions)
+        if report.files.iter().any(|f| f.functions.is_some()) {
+            writeln!(writer, "## Function Hotspots (approximate spans)")?;
+            writeln!(writer)?;
+            writeln!(writer, "| File | Function | Lines | Commits | CC |")?;
+            writeln!(writer, "|------|----------|-------|---------|-----|")?;
+            for file in report.files.iter().filter(|f| f.functions.is_some()) {
+                for func in file.functions.as_deref().unwrap_or_default() {
+                    writeln!(
+                        writer,
+                        "| {} | {} | {}-{} | {} | {} |",
+                        file.path.display(),
+                        func.name,
+                        func.start_line,
+                        func.end_line,
+                        func.commits,
+                        func.cyclomatic,
+                    )?;
+                }
+            }
+            writeln!(writer)?;
+        }
+
         Ok(())
     }
 

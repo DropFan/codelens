@@ -8,5 +8,5 @@ pub mod test_code;
 pub mod tokens;
 pub mod trie;
 
-pub use complexity::ComplexityAnalyzer;
+pub use complexity::{ComplexityAnalyzer, FunctionSpan};
 pub use file::FileAnalyzer;

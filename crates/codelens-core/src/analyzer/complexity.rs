@@ -4,6 +4,22 @@ use crate::language::Language;
 
 use super::stats::Complexity;
 
+/// A function's location within a file, by line numbers.
+///
+/// Spans are heuristic: a function extends from its signature match to
+/// the line before the next match (the last one runs to end of file).
+/// Trailing items between functions get attributed to the preceding
+/// function — good enough for change attribution, not for tooling that
+/// needs exact boundaries.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FunctionSpan {
+    pub name: String,
+    /// 1-based, inclusive.
+    pub start_line: usize,
+    /// 1-based, inclusive.
+    pub end_line: usize,
+}
+
 /// Analyzes code complexity metrics.
 pub struct ComplexityAnalyzer;
 
@@ -50,6 +66,57 @@ impl ComplexityAnalyzer {
         }
 
         complexity
+    }
+
+    /// Locate function spans using the language's function pattern.
+    /// Returns an empty list for languages without one.
+    pub fn function_spans(&self, content: &str, lang: &Language) -> Vec<FunctionSpan> {
+        let patterns = lang.complexity_patterns();
+        let Some(re) = &patterns.function_re else {
+            return Vec::new();
+        };
+
+        let matches: Vec<(usize, String)> = re
+            .find_iter(content)
+            .map(|m| {
+                // Patterns like `(?m)^\s*fn ...` swallow preceding blank
+                // lines into the match; anchor the span at the signature
+                // itself, not at the leading whitespace.
+                let lead_ws = m.as_str().len() - m.as_str().trim_start().len();
+                (m.start() + lead_ws, trailing_identifier(m.as_str()))
+            })
+            .collect();
+        if matches.is_empty() {
+            return Vec::new();
+        }
+
+        // Byte offset of each line start, for offset → line translation.
+        let mut line_starts = vec![0usize];
+        for (i, b) in content.bytes().enumerate() {
+            if b == b'\n' {
+                line_starts.push(i + 1);
+            }
+        }
+        let line_of = |offset: usize| line_starts.partition_point(|&s| s <= offset);
+        let total_lines = content.lines().count().max(1);
+
+        matches
+            .iter()
+            .enumerate()
+            .map(|(i, (offset, name))| {
+                let start_line = line_of(*offset);
+                let end_line = if i + 1 < matches.len() {
+                    line_of(matches[i + 1].0).saturating_sub(1).max(start_line)
+                } else {
+                    total_lines
+                };
+                FunctionSpan {
+                    name: name.clone(),
+                    start_line,
+                    end_line,
+                }
+            })
+            .collect()
     }
 
     /// Calculate maximum nesting depth from bracket pairs, ignoring
@@ -116,6 +183,17 @@ impl Default for ComplexityAnalyzer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Last identifier in a function signature match:
+/// "pub async fn parse_log" → "parse_log".
+fn trailing_identifier(matched: &str) -> String {
+    matched
+        .trim()
+        .rsplit(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .find(|s| !s.is_empty())
+        .unwrap_or("?")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -238,6 +316,46 @@ fn main() {
             "brackets after lifetimes must still count, got {}",
             complexity.max_depth
         );
+    }
+
+    #[test]
+    fn test_function_spans() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = "\
+fn first() {
+    body();
+}
+
+pub fn second() {
+    more();
+}
+";
+        let spans = analyzer.function_spans(content, &lang);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].name, "first");
+        assert_eq!(spans[0].start_line, 1);
+        assert_eq!(spans[0].end_line, 4, "first span ends before second's line");
+        assert_eq!(spans[1].name, "second");
+        assert_eq!(spans[1].start_line, 5);
+        assert_eq!(spans[1].end_line, 7, "last span runs to end of file");
+    }
+
+    #[test]
+    fn test_function_spans_no_pattern() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = Language {
+            name: "Markdown".to_string(),
+            ..Default::default()
+        };
+        assert!(analyzer.function_spans("# hi\n", &lang).is_empty());
+    }
+
+    #[test]
+    fn test_trailing_identifier() {
+        assert_eq!(trailing_identifier("pub async fn parse_log"), "parse_log");
+        assert_eq!(trailing_identifier("  def foo"), "foo");
+        assert_eq!(trailing_identifier("function bar ("), "bar");
     }
 
     #[test]
