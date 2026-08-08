@@ -21,10 +21,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge risk in hotspots: per-file author count and ownership
   share; a MED/HIGH-risk file owned ≥75% by one author is flagged as a
   knowledge island (frequently changed + complex + one person knows it)
+- `--no-dup-scan` — skip line-duplication collection (saves hundreds
+  of MB on very large repos); the Duplication health dimension is
+  omitted and the remaining weights renormalized, never faked as a
+  perfect score
+- `--languages-file <PATH>` — load custom language definitions from a
+  TOML file (also settable in `.codelens.toml`, resolved relative to
+  the config file); definitions with the same id replace the built-in
+  entirely, and invalid regexes are rejected at load time
 
 ### Changed
 - Old trend snapshots lack duplication data and default to a perfect
   duplication score; regenerate baselines for meaningful comparisons
+- `.m` files are now always counted as Objective-C (matching scc's
+  dominant real-world output); previously the MATLAB/Objective-C
+  winner was random per run. MATLAB repos: use `--count-as m:matlab`
+- `health --fail-under` gates on the current analysis's own scoring
+  model; a baseline snapshot's capture settings no longer change the
+  absolute score
+
+### Fixed
+- `--list-languages` printed every language twice and doubled the total
+- `codelens diff A..B C` now errors instead of silently ignoring `C`
+- Release pipeline: draft releases are published automatically after
+  all builds complete, and Homebrew checksum downloads fail loudly
 
 ## [0.1.6] - 2026-08-08
 
