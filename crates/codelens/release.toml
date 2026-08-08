@@ -1,0 +1,19 @@
+# cargo-release 包级配置：codelens 是"代表包"——
+# 统一的 tag 和一次性的文件替换都挂在这里，避免每个包重复执行。
+
+release = true
+
+# Tag 配置（workspace 默认 tag = false，只有本包打 tag）
+tag = true
+tag-name = "v{{version}}-rust"
+tag-message = "Release v{{version}} (Rust)"
+
+# 发版时同步更新版本号引用（file 路径相对本包目录）：
+# - README / pre-commit 示例里的 `rev:` 指向本次发布的 tag，
+#   保证每个 tag 的源码树自洽
+# - CHANGELOG 的 [Unreleased] 收口为本次版本
+pre-release-replacements = [
+    { file = "../../README.md", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
+    { file = "../../.pre-commit-hooks.yaml", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
+    { file = "../../CHANGELOG.md", search = "\\[Unreleased\\]", replace = "[{{version}}] - {{date}}" },
+]

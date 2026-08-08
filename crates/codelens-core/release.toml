@@ -1,0 +1,2 @@
+# cargo-release 包级配置（workspace 默认 release = false，这里显式开启）
+release = true

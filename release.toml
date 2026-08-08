@@ -1,40 +1,22 @@
-# cargo-release configuration
-# https://github.com/crate-ci/cargo-release
+# cargo-release workspace 配置
+# https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
+#
+# 注意：独立的 release.toml 不使用 [workspace] / [[package]] 表头——
+# workspace 根的 release.toml 顶层键即为 workspace 级配置，
+# 包级配置放在各包目录自己的 release.toml 里
+# （crates/codelens-core/release.toml、crates/codelens/release.toml）。
 
-[workspace]
-# 发布前是否允许未提交的更改
+# 只允许在 rust 分支发版
 allow-branch = ["rust"]
-# 是否为 workspace 所有成员统一版本
+# workspace 所有成员合并为一次发布提交
 consolidate-commits = true
-# 发布顺序（先核心库，后 CLI）
+# 默认不发布任何包；各包在自己的 release.toml 里显式开启，
+# 防止未来新增的 crate 被意外发布
 release = false
-
-[[package]]
-name = "codelens-core"
-release = true
-
-[[package]]
-name = "codelens"
-release = true
-# Keep pre-commit `rev:` examples pointing at the tag being released so
-# every tag's tree is self-consistent.
-pre-release-replacements = [
-    { file = "../../README.md", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
-    { file = "../../.pre-commit-hooks.yaml", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
-]
-
-# 预发布检查
-pre-release-commit-message = "chore: release v{{version}}"
-pre-release-replacements = [
-    { file = "CHANGELOG.md", search = "\\[Unreleased\\]", replace = "[{{version}}] - {{date}}" },
-]
-
-# Tag 配置
-tag-name = "v{{version}}-rust"
-tag-message = "Release v{{version}} (Rust)"
-tag = true
+# 默认不打 tag，由 codelens 包统一打 v{{version}}-rust（见其 release.toml）
+tag = false
 sign-tag = false
 sign-commit = false
 
-# 发布后动作
-post-release-commit-message = "chore: start next development iteration"
+# 发布提交消息
+pre-release-commit-message = "chore: release v{{version}}"
