@@ -1,0 +1,467 @@
+//! Subcommand implementations and the shared CLI plumbing they build on:
+//! config loading/merging, report writing, and git path normalization.
+
+pub(crate) mod coupling;
+pub(crate) mod diff;
+pub(crate) mod estimate;
+pub(crate) mod health;
+pub(crate) mod hotspot;
+pub(crate) mod trend;
+
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use anyhow::{Context, Result};
+use colored::Colorize;
+
+use codelens_core::config::{Config, PartialConfig};
+use codelens_core::git::GitClient;
+use codelens_core::insight::scoring::default::DefaultModel;
+use codelens_core::output::{create_output, OutputOptions, Report};
+use codelens_core::{analyze, LanguageRegistry};
+
+use crate::cli::{self, Cli};
+
+/// Run the default (no subcommand) analysis and print the combined report.
+pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
+    // Build configuration
+    let config = build_config(cli)?;
+
+    // Collect paths to analyze
+    let paths: Vec<PathBuf> = if cli.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        cli.paths.clone()
+    };
+
+    // Run analysis
+    let result = analyze(&paths, &config).context("Analysis failed")?;
+
+    // Prepare output options from the merged config (defaults → file → CLI)
+    let output_options = OutputOptions {
+        summary_only: config.output.summary_only,
+        by_file: config.output.by_file,
+        by_dir: config.output.by_dir,
+        dir_depth: config.output.dir_depth,
+        show_tokens: config.output.show_tokens,
+        sort_by: config.output.sort_by,
+        top_n: config.output.top_n,
+        colorize: should_colorize(&config.output),
+        show_git_info: config.output.show_git_info,
+    };
+
+    // Get output formatter
+    let formatter = create_output(config.output.format);
+
+    // Quiet suppresses terminal output only; an explicit -O file is still written
+    if config.output.quiet && config.output.file.is_none() {
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // Bundle stats + health + estimation into ONE report so machine
+    // formats (JSON/HTML) stay parseable as a single document.
+    let scoring_model = DefaultModel::new();
+    let health_top_n = config.output.top_n.unwrap_or(10);
+    let health_report =
+        codelens_core::insight::health::score(&result, &scoring_model, health_top_n);
+
+    let cost_config = codelens_core::CostConfig::default();
+    let cocomo_basic = codelens_core::CocomoBasicModel::default();
+    let cocomo2 = codelens_core::CocomoIIModel::default();
+    let putnam = codelens_core::PutnamModel::default();
+    let locomo = codelens_core::LocomoModel::default();
+    let models: Vec<&dyn codelens_core::EstimationModel> =
+        vec![&cocomo_basic, &cocomo2, &putnam, &locomo];
+    let comparison =
+        codelens_core::insight::estimation::estimate_all(&result.summary, &models, &cost_config);
+
+    let report = Report::Combined(Box::new(codelens_core::output::CombinedReport {
+        analysis: result,
+        health: health_report,
+        estimation: comparison,
+    }));
+
+    if let Some(ref path) = config.output.file {
+        let file = File::create(path).context("Failed to create output file")?;
+        let mut writer = BufWriter::new(file);
+        formatter.write(&report, &output_options, &mut writer)?;
+        writer.flush()?;
+        if !config.output.quiet {
+            println!("Output written to: {}", path.display().to_string().green());
+        }
+    } else {
+        let stdout = io::stdout();
+        let mut writer = stdout.lock();
+        formatter.write(&report, &output_options, &mut writer)?;
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn list_languages() -> Result<()> {
+    let registry = LanguageRegistry::with_builtin()?;
+
+    println!("{}", "Supported Languages".bold());
+    println!("{}", "─".repeat(40));
+
+    let mut languages: Vec<_> = registry.all().collect();
+    languages.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let count = languages.len();
+    for lang in languages {
+        let exts = lang.extensions.join(", ");
+        println!("  {} {}", lang.name.cyan(), format!("({})", exts).dimmed());
+    }
+
+    println!();
+    println!("Total: {} languages", count.to_string().green());
+
+    Ok(())
+}
+
+/// Load the config file specified by `--config`, or search default locations.
+///
+/// Unlike the previous behavior, a config file that exists but fails to parse
+/// is a hard error even when found via the default search path — silently
+/// ignoring it made bad configs undiagnosable.
+fn load_partial_config(advanced: &cli::AdvancedArgs) -> Result<Option<PartialConfig>> {
+    if advanced.no_config {
+        return Ok(None);
+    }
+    if let Some(ref path) = advanced.config {
+        return Ok(Some(codelens_core::config::load_config_file(path)?));
+    }
+    let default_path = PathBuf::from(".codelens.toml");
+    if default_path.exists() {
+        return Ok(Some(codelens_core::config::load_config_file(
+            &default_path,
+        )?));
+    }
+    Ok(None)
+}
+
+/// Merge configuration from three layers, later layers winning:
+/// built-in defaults → config file → explicitly passed CLI arguments.
+fn resolve_config(
+    filter: &cli::FilterArgs,
+    output: &cli::OutputArgs,
+    advanced: &cli::AdvancedArgs,
+    partial: Option<&PartialConfig>,
+) -> Config {
+    let mut config = Config::default();
+    config.walker.threads = num_cpus::get();
+    config.filter.smart_exclude = true;
+
+    if let Some(partial) = partial {
+        partial.apply_to(&mut config);
+    }
+
+    // CLI overrides: only fields the user explicitly passed.
+    if let Some(threads) = advanced.threads {
+        config.walker.threads = threads;
+    }
+    if filter.no_gitignore {
+        config.walker.use_gitignore = false;
+    }
+    if let Some(depth) = filter.depth {
+        config.walker.max_depth = Some(depth);
+    }
+
+    if let Some(ref excludes) = filter.exclude {
+        config.filter.excludes = excludes.clone();
+    }
+    if let Some(ref pattern) = filter.exclude_files {
+        config.filter.exclude_files = vec![pattern.clone()];
+    }
+    if let Some(ref pattern) = filter.include_files {
+        config.filter.include_files = vec![pattern.clone()];
+    }
+    if let Some(ref langs) = filter.lang {
+        config.filter.languages = langs.clone();
+    }
+    if let Some(min_lines) = filter.min_lines {
+        config.filter.min_lines = Some(min_lines);
+    }
+    if let Some(max_lines) = filter.max_lines {
+        config.filter.max_lines = Some(max_lines);
+    }
+    if filter.no_smart_exclude {
+        config.filter.smart_exclude = false;
+    }
+    if filter.all {
+        config.filter.include_all = true;
+    }
+    if filter.no_duplicates {
+        config.filter.no_duplicates = true;
+    }
+    if filter.no_min_gen {
+        config.filter.no_min_gen = true;
+    }
+    if filter.no_linguist {
+        config.filter.no_linguist = true;
+    }
+    if let Some(ref count_as) = filter.count_as {
+        config.count_as = parse_count_as(count_as);
+    }
+
+    if let Some(format) = output.format {
+        config.output.format = format.into();
+    }
+    if let Some(ref path) = output.output_file {
+        config.output.file = Some(path.clone());
+    }
+    if output.summary {
+        config.output.summary_only = true;
+    }
+    if output.by_file {
+        config.output.by_file = true;
+    }
+    if output.by_dir {
+        config.output.by_dir = true;
+    }
+    if let Some(depth) = output.dir_depth {
+        config.output.dir_depth = depth.max(1);
+    }
+    if output.tokens {
+        config.output.show_tokens = true;
+    }
+    if let Some(sort) = output.sort {
+        config.output.sort_by = sort.into();
+    }
+    if let Some(top) = output.top {
+        config.output.top_n = Some(top);
+    }
+    if output.verbose {
+        config.output.verbose = true;
+    }
+    if output.quiet {
+        config.output.quiet = true;
+    }
+    if advanced.git_info {
+        config.output.show_git_info = true;
+    }
+
+    config
+}
+
+fn build_config(cli: &Cli) -> Result<Config> {
+    let partial = load_partial_config(&cli.advanced)?;
+    Ok(resolve_config(
+        &cli.filter,
+        &cli.output,
+        &cli.advanced,
+        partial.as_ref(),
+    ))
+}
+
+/// Materialize `reference` in a temporary worktree and analyze the same
+/// locations there; file paths come back repo-root-relative.
+fn analyze_at_git_ref(
+    git_client: &GitClient,
+    reference: &str,
+    paths: &[PathBuf],
+    config: &Config,
+) -> Result<codelens_core::AnalysisResult> {
+    if !git_client.rev_exists(reference) {
+        anyhow::bail!("'{reference}' is not a git ref in this repository");
+    }
+
+    let worktree = git_client.temp_worktree(reference)?;
+    // A path that does not exist in that tree must be a hard error:
+    // falling back to the whole tree would compare mismatched scopes and
+    // fabricate a project-level "regression" with zero regressed files.
+    let repo_root = std::fs::canonicalize(git_client.repo_path())
+        .unwrap_or_else(|_| git_client.repo_path().to_path_buf());
+    let mut mapped: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    for p in paths {
+        let inside = std::fs::canonicalize(p).ok().and_then(|abs| {
+            abs.strip_prefix(&repo_root)
+                .ok()
+                .map(|rel| worktree.path().join(rel))
+        });
+        match inside.filter(|m| m.exists()) {
+            Some(m) => mapped.push(m),
+            None => anyhow::bail!(
+                "path '{}' does not exist in '{reference}'; \
+                 compare a path that exists in both trees",
+                p.display()
+            ),
+        }
+    }
+    let mut result = analyze(&mapped, config).context("Analysis of the git ref failed")?;
+    rewrite_paths_repo_relative(&mut result.files, worktree.path());
+    Ok(result)
+}
+
+/// Drop files living inside git submodules and rebuild the summary.
+/// Ref comparisons need this symmetrically on both sides: temporary
+/// worktrees never materialize submodules, the real tree does.
+fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: &[PathBuf]) {
+    if submodules.is_empty() {
+        return;
+    }
+    result.files.retain(|f| {
+        let p = f.path.strip_prefix("./").unwrap_or(&f.path);
+        !submodules.iter().any(|s| p.starts_with(s))
+    });
+    result.summary = codelens_core::Summary::from_file_stats(&result.files);
+}
+
+/// Rewrite analysis file paths to be repo-root-relative.
+pub(crate) fn rewrite_paths_repo_relative(
+    files: &mut [codelens_core::FileStats],
+    repo_root: &Path,
+) {
+    let repo_root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    for f in files {
+        if let Ok(abs) = std::fs::canonicalize(&f.path) {
+            if let Ok(rel) = abs.strip_prefix(&repo_root) {
+                f.path = rel.to_path_buf();
+            }
+        }
+    }
+}
+
+/// Parse "jsp:html,tpl:php" into (extension, language) pairs.
+/// Entries without a ':' are ignored.
+fn parse_count_as(spec: &str) -> Vec<(String, String)> {
+    spec.split(',')
+        .filter_map(|pair| {
+            let (ext, lang) = pair.split_once(':')?;
+            let (ext, lang) = (ext.trim(), lang.trim());
+            if ext.is_empty() || lang.is_empty() {
+                return None;
+            }
+            Some((ext.to_string(), lang.to_string()))
+        })
+        .collect()
+}
+
+/// Colors belong on an interactive terminal only — never in an -O file,
+/// and not when stdout is piped/redirected.
+fn should_colorize(output: &codelens_core::config::OutputConfig) -> bool {
+    use std::io::IsTerminal;
+    output.file.is_none() && io::stdout().is_terminal()
+}
+
+fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
+    let output_options = OutputOptions {
+        summary_only: output.summary_only,
+        by_file: output.by_file,
+        by_dir: output.by_dir,
+        dir_depth: output.dir_depth,
+        show_tokens: output.show_tokens,
+        sort_by: output.sort_by,
+        top_n: output.top_n,
+        colorize: should_colorize(output),
+        show_git_info: false,
+    };
+    let formatter = create_output(output.format);
+
+    // Quiet suppresses terminal output only; an explicit -O file is still written
+    if output.quiet && output.file.is_none() {
+        return Ok(());
+    }
+
+    if let Some(ref path) = output.file {
+        let file = File::create(path).context("Failed to create output file")?;
+        let mut writer = BufWriter::new(file);
+        formatter.write(&report, &output_options, &mut writer)?;
+        writer.flush()?;
+        if !output.quiet {
+            println!("Output written to: {}", path.display().to_string().green());
+        }
+    } else {
+        let stdout = io::stdout();
+        let mut writer = stdout.lock();
+        formatter.write(&report, &output_options, &mut writer)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use codelens_core::config::OutputFormatType;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).unwrap()
+    }
+
+    fn partial(toml_src: &str) -> PartialConfig {
+        toml::from_str(toml_src).unwrap()
+    }
+
+    #[test]
+    fn config_file_values_survive_when_cli_args_absent() {
+        let cli = parse(&["codelens"]);
+        let p = partial(
+            r#"
+            output = "json"
+            lang = "rust,go"
+            excludes = "vendor"
+            threads = 3
+            sort = "code"
+            quiet = true
+        "#,
+        );
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+
+        assert_eq!(config.output.format, OutputFormatType::Json);
+        assert_eq!(config.filter.languages, vec!["rust", "go"]);
+        assert_eq!(config.filter.excludes, vec!["vendor"]);
+        assert_eq!(config.walker.threads, 3);
+        assert_eq!(config.output.sort_by, codelens_core::config::SortBy::Code);
+        assert!(config.output.quiet);
+    }
+
+    #[test]
+    fn explicit_cli_args_override_config_file() {
+        let cli = parse(&["codelens", "-f", "csv", "-l", "python", "-j", "8"]);
+        let p = partial(
+            r#"
+            output = "json"
+            lang = "rust"
+            threads = 3
+        "#,
+        );
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+
+        assert_eq!(config.output.format, OutputFormatType::Csv);
+        assert_eq!(config.filter.languages, vec!["python"]);
+        assert_eq!(config.walker.threads, 8);
+    }
+
+    #[test]
+    fn subcommands_accept_global_advanced_args() {
+        // -j and --config used to be rejected after a subcommand.
+        let cli = parse(&["codelens", "health", ".", "-j", "2", "--no-config"]);
+        assert_eq!(cli.advanced.threads, Some(2));
+        assert!(cli.advanced.no_config);
+    }
+
+    #[test]
+    fn subcommand_filter_args_reach_config() {
+        // --min-lines & co. used to be accepted but silently dropped.
+        let cli = parse(&["codelens", "health", ".", "--min-lines", "5"]);
+        let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected health subcommand");
+        };
+        let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
+        assert_eq!(config.filter.min_lines, Some(5));
+    }
+
+    #[test]
+    fn defaults_apply_without_config_file() {
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
+
+        assert_eq!(config.output.format, OutputFormatType::Console);
+        assert!(config.filter.languages.is_empty());
+        assert!(config.filter.smart_exclude);
+        assert!(config.walker.use_gitignore);
+    }
+}

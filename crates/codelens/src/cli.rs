@@ -497,6 +497,43 @@ pub enum SortByArg {
     Size,
 }
 
+impl From<OutputFormatArg> for codelens_core::config::OutputFormatType {
+    fn from(arg: OutputFormatArg) -> Self {
+        match arg {
+            OutputFormatArg::Console => Self::Console,
+            OutputFormatArg::Json => Self::Json,
+            OutputFormatArg::Csv => Self::Csv,
+            OutputFormatArg::Markdown => Self::Markdown,
+            OutputFormatArg::Html => Self::Html,
+            OutputFormatArg::Openmetrics => Self::OpenMetrics,
+            OutputFormatArg::Badge => Self::Badge,
+            OutputFormatArg::Sarif => Self::Sarif,
+        }
+    }
+}
+
+impl From<SortByArg> for codelens_core::config::SortBy {
+    fn from(arg: SortByArg) -> Self {
+        match arg {
+            SortByArg::Lines => Self::Lines,
+            SortByArg::Files => Self::Files,
+            SortByArg::Code => Self::Code,
+            SortByArg::Name => Self::Name,
+            SortByArg::Size => Self::Size,
+        }
+    }
+}
+
+impl From<ProjectTypeArg> for codelens_core::ProjectType {
+    fn from(arg: ProjectTypeArg) -> Self {
+        match arg {
+            ProjectTypeArg::Organic => Self::Organic,
+            ProjectTypeArg::SemiDetached => Self::SemiDetached,
+            ProjectTypeArg::Embedded => Self::Embedded,
+        }
+    }
+}
+
 // ANSI: \x1b[1;32m = bold green, \x1b[1;36m = bold cyan, \x1b[2m = dim, \x1b[0m = reset
 const EXAMPLES: &str = "\
 \x1b[1;32mExamples:\x1b[0m

@@ -115,7 +115,7 @@ impl CodelensServer {
             let mut result = analyze(&[path], &default_config())?;
             // Git paths are repo-root-relative; align the analysis side so
             // churn/knowledge joins work when `path` is a subdirectory.
-            crate::rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+            crate::commands::rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
             let commits = git_client.commit_log(&since)?;
             let churns = codelens_core::git::churn_from_commits(&commits);
             let authors = codelens_core::git::aggregate_authors(&commits);
