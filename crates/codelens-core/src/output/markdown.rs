@@ -196,6 +196,54 @@ impl MarkdownOutput {
         )?;
         writeln!(writer)?;
 
+        // Baseline comparison (--baseline)
+        if let Some(reg) = &report.regression {
+            let delta = if reg.score_delta >= 0.0 {
+                format!("+{:.1}", reg.score_delta)
+            } else {
+                format!("{:.1}", reg.score_delta)
+            };
+            writeln!(
+                writer,
+                "**Baseline:** {} — {} ({:.1}) → {} ({:.1}), Δ {}",
+                reg.baseline,
+                reg.baseline_grade,
+                reg.baseline_score,
+                report.grade,
+                report.score,
+                delta
+            )?;
+            writeln!(writer)?;
+            if !reg.regressed_files.is_empty() {
+                writeln!(writer, "## Regressed Files")?;
+                writeln!(writer)?;
+                writeln!(writer, "| File | Before | After |")?;
+                writeln!(writer, "|------|--------|-------|")?;
+                for f in &reg.regressed_files {
+                    writeln!(
+                        writer,
+                        "| {} | {} ({:.1}) | {} ({:.1}) |",
+                        f.path.display(),
+                        f.from_grade,
+                        f.from_score,
+                        f.to_grade,
+                        f.to_score
+                    )?;
+                }
+                writeln!(writer)?;
+            }
+            writeln!(
+                writer,
+                "**Verdict:** {}",
+                if reg.failed {
+                    "🔴 REGRESSED"
+                } else {
+                    "🟢 NO REGRESSION"
+                }
+            )?;
+            writeln!(writer)?;
+        }
+
         // Dimensions
         writeln!(writer, "## Dimensions")?;
         writeln!(writer)?;

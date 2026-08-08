@@ -44,6 +44,111 @@ pub struct HealthReport {
     pub dimensions: Vec<DimensionScore>,
     pub by_directory: Vec<DirectoryHealth>,
     pub worst_files: Vec<FileHealth>,
+    /// Delta against a baseline (--baseline); None for plain reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regression: Option<RegressionReport>,
+}
+
+/// A file whose health grade dropped compared to the baseline.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileRegression {
+    pub path: PathBuf,
+    pub from_score: f64,
+    pub from_grade: Grade,
+    pub to_score: f64,
+    pub to_grade: Grade,
+}
+
+/// Health delta against a baseline tree (snapshot or git ref).
+///
+/// Follows the "clean as you code" gate philosophy: only letter-grade
+/// drops fail, so legacy debt does not block CI — a file's grade can
+/// only move when the file itself was touched.
+#[derive(Debug, Clone, Serialize)]
+pub struct RegressionReport {
+    /// Human-readable baseline reference (snapshot id or git ref).
+    pub baseline: String,
+    pub baseline_score: f64,
+    pub baseline_grade: Grade,
+    /// Current score minus baseline score.
+    pub score_delta: f64,
+    /// Project letter grade dropped (e.g. B → C).
+    pub project_regressed: bool,
+    /// Files present in both trees whose letter grade dropped, worst first.
+    pub regressed_files: Vec<FileRegression>,
+    /// Files present in both trees whose letter grade improved.
+    pub improved_files: usize,
+    /// Gate verdict: project regressed or any file regressed.
+    pub failed: bool,
+}
+
+/// Compare current analysis against a baseline tree with the same scoring
+/// model. Only files present in both trees are compared (paths normalized
+/// by stripping a leading "./"); added and removed files never regress.
+pub fn compare_with_baseline(
+    baseline: &AnalysisResult,
+    current: &AnalysisResult,
+    model: &dyn ScoringModel,
+    baseline_label: &str,
+) -> RegressionReport {
+    let normalize = |p: &Path| -> PathBuf { p.strip_prefix("./").unwrap_or(p).to_path_buf() };
+
+    let baseline_files: HashMap<PathBuf, (f64, Grade)> = baseline
+        .files
+        .iter()
+        .map(|f| {
+            let metrics = RawMetrics::from_file(f);
+            let s = model.total_score(&metrics);
+            (normalize(&f.path), (s, model.grade(s)))
+        })
+        .collect();
+
+    let mut regressed_files = Vec::new();
+    let mut improved_files = 0usize;
+    for f in &current.files {
+        let Some(&(from_score, from_grade)) = baseline_files.get(&normalize(&f.path)) else {
+            continue;
+        };
+        let metrics = RawMetrics::from_file(f);
+        let to_score = model.total_score(&metrics);
+        let to_grade = model.grade(to_score);
+        // Grade orders A < B < ... < F, so "greater" means worse.
+        if to_grade > from_grade {
+            regressed_files.push(FileRegression {
+                path: f.path.clone(),
+                from_score,
+                from_grade,
+                to_score,
+                to_grade,
+            });
+        } else if to_grade < from_grade {
+            improved_files += 1;
+        }
+    }
+    regressed_files.sort_by(|a, b| {
+        b.to_grade.cmp(&a.to_grade).then(
+            a.to_score
+                .partial_cmp(&b.to_score)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
+    });
+
+    let baseline_score = model.total_score(&RawMetrics::from_files(&baseline.files));
+    let baseline_grade = model.grade(baseline_score);
+    let current_score = model.total_score(&RawMetrics::from_files(&current.files));
+    let current_grade = model.grade(current_score);
+    let project_regressed = current_grade > baseline_grade;
+
+    RegressionReport {
+        baseline: baseline_label.to_string(),
+        baseline_score,
+        baseline_grade,
+        score_delta: current_score - baseline_score,
+        project_regressed,
+        failed: project_regressed || !regressed_files.is_empty(),
+        regressed_files,
+        improved_files,
+    }
 }
 
 /// Generate a health report from analysis results using the given scoring model.
@@ -98,6 +203,7 @@ pub fn score(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) ->
         dimensions: project_dimensions,
         by_directory: dir_healths.into_iter().take(top_n).collect(),
         worst_files: file_healths.into_iter().take(top_n).collect(),
+        regression: None,
     }
 }
 
@@ -289,6 +395,87 @@ mod tests {
         let report = score(&result, &model, 10);
         assert!(report.worst_files.is_empty());
         assert!(report.by_directory.is_empty());
+    }
+
+    fn worsen(file: &mut FileStats) {
+        file.lines.total = 900;
+        file.lines.code = 850;
+        file.complexity.cyclomatic = 120;
+        file.complexity.functions = 2;
+        file.complexity.max_depth = 9;
+        file.complexity.avg_func_lines = 400.0;
+    }
+
+    #[test]
+    fn test_compare_no_change_passes() {
+        let result = make_test_result();
+        let model = DefaultModel::new();
+        let reg = compare_with_baseline(&result, &result, &model, "latest");
+        assert!(!reg.failed);
+        assert!(!reg.project_regressed);
+        assert!(reg.regressed_files.is_empty());
+        assert!(reg.score_delta.abs() < 0.001);
+    }
+
+    #[test]
+    fn test_compare_detects_file_regression() {
+        let baseline = make_test_result();
+        let mut current = make_test_result();
+        worsen(&mut current.files[0]); // good.rs degrades
+        current.summary = Summary::from_file_stats(&current.files);
+
+        let model = DefaultModel::new();
+        let reg = compare_with_baseline(&baseline, &current, &model, "main");
+        assert!(reg.failed);
+        assert_eq!(reg.regressed_files.len(), 1);
+        let fr = &reg.regressed_files[0];
+        assert!(fr.path.ends_with("good.rs"));
+        assert!(fr.to_grade > fr.from_grade);
+    }
+
+    #[test]
+    fn test_compare_added_file_never_regresses() {
+        let baseline = make_test_result();
+        let mut current = make_test_result();
+        let mut extra = current.files[1].clone();
+        extra.path = PathBuf::from("src/new_horror.rs");
+        worsen(&mut extra);
+        current.files.push(extra);
+        current.summary = Summary::from_file_stats(&current.files);
+
+        let model = DefaultModel::new();
+        let reg = compare_with_baseline(&baseline, &current, &model, "main");
+        assert!(
+            reg.regressed_files.is_empty(),
+            "files absent from the baseline must not appear as regressions"
+        );
+    }
+
+    #[test]
+    fn test_compare_counts_improvements() {
+        let mut baseline = make_test_result();
+        worsen(&mut baseline.files[0]);
+        let current = make_test_result();
+
+        let model = DefaultModel::new();
+        let reg = compare_with_baseline(&baseline, &current, &model, "main");
+        assert!(reg.improved_files >= 1);
+        assert!(reg.regressed_files.is_empty());
+    }
+
+    #[test]
+    fn test_compare_normalizes_dot_prefix() {
+        let baseline = make_test_result();
+        let mut current = make_test_result();
+        for f in &mut current.files {
+            f.path = PathBuf::from("./").join(&f.path);
+        }
+        let model = DefaultModel::new();
+        let reg = compare_with_baseline(&baseline, &current, &model, "main");
+        assert!(
+            !reg.failed,
+            "./-prefixed paths must match their baseline counterparts"
+        );
     }
 
     #[test]

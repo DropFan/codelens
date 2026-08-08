@@ -306,12 +306,32 @@ fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<Ex
 
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
-    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
     let model = DefaultModel::new();
     let top_n = config.output.top_n.unwrap_or(10);
-    let report = health::score(&result, &model, top_n);
+
+    let regression = if let Some(baseline_ref) = &args.baseline {
+        // Normalize current paths to repo-root-relative so they line up
+        // with the baseline tree regardless of the working directory.
+        if let Ok(git_client) = GitClient::detect(&args.paths[0]) {
+            rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+        }
+        let (baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        Some(health::compare_with_baseline(
+            &baseline_result,
+            &result,
+            &model,
+            &label,
+        ))
+    } else {
+        None
+    };
+
+    let mut report = health::score(&result, &model, top_n);
+    report.regression = regression;
     let score = report.score;
     let grade = report.grade;
+    let regression_failed = report.regression.as_ref().is_some_and(|r| r.failed);
     write_report(Report::Health(report), &config.output)?;
 
     if let Some(threshold) = threshold {
@@ -326,7 +346,70 @@ fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<Ex
             return Ok(ExitCode::FAILURE);
         }
     }
+    if args.fail_on_regression && regression_failed {
+        eprintln!(
+            "{}: health regressed against baseline '{}'",
+            "gate failed".red().bold(),
+            args.baseline.as_deref().unwrap_or_default(),
+        );
+        return Ok(ExitCode::FAILURE);
+    }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Resolve a --baseline reference into an analyzed tree.
+///
+/// Snapshot references ("latest", "latest~N", date prefixes) win; anything
+/// else is treated as a git ref and analyzed via a temporary worktree.
+fn resolve_baseline(
+    reference: &str,
+    paths: &[PathBuf],
+    config: &Config,
+) -> Result<(codelens_core::AnalysisResult, String)> {
+    let project_root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+
+    if let Ok(snap_path) = trend::resolve_snapshot(&project_root, reference) {
+        let snapshot = trend::load_snapshot(&snap_path)?;
+        let label = snapshot
+            .label
+            .clone()
+            .unwrap_or_else(|| snapshot.timestamp.format("%Y-%m-%d %H:%M").to_string());
+        return Ok((snapshot.result, format!("snapshot {label}")));
+    }
+
+    let git_client = GitClient::detect(&project_root).with_context(|| {
+        format!(
+            "baseline '{reference}' is not a snapshot reference, and this is not a git repository"
+        )
+    })?;
+    if !git_client.rev_exists(reference) {
+        anyhow::bail!(
+            "baseline '{reference}' is neither a snapshot reference (latest, latest~N, YYYY-MM-DD) nor a git ref"
+        );
+    }
+
+    let worktree = git_client.temp_worktree(reference)?;
+    // Analyze the same locations inside the baseline tree; paths that do
+    // not exist there (e.g. a directory added since) fall back to the root.
+    let repo_root = std::fs::canonicalize(git_client.repo_path())
+        .unwrap_or_else(|_| git_client.repo_path().to_path_buf());
+    let mapped: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| {
+            std::fs::canonicalize(p)
+                .ok()
+                .and_then(|abs| {
+                    abs.strip_prefix(&repo_root)
+                        .ok()
+                        .map(|rel| worktree.path().join(rel))
+                })
+                .filter(|mapped| mapped.exists())
+                .unwrap_or_else(|| worktree.path().to_path_buf())
+        })
+        .collect();
+    let mut result = analyze(&mapped, config).context("Baseline analysis failed")?;
+    rewrite_paths_repo_relative(&mut result.files, worktree.path());
+    Ok((result, format!("git:{reference}")))
 }
 
 /// Parse a `--fail-under` threshold: a grade letter (A/B/C/D, using the

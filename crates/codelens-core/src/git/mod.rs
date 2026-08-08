@@ -180,6 +180,44 @@ impl GitClient {
         Ok(output.parse::<usize>().unwrap_or(0))
     }
 
+    /// Check whether `reference` resolves to a commit in this repository.
+    pub fn rev_exists(&self, reference: &str) -> bool {
+        self.run_git(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{reference}^{{commit}}"),
+        ])
+        .is_ok()
+    }
+
+    /// Materialize `reference` as a detached temporary worktree so the old
+    /// tree can be analyzed like a normal directory. The worktree is removed
+    /// when the returned guard drops.
+    pub fn temp_worktree(&self, reference: &str) -> Result<TempWorktree> {
+        let dir = std::env::temp_dir().join(format!(
+            "codelens-baseline-{}-{}",
+            std::process::id(),
+            reference.replace(['/', '\\', ':'], "_")
+        ));
+        // A stale directory from a crashed run would make `worktree add` fail.
+        let _ = std::fs::remove_dir_all(&dir);
+
+        self.run_git(&[
+            "worktree",
+            "add",
+            "--detach",
+            "--force",
+            &dir.display().to_string(),
+            reference,
+        ])?;
+
+        Ok(TempWorktree {
+            repo_path: self.repo_path.clone(),
+            path: dir,
+        })
+    }
+
     fn run_git(&self, args: &[&str]) -> Result<String> {
         let output = Command::new("git")
             .args(args)
@@ -197,6 +235,39 @@ impl GitClient {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+/// A temporary detached git worktree, removed on drop.
+pub struct TempWorktree {
+    repo_path: PathBuf,
+    path: PathBuf,
+}
+
+impl TempWorktree {
+    /// Root directory of the materialized tree.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempWorktree {
+    fn drop(&mut self) {
+        let _ = Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                &self.path.display().to_string(),
+            ])
+            .current_dir(&self.repo_path)
+            .output();
+        // Backstop: clear leftover metadata if removal was interrupted.
+        let _ = Command::new("git")
+            .args(["worktree", "prune"])
+            .current_dir(&self.repo_path)
+            .output();
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 

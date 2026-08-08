@@ -167,6 +167,7 @@ mod tests {
                 dimensions: vec![],
                 by_directory: vec![],
                 worst_files: vec![],
+                regression: None,
             },
             estimation: EstimationComparison {
                 total_sloc: 80,

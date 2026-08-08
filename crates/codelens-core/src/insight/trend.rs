@@ -161,7 +161,7 @@ fn read_snapshot_meta(path: &Path) -> Result<SnapshotMeta> {
     })
 }
 
-fn load_snapshot(path: &Path) -> Result<Snapshot> {
+pub fn load_snapshot(path: &Path) -> Result<Snapshot> {
     let content = fs::read_to_string(path).map_err(|e| Error::FileRead {
         path: path.to_path_buf(),
         source: e,

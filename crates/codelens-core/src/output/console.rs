@@ -376,6 +376,61 @@ impl ConsoleOutput {
         )?;
         writeln!(writer)?;
 
+        // Baseline comparison (--baseline)
+        if let Some(reg) = &report.regression {
+            let arrow = format!(
+                "{} ({:.1}) → {} ({:.1})",
+                reg.baseline_grade, reg.baseline_score, report.grade, report.score
+            );
+            let delta = if reg.score_delta >= 0.0 {
+                format!("+{:.1}", reg.score_delta).green().to_string()
+            } else {
+                format!("{:.1}", reg.score_delta).red().to_string()
+            };
+            writeln!(
+                writer,
+                "  Baseline: {}  {}  Δ {}",
+                reg.baseline.bold(),
+                arrow,
+                delta
+            )?;
+            if reg.improved_files > 0 {
+                writeln!(writer, "  Improved files: {}", reg.improved_files)?;
+            }
+
+            if !reg.regressed_files.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "{}", "  Regressed Files".bold())?;
+                let mut reg_table = Table::new();
+                reg_table
+                    .load_preset(UTF8_FULL)
+                    .set_content_arrangement(ContentArrangement::Dynamic);
+                reg_table.set_header(vec![
+                    Cell::new("File").add_attribute(Attribute::Bold),
+                    Cell::new("Before").add_attribute(Attribute::Bold),
+                    Cell::new("After").add_attribute(Attribute::Bold),
+                ]);
+                for f in &reg.regressed_files {
+                    reg_table.add_row(vec![
+                        Cell::new(f.path.display().to_string()).fg(Color::Cyan),
+                        Cell::new(format!("{} ({:.1})", f.from_grade, f.from_score))
+                            .fg(Self::grade_color(f.from_grade)),
+                        Cell::new(format!("{} ({:.1})", f.to_grade, f.to_score))
+                            .fg(Self::grade_color(f.to_grade)),
+                    ]);
+                }
+                writeln!(writer, "{reg_table}")?;
+            }
+
+            let verdict = if reg.failed {
+                "REGRESSED".red().bold().to_string()
+            } else {
+                "NO REGRESSION".green().bold().to_string()
+            };
+            writeln!(writer, "  Verdict: {verdict}")?;
+            writeln!(writer)?;
+        }
+
         // Dimensions table
         let mut dim_table = Table::new();
         dim_table

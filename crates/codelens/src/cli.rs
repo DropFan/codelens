@@ -97,6 +97,17 @@ pub struct HealthArgs {
     #[arg(long, value_name = "GRADE|SCORE")]
     pub fail_under: Option<String>,
 
+    /// Compare against a baseline: a snapshot reference ("latest",
+    /// "latest~1", a date prefix) or a git ref ("main", "HEAD~1", a tag).
+    #[arg(long, value_name = "REF")]
+    pub baseline: Option<String>,
+
+    /// Exit non-zero when health regressed against --baseline: the project
+    /// grade dropped, or any file present in both trees dropped a grade.
+    /// Only changes fail the gate, never pre-existing debt.
+    #[arg(long, requires = "baseline")]
+    pub fail_on_regression: bool,
+
     #[command(flatten)]
     pub filter: FilterArgs,
 

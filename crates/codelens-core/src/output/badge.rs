@@ -166,6 +166,7 @@ mod tests {
             dimensions: vec![],
             by_directory: vec![],
             worst_files: vec![],
+            regression: None,
         };
 
         let mut buf = Vec::new();
