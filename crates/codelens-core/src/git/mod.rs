@@ -136,6 +136,12 @@ impl GitClient {
 
     fn commit_log_range(&self, since: Option<&str>) -> Result<Vec<CommitRecord>> {
         let mut args = vec![
+            // core.quotepath defaults to true and C-quotes non-ASCII paths
+            // ("\344\270\255...") in numstat output; those never match the
+            // real UTF-8 paths from the analyzer, silently dropping the
+            // files from churn/hotspot/coupling/age.
+            "-c".to_string(),
+            "core.quotepath=false".to_string(),
             "log".to_string(),
             "--numstat".to_string(),
             "--format=%x01%H%x1f%aN%x1f%ct".to_string(),
@@ -188,6 +194,8 @@ impl GitClient {
     pub fn file_commit_hunks(&self, path: &Path, since: &str) -> Result<Vec<Vec<(usize, usize)>>> {
         let output = Command::new("git")
             .args([
+                "-c",
+                "core.quotepath=false",
                 "log",
                 "-p",
                 "-U0",
@@ -385,7 +393,13 @@ fn parse_log(output: &str) -> Vec<CommitRecord> {
             final_name.insert(old, target.clone());
             target
         } else {
-            PathBuf::from(parts[2])
+            // Resolve through renames seen SO FAR (i.e. in newer commits
+            // only). This keeps the mapping time-aware: when a file is
+            // renamed away and a new file is later created under the old
+            // name, the new file's commits keep their own name instead of
+            // being folded into the rename target.
+            let raw = PathBuf::from(parts[2]);
+            final_name.get(&raw).cloned().unwrap_or(raw)
         };
 
         commit.files.push(FileChange {
@@ -393,19 +407,6 @@ fn parse_log(output: &str) -> Vec<CommitRecord> {
             added,
             deleted,
         });
-    }
-
-    // Second pass: non-rename records were stored with their raw path,
-    // which may be an old name whose rename entry appeared earlier
-    // (i.e. in a newer commit). Rewrite them to the final name.
-    if !final_name.is_empty() {
-        for commit in &mut commits {
-            for change in &mut commit.files {
-                if let Some(target) = final_name.get(&change.path) {
-                    change.path = target.clone();
-                }
-            }
-        }
     }
 
     commits
@@ -449,11 +450,20 @@ fn parse_hunk_ranges(output: &str) -> Vec<Vec<(usize, usize)>> {
 fn aggregate_churn(commits: &[CommitRecord]) -> Vec<FileChurn> {
     let mut file_map: HashMap<PathBuf, (usize, usize, usize, i64)> = HashMap::new();
     for commit in commits {
+        // Rename normalization can leave one commit with several entries
+        // for the same final path; merge them first so the commit counts
+        // once per file.
+        let mut per_commit: HashMap<&PathBuf, (usize, usize)> = HashMap::new();
         for change in &commit.files {
-            let entry = file_map.entry(change.path.clone()).or_insert((0, 0, 0, 0));
+            let entry = per_commit.entry(&change.path).or_insert((0, 0));
+            entry.0 += change.added;
+            entry.1 += change.deleted;
+        }
+        for (path, (added, deleted)) in per_commit {
+            let entry = file_map.entry(path.clone()).or_insert((0, 0, 0, 0));
             entry.0 += 1;
-            entry.1 += change.added;
-            entry.2 += change.deleted;
+            entry.1 += added;
+            entry.2 += deleted;
             entry.3 = entry.3.max(commit.timestamp);
         }
     }
@@ -674,6 +684,87 @@ mod tests {
         );
         let commits = parse_log(&input);
         assert_eq!(commits[1].files[0].path, PathBuf::from("new.rs"));
+    }
+
+    #[test]
+    fn test_recreated_file_keeps_own_history() {
+        // a.rs was renamed to b.rs, then a NEW a.rs was created and
+        // modified. The new file's commits must stay under a.rs, not be
+        // folded into b.rs. Input is newest-first.
+        let input = format!(
+            "{}\n1\t0\ta.rs\n\n{}\n1\t0\ta.rs\n\n{}\n2\t0\ta.rs\n\n{}\n0\t0\ta.rs => b.rs\n\n{}\n5\t0\ta.rs\n",
+            header("c5", "Alice", 500),
+            header("c4", "Alice", 400),
+            header("c3", "Alice", 300),
+            header("c2", "Alice", 200),
+            header("c1", "Alice", 100)
+        );
+        let churns = aggregate_churn(&parse_log(&input));
+        let a = churns
+            .iter()
+            .find(|c| c.path == Path::new("a.rs"))
+            .expect("recreated a.rs must exist: {churns:?}");
+        assert_eq!(a.commits, 3, "the new a.rs owns exactly its 3 commits");
+        assert_eq!(a.lines_added, 4);
+        assert_eq!(a.last_commit_ts, 500);
+        let b = churns
+            .iter()
+            .find(|c| c.path == Path::new("b.rs"))
+            .expect("b.rs must carry the pre-rename history");
+        assert_eq!(b.commits, 2, "rename commit + original history");
+        assert_eq!(b.lines_added, 5);
+    }
+
+    #[test]
+    fn test_same_commit_merged_paths_count_once() {
+        // A historic commit touched both x.rs and y.rs; later x.rs was
+        // renamed to y.rs. After normalization that commit has two entries
+        // for y.rs — it must count as ONE commit with summed lines.
+        let input = format!(
+            "{}\n0\t0\tx.rs => y.rs\n\n{}\n3\t1\tx.rs\n2\t1\ty.rs\n",
+            header("c2", "Alice", 200),
+            header("c1", "Alice", 100)
+        );
+        let churns = aggregate_churn(&parse_log(&input));
+        assert_eq!(churns.len(), 1);
+        let y = &churns[0];
+        assert_eq!(y.path, PathBuf::from("y.rs"));
+        assert_eq!(y.commits, 2, "c1 must count once despite two entries");
+        assert_eq!(y.lines_added, 5);
+        assert_eq!(y.lines_deleted, 2);
+    }
+
+    #[test]
+    fn test_non_ascii_filenames_survive() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+        // Force the C-quoting default even if the user's config disables it.
+        Command::new("git")
+            .args(["config", "core.quotepath", "true"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        std::fs::write(temp.path().join("中文文件.rs"), "fn main() {}\n").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        let client = GitClient::detect(temp.path()).unwrap();
+        let churns = client.file_churn("90 days ago").unwrap();
+        assert_eq!(churns.len(), 1);
+        assert_eq!(
+            churns[0].path,
+            PathBuf::from("中文文件.rs"),
+            "non-ASCII paths must come back as real UTF-8, not C-quoted"
+        );
     }
 
     #[test]
