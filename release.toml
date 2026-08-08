@@ -16,6 +16,12 @@ release = true
 [[package]]
 name = "codelens"
 release = true
+# Keep pre-commit `rev:` examples pointing at the tag being released so
+# every tag's tree is self-consistent.
+pre-release-replacements = [
+    { file = "../../README.md", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
+    { file = "../../.pre-commit-hooks.yaml", search = "rev: v[0-9][^ ]*-rust", replace = "rev: v{{version}}-rust" },
+]
 
 # 预发布检查
 pre-release-commit-message = "chore: release v{{version}}"

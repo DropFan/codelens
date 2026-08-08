@@ -34,7 +34,7 @@ jobs:
 | 输入 | 默认 | 说明 |
 |------|------|------|
 | `path` | `.` | 要分析的路径（空格分隔多个） |
-| `version` | `latest` | codelens 版本（release tag，如 `v0.1.5-rust`） |
+| `version` | `latest` | codelens 版本（release tag）。`baseline` 回归门禁需要 v0.1.5-rust **之后**的版本；装到旧版时 Action 会明确报错而不是静默跳过门禁 |
 | `fail-under` | 空 | 绝对门禁：健康分低于该等级（A/B/C/D）或分数（0-100）时失败 |
 | `baseline` | 空 | 回归基线 git ref（推荐 `origin/${{ github.base_ref }}`） |
 | `fail-on-regression` | `false` | 相对基线出现回归时失败 |
@@ -71,4 +71,4 @@ README 中引用：
 
 - **浅克隆**：`actions/checkout` 默认 `fetch-depth: 1`，用 `baseline` 时请设 `fetch-depth: 0`（Action 也会尽力补拉基线 ref，但完整历史最可靠）。
 - **私有仓库**：无需额外配置，二进制从公开 release 下载。
-- **PR 评论权限**：fork 发起的 PR 上 `GITHUB_TOKEN` 是只读的，评论会失败但不影响门禁本身；可以关掉 `comment` 只用 step summary。
+- **PR 评论权限**：fork 发起的 PR 上 `GITHUB_TOKEN` 是只读的，评论步骤会打一条 warning 后继续，不影响门禁结果；也可以直接关掉 `comment` 只用 step summary。

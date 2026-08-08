@@ -1,6 +1,12 @@
 # pre-commit hooks for codelens (https://pre-commit.com)
 #
-# Usage in a consuming repo's .pre-commit-config.yaml:
+# These hooks use `language: system`: install codelens first
+# (`brew install DropFan/tap/codelens` or `cargo install codelens`).
+# `language: rust` is not an option here because the repository root is
+# a virtual cargo workspace, which `cargo install --path .` rejects.
+#
+# Usage in a consuming repo's .pre-commit-config.yaml (rev must be a
+# tag that contains this manifest, i.e. newer than v0.1.5-rust):
 #
 #   repos:
 #     - repo: https://github.com/DropFan/codelens
@@ -8,25 +14,21 @@
 #       hooks:
 #         - id: codelens-health
 #           args: ['--fail-under', 'C']
-#
-# `language: rust` lets pre-commit build codelens from this repo via
-# cargo; teams that prefer prebuilt binaries can use a local hook with
-# `language: system` pointing at an installed codelens instead.
 
 - id: codelens-health
   name: codelens health gate
-  description: Fail the commit when project code health is below a threshold.
+  description: Fail the commit when project code health is below a threshold (requires codelens on PATH).
   entry: codelens health
   args: ['--fail-under', 'C']
-  language: rust
+  language: system
   pass_filenames: false
   types: [text]
 
 - id: codelens-stats
   name: codelens statistics
-  description: Print code statistics for the repository (informational).
+  description: Print code statistics for the repository (informational, requires codelens on PATH).
   entry: codelens
-  language: rust
+  language: system
   pass_filenames: false
   verbose: true
   types: [text]
