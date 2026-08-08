@@ -96,17 +96,8 @@ impl Language {
                 .as_ref()
                 .and_then(|p| Regex::new(p).ok());
 
-            let keywords_re = if self.complexity_keywords.is_empty() {
-                None
-            } else {
-                let alts: Vec<String> = self
-                    .complexity_keywords
-                    .iter()
-                    .map(|k| regex::escape(k))
-                    .collect();
-                let pattern = format!(r"\b({})\b", alts.join("|"));
-                Regex::new(&pattern).ok()
-            };
+            let keywords_re = keywords_pattern(&self.complexity_keywords)
+                .and_then(|pattern| Regex::new(&pattern).ok());
 
             ComplexityPatterns {
                 function_re,
@@ -114,6 +105,18 @@ impl Language {
             }
         })
     }
+}
+
+/// Build the alternation pattern matching all complexity keywords:
+/// `\b(if|else|...)\b`. Shared by the lazy compilation above and the
+/// load-time validation of user language files so both compile exactly
+/// the same regex.
+pub(crate) fn keywords_pattern(keywords: &[String]) -> Option<String> {
+    if keywords.is_empty() {
+        return None;
+    }
+    let alts: Vec<String> = keywords.iter().map(|k| regex::escape(k)).collect();
+    Some(format!(r"\b({})\b", alts.join("|")))
 }
 
 impl Default for Language {

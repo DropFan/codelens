@@ -273,13 +273,21 @@ git_info = true
 ## Custom Languages
 
 Teach codelens new languages with `--languages-file`: a TOML file with one
-table per language id, merged on top of the built-in definitions. Every
-field except `name` is optional; the built-in
+table per language id. A table whose id matches a built-in language
+**replaces that definition entirely** — fields are not merged — so when
+overriding a built-in language, restate every field you still need
+(`extensions`, `line_comments`, ...); an override that omits `extensions`
+stops those files from being detected at all. The built-in
 [languages.toml](crates/codelens-core/languages.toml) shows all fields in
 use, including `string_delimiters` for accurate string/comment parsing.
+`function_pattern` and `complexity_keywords` are validated when the file
+loads; an invalid regex is a hard error rather than silently disabling
+function and complexity analysis.
 
 ```toml
 # my-langs.toml
+
+# A new language:
 [mylang]
 name = "MyLang"
 extensions = [".myl"]
@@ -289,6 +297,15 @@ block_comments = [["/*", "*/"]]   # [open, close] pairs
 nested_comments = false           # true if /* /* */ */ nests
 function_pattern = "(?m)^\\s*def\\s+\\w+"
 complexity_keywords = ["if", "elif", "else", "for", "while"]
+
+# Overriding a built-in language: the whole definition is replaced, so
+# copy the fields you want to keep from the built-in languages.toml.
+[rust]
+name = "Rust"
+extensions = [".rs"]              # omitting this would stop .rs detection
+line_comments = ["//"]            # omitting this would count // as code
+block_comments = [["/*", "*/"]]
+nested_comments = true
 ```
 
 ```bash
@@ -299,8 +316,16 @@ codelens health . --languages-file my-langs.toml           # works on subcommand
 
 `--count-as` can map further extensions onto a custom language
 (`--count-as myx:mylang`). Analysis commands also pick the path up from
-`.codelens.toml` (`languages_file = "my-langs.toml"`); `--list-languages`
-only honors the explicit flag.
+`.codelens.toml` (`languages_file = "my-langs.toml"`); a relative path
+there resolves relative to the directory containing the config file.
+`--list-languages` only honors the explicit flag.
+
+One built-in ambiguity to know about: `.m` belongs to both Objective-C and
+MATLAB. codelens assigns it to Objective-C, which matches what
+[scc](https://github.com/boyter/scc) reports on real Objective-C sources.
+MATLAB projects can reclaim the extension with `--count-as m:matlab` —
+prefer that over overriding `[matlab]` in a languages file, since an
+override replaces the whole definition.
 
 ## License
 
