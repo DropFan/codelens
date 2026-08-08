@@ -232,6 +232,13 @@ pub struct Summary {
     /// absent duplication data reads as measured-and-clean. Only
     /// analyses that explicitly skipped collection take the
     /// "not measured" path (Duplication dimension excluded).
+    ///
+    /// The derive(Default) value is deliberately `false` — the opposite
+    /// of the serde default. False is the safe failure mode: a caller
+    /// that forgets to set it merely drops the Duplication dimension,
+    /// whereas true would present unmeasured data as measured-and-clean.
+    /// `from_file_stats` does NOT set this field (or `uloc`); callers
+    /// rebuilding a Summary must carry both over themselves.
     #[serde(default = "default_true")]
     pub dup_scanned: bool,
 }
@@ -242,6 +249,11 @@ fn default_true() -> bool {
 
 impl Summary {
     /// Build summary from a list of file statistics.
+    ///
+    /// WARNING: analysis-wide fields that are not derivable from per-file
+    /// stats — `dup_scanned` and `uloc` — come back as their defaults
+    /// (false / 0). Callers rebuilding a Summary from an existing analysis
+    /// must carry both over from the previous summary themselves.
     pub fn from_file_stats(files: &[FileStats]) -> Self {
         let mut summary = Summary::default();
         let mut by_language: HashMap<String, LanguageSummary> = HashMap::new();

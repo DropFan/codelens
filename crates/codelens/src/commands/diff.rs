@@ -24,21 +24,14 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     let git_client = GitClient::detect(&cwd).context("Not a git repository")?;
     let paths = vec![cwd];
 
-    // Accept "FROM..TO", git's "FROM...TO" (compare from the merge base),
-    // or FROM TO as two arguments. An empty side means HEAD, like git.
-    let (from_ref, to_ref) = if let Some((a, b)) = args.from.split_once("...") {
-        let a = if a.is_empty() { "HEAD" } else { a };
-        let b = if b.is_empty() { "HEAD" } else { b };
-        let base = git_client
-            .merge_base(a, b)
-            .with_context(|| format!("no merge base between '{a}' and '{b}'"))?;
-        (base[..base.len().min(12)].to_string(), Some(b.to_string()))
-    } else if let Some((a, b)) = args.from.split_once("..") {
-        let a = if a.is_empty() { "HEAD" } else { a };
-        let b = if b.is_empty() { "HEAD" } else { b };
-        (a.to_string(), Some(b.to_string()))
-    } else {
-        (args.from.clone(), args.to.clone())
+    let (from_ref, to_ref) = match parse_ref_args(&args.from, args.to.as_deref())? {
+        RefSpec::MergeBase { from, to } => {
+            let base = git_client
+                .merge_base(&from, &to)
+                .with_context(|| format!("no merge base between '{from}' and '{to}'"))?;
+            (base[..base.len().min(12)].to_string(), Some(to))
+        }
+        RefSpec::Plain { from, to } => (from, to),
     };
 
     // Temporary worktrees never materialize submodules; exclude them on
@@ -76,4 +69,93 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
         return Ok(ExitCode::FAILURE);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// How the FROM/TO CLI arguments resolve into refs, before any git lookup.
+#[derive(Debug, PartialEq)]
+enum RefSpec {
+    /// `FROM...TO`: compare from the merge base of the two refs.
+    MergeBase { from: String, to: String },
+    /// Plain refs; a missing `to` means the working tree.
+    Plain { from: String, to: Option<String> },
+}
+
+/// Accept "FROM..TO", git's "FROM...TO" (compare from the merge base),
+/// or FROM TO as two arguments. An empty side means HEAD, like git.
+/// Mixing both forms would silently discard one TO — reject it instead.
+fn parse_ref_args(from: &str, to: Option<&str>) -> Result<RefSpec> {
+    // Covers "..." too; git forbids ".." inside ref names.
+    if to.is_some() && from.contains("..") {
+        anyhow::bail!("cannot combine FROM..TO syntax with a separate TO argument");
+    }
+    let head_if_empty = |r: &str| if r.is_empty() { "HEAD" } else { r }.to_string();
+    Ok(if let Some((a, b)) = from.split_once("...") {
+        RefSpec::MergeBase {
+            from: head_if_empty(a),
+            to: head_if_empty(b),
+        }
+    } else if let Some((a, b)) = from.split_once("..") {
+        RefSpec::Plain {
+            from: head_if_empty(a),
+            to: Some(head_if_empty(b)),
+        }
+    } else {
+        RefSpec::Plain {
+            from: from.to_string(),
+            to: to.map(String::from),
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_from_plus_positional_to_is_an_error() {
+        // `codelens diff v1.0..v2.0 v3.0` used to silently ignore v3.0
+        // and compare v1.0..v2.0 — reject the ambiguous combination.
+        assert!(parse_ref_args("v1.0..v2.0", Some("v3.0")).is_err());
+        assert!(parse_ref_args("v1.0...v2.0", Some("v3.0")).is_err());
+    }
+
+    #[test]
+    fn plain_and_range_forms_parse() {
+        assert_eq!(
+            parse_ref_args("v1.0", Some("v2.0")).unwrap(),
+            RefSpec::Plain {
+                from: "v1.0".into(),
+                to: Some("v2.0".into()),
+            }
+        );
+        assert_eq!(
+            parse_ref_args("v1.0", None).unwrap(),
+            RefSpec::Plain {
+                from: "v1.0".into(),
+                to: None,
+            }
+        );
+        assert_eq!(
+            parse_ref_args("v1.0..v2.0", None).unwrap(),
+            RefSpec::Plain {
+                from: "v1.0".into(),
+                to: Some("v2.0".into()),
+            }
+        );
+        assert_eq!(
+            parse_ref_args("v1.0...v2.0", None).unwrap(),
+            RefSpec::MergeBase {
+                from: "v1.0".into(),
+                to: "v2.0".into(),
+            }
+        );
+        // An empty side means HEAD, like git.
+        assert_eq!(
+            parse_ref_args("..v2.0", None).unwrap(),
+            RefSpec::Plain {
+                from: "HEAD".into(),
+                to: Some("v2.0".into()),
+            }
+        );
+    }
 }

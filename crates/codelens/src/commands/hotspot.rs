@@ -4,10 +4,10 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 
+use codelens_core::analyze;
 use codelens_core::git::{self, GitClient};
 use codelens_core::insight::hotspot;
 use codelens_core::output::Report;
-use codelens_core::{analyze, LanguageRegistry};
 
 use super::{load_partial_config, resolve_config, rewrite_paths_repo_relative, write_report};
 use crate::cli;
@@ -52,7 +52,7 @@ pub(crate) fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs)
         }
     }
     if args.functions {
-        attach_function_hotspots(&mut report, &git_client, &since)?;
+        attach_function_hotspots(&mut report, &git_client, &since, &config)?;
     }
     write_report(Report::Hotspot(report), &config.output)
 }
@@ -64,6 +64,7 @@ fn attach_function_hotspots(
     report: &mut codelens_core::insight::hotspot::HotspotReport,
     git_client: &GitClient,
     since: &str,
+    config: &codelens_core::Config,
 ) -> Result<()> {
     use codelens_core::insight::hotspot::FunctionHotspot;
 
@@ -71,7 +72,10 @@ fn attach_function_hotspots(
     const MAX_FILES: usize = 10;
     const MAX_FUNCTIONS: usize = 5;
 
-    let registry = LanguageRegistry::with_builtin()?;
+    // The config-described registry, not a bare builtin one: custom
+    // languages (--languages-file) and remapped extensions (--count-as)
+    // must get the same breakdown as builtin ones.
+    let registry = codelens_core::build_registry(config)?;
     let analyzer = codelens_core::ComplexityAnalyzer::new();
     let repo_root = git_client.repo_path().to_path_buf();
 
@@ -122,4 +126,88 @@ fn attach_function_hotspots(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use codelens_core::insight::hotspot::{ChurnMetrics, FileHotspot, HotspotReport, RiskLevel};
+    use codelens_core::{Complexity, Config};
+
+    fn git(dir: &Path, args: &[&str]) {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+    }
+
+    fn init_repo(dir: &Path) {
+        git(dir, &["init"]);
+        git(dir, &["config", "user.email", "test@test.com"]);
+        git(dir, &["config", "user.name", "Test"]);
+    }
+
+    #[test]
+    fn function_breakdown_honors_count_as_mapping() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+
+        // Rust code behind an extension the builtin registry does not
+        // know: only the config's count_as mapping makes it detectable.
+        std::fs::write(
+            temp.path().join("main.foo"),
+            "fn alpha() {\n    let x = 1;\n    println!(\"{x}\");\n}\n",
+        )
+        .unwrap();
+        git(temp.path(), &["add", "."]);
+        git(temp.path(), &["commit", "-m", "init"]);
+
+        // The second commit touches lines inside the function body so
+        // the span registers at least one commit.
+        std::fs::write(
+            temp.path().join("main.foo"),
+            "fn alpha() {\n    let x = 2;\n    println!(\"{x}\");\n}\n",
+        )
+        .unwrap();
+        git(temp.path(), &["add", "."]);
+        git(temp.path(), &["commit", "-m", "change"]);
+
+        let client = GitClient::detect(temp.path()).unwrap();
+        let mut report = HotspotReport {
+            files: vec![FileHotspot {
+                path: PathBuf::from("main.foo"),
+                language: "Rust".to_string(),
+                churn: ChurnMetrics {
+                    commits: 2,
+                    lines_added: 0,
+                    lines_deleted: 0,
+                    lines_churn: 0,
+                },
+                complexity: Complexity::default(),
+                hotspot_score: 1.0,
+                risk: RiskLevel::High,
+                age_days: None,
+                knowledge: None,
+                functions: None,
+            }],
+            since: "90 days ago".to_string(),
+            total_commits: 2,
+        };
+        let config = Config {
+            count_as: vec![("foo".to_string(), "Rust".to_string())],
+            ..Config::default()
+        };
+
+        attach_function_hotspots(&mut report, &client, "90 days ago", &config).unwrap();
+
+        let functions = report.files[0]
+            .functions
+            .as_ref()
+            .expect("custom-mapped language must get a function breakdown");
+        assert!(functions.iter().any(|f| f.name == "alpha"));
+    }
 }

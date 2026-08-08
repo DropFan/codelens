@@ -59,13 +59,13 @@ use analyzer::FileAnalyzer;
 use filter::FilterChain;
 use walker::ParallelWalker;
 
-/// Analyze code statistics for the given paths.
+/// Build the language registry a `Config` describes: builtin languages,
+/// then the custom definitions file, then the extension remappings.
 ///
-/// This is the main entry point for the library.
-pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisResult> {
-    let start = Instant::now();
-
-    // Initialize components
+/// Every consumer that detects languages on behalf of an analysis must go
+/// through this — a bare `LanguageRegistry::with_builtin()` would silently
+/// ignore `--languages-file` and `--count-as`.
+pub fn build_registry(config: &Config) -> Result<LanguageRegistry> {
     let mut registry = LanguageRegistry::with_builtin()?;
     // Custom definitions load before --count-as so the extension
     // mappings can reference custom language names.
@@ -75,7 +75,17 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     for (ext, lang) in &config.count_as {
         registry.map_extension(ext, lang)?;
     }
-    let registry = Arc::new(registry);
+    Ok(registry)
+}
+
+/// Analyze code statistics for the given paths.
+///
+/// This is the main entry point for the library.
+pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisResult> {
+    let start = Instant::now();
+
+    // Initialize components
+    let registry = Arc::new(build_registry(config)?);
     // The duplication sink holds every line hash until the walk ends;
     // --no-dup-scan skips it entirely so huge trees don't pay the memory.
     let dup_sink =

@@ -39,23 +39,8 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
     // Run analysis
     let result = analyze(&paths, &config).context("Analysis failed")?;
 
-    // Prepare output options from the merged config (defaults → file → CLI)
-    let output_options = OutputOptions {
-        summary_only: config.output.summary_only,
-        by_file: config.output.by_file,
-        by_dir: config.output.by_dir,
-        dir_depth: config.output.dir_depth,
-        show_tokens: config.output.show_tokens,
-        sort_by: config.output.sort_by,
-        top_n: config.output.top_n,
-        colorize: should_colorize(&config.output),
-        show_git_info: config.output.show_git_info,
-    };
-
-    // Get output formatter
-    let formatter = create_output(config.output.format);
-
-    // Quiet suppresses terminal output only; an explicit -O file is still written
+    // Quiet with no -O file means nothing gets written; skip building
+    // the report at all (write_report re-checks this for other callers).
     if config.output.quiet && config.output.file.is_none() {
         return Ok(ExitCode::SUCCESS);
     }
@@ -83,20 +68,7 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
         estimation: comparison,
     }));
 
-    if let Some(ref path) = config.output.file {
-        let file = File::create(path).context("Failed to create output file")?;
-        let mut writer = BufWriter::new(file);
-        formatter.write(&report, &output_options, &mut writer)?;
-        writer.flush()?;
-        if !config.output.quiet {
-            println!("Output written to: {}", path.display().to_string().green());
-        }
-    } else {
-        let stdout = io::stdout();
-        let mut writer = stdout.lock();
-        formatter.write(&report, &output_options, &mut writer)?;
-    }
-
+    write_report(report, &config.output)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -317,10 +289,15 @@ fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: 
     });
     // Rebuilding from file stats cannot know whether duplication was
     // collected — carry the flag over or measured trees would silently
-    // read as unmeasured downstream.
+    // read as unmeasured downstream. ULOC must survive the rebuild too;
+    // the pre-filter value is an approximation (lines of the dropped
+    // submodule files are still counted in it), but losing it entirely
+    // would zero the Duplication dimension's input.
     let dup_scanned = result.summary.dup_scanned;
+    let uloc = result.summary.uloc;
     result.summary = codelens_core::Summary::from_file_stats(&result.files);
     result.summary.dup_scanned = dup_scanned;
+    result.summary.uloc = uloc;
 }
 
 /// Scoring model matching an analysis: when duplication was not
@@ -371,8 +348,9 @@ fn should_colorize(output: &codelens_core::config::OutputConfig) -> bool {
     output.file.is_none() && io::stdout().is_terminal()
 }
 
-fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
-    let output_options = OutputOptions {
+/// Formatter options derived from the merged output config.
+fn report_output_options(output: &codelens_core::config::OutputConfig) -> OutputOptions {
+    OutputOptions {
         summary_only: output.summary_only,
         by_file: output.by_file,
         by_dir: output.by_dir,
@@ -381,8 +359,12 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
         sort_by: output.sort_by,
         top_n: output.top_n,
         colorize: should_colorize(output),
-        show_git_info: false,
-    };
+        show_git_info: output.show_git_info,
+    }
+}
+
+fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
+    let output_options = report_output_options(output);
     let formatter = create_output(output.format);
 
     // Quiet suppresses terminal output only; an explicit -O file is still written
@@ -567,6 +549,37 @@ mod tests {
     }
 
     #[test]
+    fn drop_submodule_files_preserves_uloc() {
+        let files = vec![
+            codelens_core::FileStats {
+                path: PathBuf::from("src/a.rs"),
+                ..Default::default()
+            },
+            codelens_core::FileStats {
+                path: PathBuf::from("vendor/sub/b.rs"),
+                ..Default::default()
+            },
+        ];
+        let mut summary = codelens_core::Summary::from_file_stats(&files);
+        summary.dup_scanned = true;
+        summary.uloc = 42;
+        let mut result = codelens_core::AnalysisResult {
+            files,
+            summary,
+            elapsed: std::time::Duration::from_millis(1),
+            scanned_files: 2,
+            skipped_files: 0,
+            error_files: 0,
+        };
+
+        drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
+        assert_eq!(
+            result.summary.uloc, 42,
+            "summary rebuild must not zero out the measured ULOC"
+        );
+    }
+
+    #[test]
     fn scoring_model_drops_duplication_when_not_scanned() {
         use codelens_core::insight::scoring::{HealthDimension, ScoringModel};
 
@@ -581,6 +594,21 @@ mod tests {
             .dimensions()
             .iter()
             .all(|d| d.dimension != HealthDimension::Duplication));
+    }
+
+    #[test]
+    fn report_output_options_follow_config() {
+        // write_report used to hardcode show_git_info: false while
+        // run_default's inline copy read it from config — the formatter
+        // options must be config-driven in both paths.
+        let mut output = codelens_core::config::OutputConfig {
+            show_git_info: true,
+            ..Default::default()
+        };
+        assert!(report_output_options(&output).show_git_info);
+
+        output.show_git_info = false;
+        assert!(!report_output_options(&output).show_git_info);
     }
 
     #[test]

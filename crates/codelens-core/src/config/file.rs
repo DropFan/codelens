@@ -1,6 +1,6 @@
 //! Configuration file loading.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -30,7 +30,9 @@ pub struct PartialConfig {
     /// Extension → language mappings, e.g. "jsp:html,tpl:php".
     pub count_as: Option<String>,
     /// Custom language definitions file.
-    pub languages_file: Option<String>,
+    pub languages_file: Option<PathBuf>,
+    /// Skip line-level duplication collection.
+    pub no_dup_scan: Option<bool>,
     /// Minimum lines.
     pub min_lines: Option<usize>,
     /// Maximum lines.
@@ -101,7 +103,10 @@ impl PartialConfig {
             config.count_as = parse_count_as_list(v);
         }
         if let Some(ref v) = self.languages_file {
-            config.languages_file = Some(v.into());
+            config.languages_file = Some(v.clone());
+        }
+        if let Some(no_dup_scan) = self.no_dup_scan {
+            config.no_dup_scan = no_dup_scan;
         }
         if let Some(min_lines) = self.min_lines {
             config.filter.min_lines = Some(min_lines);
@@ -150,10 +155,22 @@ pub fn load_config_file(path: &Path) -> Result<PartialConfig> {
         source: e,
     })?;
 
-    toml::from_str(&content).map_err(|e| Error::ConfigParse {
+    let mut partial: PartialConfig = toml::from_str(&content).map_err(|e| Error::ConfigParse {
         path: path.to_path_buf(),
         source: e,
-    })
+    })?;
+
+    // A relative languages_file resolves against the config file's
+    // directory, not the process CWD, so the config keeps working no
+    // matter where the tool is invoked from. `join` passes absolute
+    // paths through untouched. (The --languages-file CLI flag is not
+    // affected: it never goes through this loader.)
+    if let Some(languages_file) = partial.languages_file.take() {
+        let config_dir = path.parent().unwrap_or_else(|| Path::new(""));
+        partial.languages_file = Some(config_dir.join(languages_file));
+    }
+
+    Ok(partial)
 }
 
 fn parse_comma_list(s: &str) -> Vec<String> {
@@ -224,9 +241,10 @@ mod tests {
         assert_eq!(config.walker.threads, 4);
         assert_eq!(config.walker.max_depth, Some(5));
         assert!(config.output.show_git_info);
+        // Relative languages_file resolves against the config file's dir.
         assert_eq!(
             config.languages_file,
-            Some(std::path::PathBuf::from("my-langs.toml"))
+            Some(file.path().parent().unwrap().join("my-langs.toml"))
         );
     }
 
@@ -247,6 +265,55 @@ mod tests {
         assert_eq!(config.filter.excludes, vec!["vendor"]);
         assert_eq!(config.output.format, OutputFormatType::Html);
         assert_eq!(config.walker.threads, 7);
+    }
+
+    #[test]
+    fn test_no_dup_scan_from_config_file() {
+        // serde silently drops unknown keys, so a missing field would make
+        // `no_dup_scan = true` in .codelens.toml a silent no-op.
+        let partial: PartialConfig = toml::from_str("no_dup_scan = true").unwrap();
+
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+        assert!(config.no_dup_scan);
+
+        // Unspecified leaves the default untouched.
+        let partial: PartialConfig = toml::from_str("").unwrap();
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+        assert!(!config.no_dup_scan);
+    }
+
+    #[test]
+    fn test_languages_file_resolves_relative_to_config_dir() {
+        // A relative languages_file in .codelens.toml must resolve against
+        // the config file's directory, not the process CWD — otherwise the
+        // same config breaks when the tool runs from another directory.
+        let dir = tempfile::TempDir::new().unwrap();
+        let config_path = dir.path().join(".codelens.toml");
+        std::fs::write(&config_path, r#"languages_file = "langs.toml""#).unwrap();
+
+        let partial = load_config_file(&config_path).unwrap();
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+
+        assert_eq!(config.languages_file, Some(dir.path().join("langs.toml")));
+    }
+
+    #[test]
+    fn test_languages_file_absolute_path_untouched() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config_path = dir.path().join(".codelens.toml");
+        std::fs::write(&config_path, r#"languages_file = "/abs/langs.toml""#).unwrap();
+
+        let partial = load_config_file(&config_path).unwrap();
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+
+        assert_eq!(
+            config.languages_file,
+            Some(std::path::PathBuf::from("/abs/langs.toml"))
+        );
     }
 
     #[test]
