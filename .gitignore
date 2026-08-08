@@ -33,3 +33,7 @@ criterion/
 
 # Documentation build
 /target/doc/
+
+# Internal design drafts and plans (kept local, not tracked)
+docs/design/
+docs/plans/
