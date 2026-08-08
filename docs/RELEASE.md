@@ -134,7 +134,9 @@ cargo doc --no-deps --all-features
 （v0.1.6 手动发版时这些替换规则完全没有生效，全靠人工记得修改才没出错）：
 
 - [ ] 根 `Cargo.toml`：`[workspace.package]` 中的 `version`
-- [ ] `CHANGELOG.md`：将 `[Unreleased]` 改为 `[X.Y.Z] - YYYY-MM-DD`
+- [ ] `CHANGELOG.md`：将 `[Unreleased]` 改为 `[X.Y.Z] - YYYY-MM-DD`，并在
+  `<!-- next-header -->` 标记下方补回一个空的 `## [Unreleased]` 段
+  （cargo release 会自动做这两步，标记行请勿删除）
 - [ ] `README.md`：pre-commit 示例中的 `rev: vX.Y.Z-rust`
 - [ ] `.pre-commit-hooks.yaml`：注释示例中的 `rev: vX.Y.Z-rust`
 
