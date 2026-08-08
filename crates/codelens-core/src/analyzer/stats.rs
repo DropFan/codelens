@@ -510,17 +510,24 @@ mod tests {
             file_at("tests/t.rs", 30),
         ];
         let dirs = aggregate_by_dir(&files, 5);
-        let paths: Vec<&str> = dirs.iter().map(|d| d.path.to_str().unwrap()).collect();
+        // Compare as Paths, not strings: Windows renders "src\\parser".
+        let paths: Vec<&std::path::Path> = dirs.iter().map(|d| d.path.as_path()).collect();
         // src (300 code) before tests (30); src/parser directly after src.
-        assert_eq!(paths, vec!["src", "src/parser", "tests"]);
+        let expected = [
+            std::path::Path::new("src"),
+            std::path::Path::new("src/parser"),
+            std::path::Path::new("tests"),
+        ];
+        assert_eq!(paths, expected);
     }
 
     #[test]
     fn test_aggregate_by_dir_depth_limit() {
         let files = vec![file_at("a/b/c/d.rs", 10)];
         let dirs = aggregate_by_dir(&files, 2);
-        let paths: Vec<&str> = dirs.iter().map(|d| d.path.to_str().unwrap()).collect();
-        assert_eq!(paths, vec!["a", "a/b"], "depth 3 must roll into a/b");
+        let paths: Vec<&std::path::Path> = dirs.iter().map(|d| d.path.as_path()).collect();
+        let expected = [std::path::Path::new("a"), std::path::Path::new("a/b")];
+        assert_eq!(paths, expected, "depth 3 must roll into a/b");
         assert_eq!(dirs[1].files, 1);
     }
 
@@ -540,6 +547,9 @@ mod tests {
         assert!(aggregate_by_dir(&[], 3).is_empty());
     }
 
+    // "/home/..." is not an absolute path on Windows, so the anchor
+    // logic under test only engages on unix-style systems.
+    #[cfg(unix)]
     #[test]
     fn test_aggregate_by_dir_absolute_paths_anchor_at_common_root() {
         let files = vec![
@@ -548,14 +558,16 @@ mod tests {
             file_at("/home/user/proj/tests/t.rs", 30),
         ];
         let dirs = aggregate_by_dir(&files, 5);
-        let paths: Vec<&str> = dirs.iter().map(|d| d.path.to_str().unwrap()).collect();
-        assert_eq!(
-            paths,
-            vec!["src", "src/sub", "tests"],
-            "no '/', '/home', ... noise rows"
-        );
+        let paths: Vec<&std::path::Path> = dirs.iter().map(|d| d.path.as_path()).collect();
+        let expected = [
+            std::path::Path::new("src"),
+            std::path::Path::new("src/sub"),
+            std::path::Path::new("tests"),
+        ];
+        assert_eq!(paths, expected, "no '/', '/home', ... noise rows");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_aggregate_by_dir_single_absolute_file() {
         let files = vec![file_at("/home/user/proj/src/a.rs", 10)];
