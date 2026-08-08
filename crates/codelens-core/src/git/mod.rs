@@ -177,7 +177,7 @@ impl GitClient {
     ///
     /// `since` is passed directly to `git log --since`, e.g. "90 days ago", "2025-01-01".
     pub fn file_churn(&self, since: &str) -> Result<Vec<FileChurn>> {
-        Ok(aggregate_churn(&self.commit_log(since)?))
+        Ok(churn_from_commits(&self.commit_log(since)?))
     }
 
     /// Get total commit count in the given time window.
@@ -445,9 +445,69 @@ fn parse_hunk_ranges(output: &str) -> Vec<Vec<(usize, usize)>> {
     commits
 }
 
+/// Per-file author knowledge data (code-maat style ownership).
+#[derive(Debug, Clone, Serialize)]
+pub struct FileAuthors {
+    /// Distinct authors touching the file within the window.
+    pub authors: usize,
+    /// Author with the largest contribution (added lines, commits as
+    /// tie-breaker).
+    pub main_author: String,
+    /// Main author's share of the total contribution, 0.0-1.0.
+    pub ownership: f64,
+}
+
+/// Aggregate per-commit records into per-file author ownership.
+///
+/// Contribution is weighted by added lines plus one point per commit, so
+/// touch-only commits (renames, deletions) still count toward knowledge.
+pub fn aggregate_authors(commits: &[CommitRecord]) -> HashMap<PathBuf, FileAuthors> {
+    // path → author → contribution score
+    let mut per_file: HashMap<&Path, HashMap<&str, usize>> = HashMap::new();
+    for commit in commits {
+        // A commit touches each path once, whatever normalization did.
+        let mut seen: HashMap<&Path, usize> = HashMap::new();
+        for change in &commit.files {
+            *seen.entry(change.path.as_path()).or_insert(0) += change.added;
+        }
+        for (path, added) in seen {
+            *per_file
+                .entry(path)
+                .or_default()
+                .entry(commit.author.as_str())
+                .or_insert(0) += added + 1;
+        }
+    }
+
+    per_file
+        .into_iter()
+        .map(|(path, by_author)| {
+            let total: usize = by_author.values().sum();
+            let (main_author, main_score) = by_author
+                .iter()
+                .max_by_key(|(author, score)| (**score, std::cmp::Reverse(*author)))
+                .map(|(a, s)| ((*a).to_string(), *s))
+                .unwrap_or_default();
+            let ownership = if total > 0 {
+                main_score as f64 / total as f64
+            } else {
+                0.0
+            };
+            (
+                path.to_path_buf(),
+                FileAuthors {
+                    authors: by_author.len(),
+                    main_author,
+                    ownership,
+                },
+            )
+        })
+        .collect()
+}
+
 /// Aggregate per-commit records into per-file churn data,
 /// sorted by commit count (descending).
-fn aggregate_churn(commits: &[CommitRecord]) -> Vec<FileChurn> {
+pub fn churn_from_commits(commits: &[CommitRecord]) -> Vec<FileChurn> {
     let mut file_map: HashMap<PathBuf, (usize, usize, usize, i64)> = HashMap::new();
     for commit in commits {
         // Rename normalization can leave one commit with several entries
@@ -567,7 +627,7 @@ mod tests {
             "{}\n5\t3\tsrc/main.rs\n2\t1\tsrc/lib.rs\n",
             header("abc1234", "Alice", 1_700_000_000)
         );
-        let result = aggregate_churn(&parse_log(&input));
+        let result = churn_from_commits(&parse_log(&input));
         assert_eq!(result.len(), 2);
         let main = result
             .iter()
@@ -587,7 +647,7 @@ mod tests {
             header("abc1234", "Alice", 1_700_000_200),
             header("def5678", "Bob", 1_700_000_100)
         );
-        let result = aggregate_churn(&parse_log(&input));
+        let result = churn_from_commits(&parse_log(&input));
         assert_eq!(result.len(), 1);
         let main = &result[0];
         assert_eq!(main.commits, 2);
@@ -602,7 +662,7 @@ mod tests {
             "{}\n-\t-\timage.png\n5\t3\tsrc/main.rs\n",
             header("abc1234", "Alice", 1_700_000_000)
         );
-        let result = aggregate_churn(&parse_log(&input));
+        let result = churn_from_commits(&parse_log(&input));
         let png = result
             .iter()
             .find(|f| f.path == Path::new("image.png"))
@@ -647,7 +707,7 @@ mod tests {
             header("ccc333", "Bob", 1_700_000_200),
             header("ddd444", "Bob", 1_700_000_100)
         );
-        let result = aggregate_churn(&parse_log(&input));
+        let result = churn_from_commits(&parse_log(&input));
         assert_eq!(result.len(), 1, "old and new names must merge: {result:?}");
         let f = &result[0];
         assert_eq!(f.path, PathBuf::from("src/new.rs"));
@@ -666,7 +726,7 @@ mod tests {
             header("bbb", "Alice", 1_700_000_200),
             header("ccc", "Alice", 1_700_000_100)
         );
-        let result = aggregate_churn(&parse_log(&input));
+        let result = churn_from_commits(&parse_log(&input));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].path, PathBuf::from("c.rs"));
         assert_eq!(result[0].commits, 3);
@@ -699,7 +759,7 @@ mod tests {
             header("c2", "Alice", 200),
             header("c1", "Alice", 100)
         );
-        let churns = aggregate_churn(&parse_log(&input));
+        let churns = churn_from_commits(&parse_log(&input));
         let a = churns
             .iter()
             .find(|c| c.path == Path::new("a.rs"))
@@ -725,7 +785,7 @@ mod tests {
             header("c2", "Alice", 200),
             header("c1", "Alice", 100)
         );
-        let churns = aggregate_churn(&parse_log(&input));
+        let churns = churn_from_commits(&parse_log(&input));
         assert_eq!(churns.len(), 1);
         let y = &churns[0];
         assert_eq!(y.path, PathBuf::from("y.rs"));
@@ -765,6 +825,40 @@ mod tests {
             PathBuf::from("中文文件.rs"),
             "non-ASCII paths must come back as real UTF-8, not C-quoted"
         );
+    }
+
+    #[test]
+    fn test_aggregate_authors_ownership() {
+        // Alice adds 90 lines over 2 commits, Bob adds 8 over 1 commit.
+        let input = format!(
+            "{}\n50\t0\tsrc/a.rs\n\n{}\n8\t2\tsrc/a.rs\n\n{}\n40\t1\tsrc/a.rs\n1\t0\tsrc/b.rs\n",
+            header("c3", "Alice", 300),
+            header("c2", "Bob", 200),
+            header("c1", "Alice", 100)
+        );
+        let authors = aggregate_authors(&parse_log(&input));
+        let a = &authors[&PathBuf::from("src/a.rs")];
+        assert_eq!(a.authors, 2);
+        assert_eq!(a.main_author, "Alice");
+        // Alice: 50+1 + 40+1 = 92; Bob: 8+1 = 9 → 92/101
+        assert!((a.ownership - 92.0 / 101.0).abs() < 0.001);
+        let b = &authors[&PathBuf::from("src/b.rs")];
+        assert_eq!(b.authors, 1);
+        assert!((b.ownership - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_aggregate_authors_touch_only_commits_count() {
+        // Bob's rename-only commit (0 added) still registers knowledge.
+        let input = format!(
+            "{}\n0\t0\tsrc/a.rs\n\n{}\n10\t0\tsrc/a.rs\n",
+            header("c2", "Bob", 200),
+            header("c1", "Alice", 100)
+        );
+        let authors = aggregate_authors(&parse_log(&input));
+        let a = &authors[&PathBuf::from("src/a.rs")];
+        assert_eq!(a.authors, 2);
+        assert_eq!(a.main_author, "Alice");
     }
 
     #[test]

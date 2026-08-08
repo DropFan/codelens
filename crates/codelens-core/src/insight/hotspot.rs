@@ -44,9 +44,47 @@ pub struct FileHotspot {
     /// Days since the file's first commit (None when unknown).
     /// An old file that is still a hotspot signals chronic instability.
     pub age_days: Option<u64>,
+    /// Author concentration (None when author data was unavailable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub knowledge: Option<KnowledgeMetrics>,
     /// Function-level breakdown (--functions), most-touched first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub functions: Option<Vec<FunctionHotspot>>,
+}
+
+/// Who knows this file: author count and ownership concentration.
+#[derive(Debug, Clone, Serialize)]
+pub struct KnowledgeMetrics {
+    pub authors: usize,
+    pub main_author: String,
+    /// Main author's contribution share, 0.0-1.0.
+    pub ownership: f64,
+    /// Knowledge island: a risky hotspot that effectively one person
+    /// knows — the highest organizational-risk combination.
+    pub knowledge_island: bool,
+}
+
+/// Ownership share above which a risky file counts as a knowledge island.
+const ISLAND_OWNERSHIP: f64 = 0.75;
+
+/// Attach author-concentration data (from `git::aggregate_authors`).
+/// A MED/HIGH-risk hotspot owned ≥75% by one author is flagged as a
+/// knowledge island.
+pub fn attach_knowledge(
+    report: &mut HotspotReport,
+    authors: &HashMap<PathBuf, crate::git::FileAuthors>,
+) {
+    for file in &mut report.files {
+        let key: &Path = file.path.strip_prefix("./").unwrap_or(&file.path);
+        if let Some(fa) = authors.get(key) {
+            file.knowledge = Some(KnowledgeMetrics {
+                authors: fa.authors,
+                main_author: fa.main_author.clone(),
+                ownership: fa.ownership,
+                knowledge_island: file.risk != RiskLevel::Low && fa.ownership >= ISLAND_OWNERSHIP,
+            });
+        }
+    }
 }
 
 /// How often one function was touched within the window (approximate:
@@ -123,6 +161,7 @@ pub fn analyze(
                 hotspot_score: 0.0,
                 risk: RiskLevel::Low,
                 age_days: None,
+                knowledge: None,
                 functions: None,
             })
         })
@@ -390,6 +429,56 @@ mod tests {
         ];
         let touches = count_function_touches(&spans, &commits);
         assert_eq!(touches, vec![2, 2]);
+    }
+
+    #[test]
+    fn test_attach_knowledge_flags_islands() {
+        use crate::git::FileAuthors;
+        let mut report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
+        let mut authors = HashMap::new();
+        // hot.rs is HIGH risk and single-owned → island.
+        authors.insert(
+            PathBuf::from("hot.rs"),
+            FileAuthors {
+                authors: 1,
+                main_author: "solo".to_string(),
+                ownership: 0.95,
+            },
+        );
+        // cold.rs is LOW risk even at full ownership → not an island.
+        authors.insert(
+            PathBuf::from("cold.rs"),
+            FileAuthors {
+                authors: 1,
+                main_author: "solo".to_string(),
+                ownership: 1.0,
+            },
+        );
+        // warm.rs: shared ownership → not an island regardless of risk.
+        authors.insert(
+            PathBuf::from("warm.rs"),
+            FileAuthors {
+                authors: 3,
+                main_author: "lead".to_string(),
+                ownership: 0.5,
+            },
+        );
+        attach_knowledge(&mut report, &authors);
+
+        let get = |name: &str| {
+            report
+                .files
+                .iter()
+                .find(|f| f.path == Path::new(name))
+                .and_then(|f| f.knowledge.as_ref())
+                .unwrap()
+        };
+        assert!(get("hot.rs").knowledge_island);
+        assert!(
+            !get("cold.rs").knowledge_island,
+            "low risk is never an island"
+        );
+        assert!(!get("warm.rs").knowledge_island, "shared knowledge is fine");
     }
 
     #[test]

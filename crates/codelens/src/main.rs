@@ -460,7 +460,10 @@ fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<
     // even when running from a subdirectory or with absolute paths.
     rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
 
-    let churns = git_client.file_churn(&since)?;
+    // One log walk yields both churn and author-ownership data.
+    let commits = git_client.commit_log(&since)?;
+    let churns = git::churn_from_commits(&commits);
+    let authors = git::aggregate_authors(&commits);
     let total_commits = git_client.commit_count(&since)?;
     if total_commits == 0 {
         eprintln!(
@@ -471,6 +474,7 @@ fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<
     }
     let top_n = config.output.top_n.unwrap_or(20);
     let mut report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
+    hotspot::attach_knowledge(&mut report, &authors);
 
     // Age enrichment walks the full history; a failure here (or a clock
     // before the epoch) only costs the Age column, never the report.

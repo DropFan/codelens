@@ -359,27 +359,67 @@ impl MarkdownOutput {
             return Ok(());
         }
 
-        writeln!(writer, "| File | Chg | +/- | CC | Age | Score | Risk |")?;
-        writeln!(writer, "|------|-----|-----|----|-----|-------|------|")?;
+        writeln!(
+            writer,
+            "| File | Chg | +/- | CC | Age | Authors | Score | Risk |"
+        )?;
+        writeln!(
+            writer,
+            "|------|-----|-----|----|-----|---------|-------|------|"
+        )?;
         for file in &report.files {
             let age = file
                 .age_days
                 .map(crate::insight::hotspot::format_age)
                 .unwrap_or_else(|| "-".to_string());
+            let auth = match &file.knowledge {
+                Some(k) if k.knowledge_island => format!("{} ★", k.authors),
+                Some(k) => k.authors.to_string(),
+                None => "-".to_string(),
+            };
             writeln!(
                 writer,
-                "| {} | {} | +{}/-{} | {} | {} | {:.2} | {} |",
+                "| {} | {} | +{}/-{} | {} | {} | {} | {:.2} | {} |",
                 file.path.display(),
                 file.churn.commits,
                 file.churn.lines_added,
                 file.churn.lines_deleted,
                 file.complexity.cyclomatic,
                 age,
+                auth,
                 file.hotspot_score,
                 file.risk,
             )?;
         }
         writeln!(writer)?;
+
+        let islands: Vec<_> = report
+            .files
+            .iter()
+            .filter_map(|f| {
+                f.knowledge
+                    .as_ref()
+                    .filter(|k| k.knowledge_island)
+                    .map(|k| (f, k))
+            })
+            .collect();
+        if !islands.is_empty() {
+            writeln!(
+                writer,
+                "**★ Knowledge Islands** (risky files effectively one person knows):"
+            )?;
+            writeln!(writer)?;
+            for (file, k) in islands {
+                writeln!(
+                    writer,
+                    "- {} — {:.0}% by {}",
+                    file.path.display(),
+                    k.ownership * 100.0,
+                    k.main_author
+                )?;
+            }
+            writeln!(writer)?;
+        }
 
         // Function-level breakdown (--functions)
         if report.files.iter().any(|f| f.functions.is_some()) {

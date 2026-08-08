@@ -165,13 +165,22 @@ impl CsvOutput {
     ) -> Result<()> {
         writeln!(
             writer,
-            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Score,Risk"
+            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Authors,MainAuthor,Ownership,KnowledgeIsland,Score,Risk"
         )?;
         for file in &report.files {
             let age = file.age_days.map(|d| d.to_string()).unwrap_or_default();
+            let (authors, main_author, ownership, island) = match &file.knowledge {
+                Some(k) => (
+                    k.authors.to_string(),
+                    k.main_author.clone(),
+                    format!("{:.2}", k.ownership),
+                    k.knowledge_island.to_string(),
+                ),
+                None => Default::default(),
+            };
             writeln!(
                 writer,
-                "{},{},{},{},{},{},{},{:.2},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{:.2},{}",
                 csv_field(&file.path.display().to_string()),
                 file.churn.commits,
                 file.churn.lines_added,
@@ -179,6 +188,10 @@ impl CsvOutput {
                 file.churn.lines_churn,
                 file.complexity.cyclomatic,
                 age,
+                authors,
+                csv_field(&main_author),
+                ownership,
+                island,
                 file.hotspot_score,
                 file.risk,
             )?;

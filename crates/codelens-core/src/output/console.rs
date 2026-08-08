@@ -632,6 +632,7 @@ impl ConsoleOutput {
             Cell::new("+/-").add_attribute(Attribute::Bold),
             Cell::new("CC").add_attribute(Attribute::Bold),
             Cell::new("Age").add_attribute(Attribute::Bold),
+            Cell::new("Auth").add_attribute(Attribute::Bold),
             Cell::new("Score").add_attribute(Attribute::Bold),
             Cell::new("Risk").add_attribute(Attribute::Bold),
         ]);
@@ -646,6 +647,11 @@ impl ConsoleOutput {
                 .age_days
                 .map(crate::insight::hotspot::format_age)
                 .unwrap_or_else(|| "-".to_string());
+            let auth = match &file.knowledge {
+                Some(k) if k.knowledge_island => format!("{} ★", k.authors),
+                Some(k) => k.authors.to_string(),
+                None => "-".to_string(),
+            };
             table.add_row(vec![
                 Cell::new(file.path.display().to_string()).fg(Color::Cyan),
                 Cell::new(Self::format_number(file.churn.commits)),
@@ -655,6 +661,7 @@ impl ConsoleOutput {
                 )),
                 Cell::new(file.complexity.cyclomatic.to_string()),
                 Cell::new(age),
+                Cell::new(auth),
                 Cell::new(format!("{:.2}", file.hotspot_score)),
                 Cell::new(file.risk.to_string()).fg(risk_color),
             ]);
@@ -662,6 +669,36 @@ impl ConsoleOutput {
 
         writeln!(writer, "{table}")?;
         writeln!(writer)?;
+
+        // Knowledge islands: risky files that effectively one person knows.
+        let islands: Vec<_> = report
+            .files
+            .iter()
+            .filter_map(|f| {
+                f.knowledge
+                    .as_ref()
+                    .filter(|k| k.knowledge_island)
+                    .map(|k| (f, k))
+            })
+            .collect();
+        if !islands.is_empty() {
+            writeln!(
+                writer,
+                "{} {}",
+                "★ Knowledge Islands".bold().red(),
+                "(risky files effectively one person knows)".dimmed()
+            )?;
+            for (file, k) in islands {
+                writeln!(
+                    writer,
+                    "    {}  {:.0}% by {}",
+                    file.path.display().to_string().cyan(),
+                    k.ownership * 100.0,
+                    k.main_author
+                )?;
+            }
+            writeln!(writer)?;
+        }
 
         // Function-level breakdown (--functions)
         if report.files.iter().any(|f| f.functions.is_some()) {
