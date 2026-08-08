@@ -28,6 +28,8 @@ pub struct FileAnalyzer {
     seen_hashes: Option<Mutex<HashSet<u64>>>,
     /// Skip minified/generated files when `--no-min-gen` is on.
     no_min_gen: bool,
+    /// Linguist attributes from .gitattributes (overrides + exclusions).
+    linguist: Option<Arc<crate::language::LinguistAttributes>>,
 }
 
 /// Average bytes per line above which a file is considered minified
@@ -92,7 +94,15 @@ impl FileAnalyzer {
                 .no_duplicates
                 .then(|| Mutex::new(HashSet::new())),
             no_min_gen: config.filter.no_min_gen,
+            linguist: None,
         }
+    }
+
+    /// Attach linguist attributes (.gitattributes) for language overrides
+    /// and vendored/generated exclusion.
+    pub fn with_linguist(mut self, linguist: Arc<crate::language::LinguistAttributes>) -> Self {
+        self.linguist = Some(linguist);
+        self
     }
 
     /// Analyze a single file.
@@ -116,11 +126,25 @@ impl FileAnalyzer {
     ///
     /// Returns `None` if the file's language is not recognized or the file is binary.
     pub fn analyze_from_bytes(&self, path: &Path, content: &[u8]) -> Result<Option<FileStats>> {
-        // Detect language (extension/filename, then shebang fallback)
-        let language = match self.registry.detect_with_content(path, content) {
-            Some(lang) => lang,
-            None => return Ok(None),
-        };
+        // Linguist-vendored/-generated files don't count, matching GitHub.
+        if let Some(linguist) = &self.linguist {
+            if linguist.is_excluded(path) {
+                return Ok(None);
+            }
+        }
+
+        // Detect language: linguist-language override first, then
+        // extension/filename, then shebang fallback.
+        let linguist_lang = self
+            .linguist
+            .as_ref()
+            .and_then(|l| l.language_override(path))
+            .and_then(|name| self.registry.get(name));
+        let language =
+            match linguist_lang.or_else(|| self.registry.detect_with_content(path, content)) {
+                Some(lang) => lang,
+                None => return Ok(None),
+            };
 
         // Apply the language filter (-l / config `lang`), case-insensitively
         if let Some(ref allowed) = self.allowed_languages {

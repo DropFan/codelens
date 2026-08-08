@@ -71,7 +71,22 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         registry.map_extension(ext, lang)?;
     }
     let registry = Arc::new(registry);
-    let analyzer = Arc::new(FileAnalyzer::new(Arc::clone(&registry), config));
+    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config);
+    if !config.filter.no_linguist {
+        // Root .gitattributes of the first analyzed tree; matches GitHub's
+        // counting for the common single-root case.
+        if let Some(root) = paths.first().map(|p| p.as_ref()) {
+            let dir = if root.is_dir() {
+                root
+            } else {
+                root.parent().unwrap_or_else(|| Path::new("."))
+            };
+            if let Some(attrs) = language::LinguistAttributes::load(dir) {
+                file_analyzer = file_analyzer.with_linguist(Arc::new(attrs));
+            }
+        }
+    }
+    let analyzer = Arc::new(file_analyzer);
     let filter: Arc<dyn filter::Filter> = Arc::new(FilterChain::new(config)?);
     let walker = ParallelWalker::new(config.walker.clone());
 

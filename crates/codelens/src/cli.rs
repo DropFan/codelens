@@ -345,6 +345,11 @@ pub struct FilterArgs {
     /// Skip minified/generated files (long lines or generated markers).
     #[arg(long)]
     pub no_min_gen: bool,
+
+    /// Ignore .gitattributes linguist attributes (linguist-language,
+    /// linguist-vendored, linguist-generated are honored by default).
+    #[arg(long)]
+    pub no_linguist: bool,
 }
 
 /// Output options.

@@ -246,6 +246,9 @@ fn resolve_config(
     if filter.no_min_gen {
         config.filter.no_min_gen = true;
     }
+    if filter.no_linguist {
+        config.filter.no_linguist = true;
+    }
     if let Some(ref count_as) = filter.count_as {
         config.count_as = parse_count_as(count_as);
     }

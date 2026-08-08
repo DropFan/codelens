@@ -47,6 +47,9 @@ pub struct FilterConfig {
     /// Skip minified/generated files (long average line length or a
     /// generated-code marker in the first line).
     pub no_min_gen: bool,
+    /// Ignore .gitattributes linguist attributes (language overrides and
+    /// vendored/generated exclusion are honored by default).
+    pub no_linguist: bool,
 }
 
 impl FilterConfig {
