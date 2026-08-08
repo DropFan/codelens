@@ -59,6 +59,26 @@ impl OutputFormat for OpenMetricsOutput {
                 writeln!(writer, "# TYPE codelens_coupling_commits gauge")?;
                 writeln!(writer, "codelens_coupling_commits {}", report.total_commits)?;
             }
+            Report::Diff(report) => {
+                writeln!(writer, "# TYPE codelens_diff_code_delta gauge")?;
+                writeln!(
+                    writer,
+                    "codelens_diff_code_delta {}",
+                    report.delta.code.signed_delta()
+                )?;
+                writeln!(writer, "# TYPE codelens_diff_health_delta gauge")?;
+                writeln!(
+                    writer,
+                    "codelens_diff_health_delta {:.1}",
+                    report.health.score_delta
+                )?;
+                writeln!(writer, "# TYPE codelens_diff_regressed_files gauge")?;
+                writeln!(
+                    writer,
+                    "codelens_diff_regressed_files {}",
+                    report.health.regressed_files.len()
+                )?;
+            }
             Report::Trend(report) => {
                 writeln!(writer, "# TYPE codelens_trend_code_delta gauge")?;
                 writeln!(

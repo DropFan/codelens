@@ -6,6 +6,7 @@ use crate::analyzer::stats::AnalysisResult;
 use crate::config::SortBy;
 use crate::error::Result;
 use crate::insight::coupling::CouplingReport;
+use crate::insight::diff::DiffReport;
 use crate::insight::estimation::{EstimationComparison, EstimationReport};
 use crate::insight::health::HealthReport;
 use crate::insight::hotspot::HotspotReport;
@@ -19,6 +20,7 @@ pub enum Report {
     Hotspot(HotspotReport),
     Coupling(CouplingReport),
     Trend(TrendReport),
+    Diff(Box<DiffReport>),
     Estimation(EstimationReport),
     EstimationComparison(EstimationComparison),
     /// Default-command bundle: stats + health + estimation as ONE document,

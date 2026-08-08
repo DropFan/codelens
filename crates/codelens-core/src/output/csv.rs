@@ -44,6 +44,7 @@ impl OutputFormat for CsvOutput {
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            Report::Diff(report) => self.write_diff(report, options, writer),
             // CSV can't hold three differently-shaped tables in one file;
             // emit the analysis table only (health/estimation are available
             // via their subcommands).
@@ -219,6 +220,48 @@ impl CsvOutput {
                 pair.commits_a,
                 pair.commits_b,
                 pair.degree,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_diff(
+        &self,
+        report: &crate::insight::diff::DiffReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "Metric,Before,After,Delta")?;
+        writeln!(
+            writer,
+            "HealthScore,{:.1},{:.1},{:.1}",
+            report.health.baseline_score, report.to_score, report.health.score_delta
+        )?;
+        let d = &report.delta;
+        for (name, dv) in [
+            ("Files", &d.files),
+            ("Code", &d.code),
+            ("Comments", &d.comment),
+            ("Complexity", &d.complexity),
+            ("Functions", &d.functions),
+        ] {
+            writeln!(
+                writer,
+                "{},{},{},{}",
+                name,
+                dv.from,
+                dv.to,
+                dv.signed_delta()
+            )?;
+        }
+        for f in &report.health.regressed_files {
+            writeln!(
+                writer,
+                "Regressed:{},{:.1},{:.1},{:.1}",
+                csv_field(&f.path.display().to_string()),
+                f.from_score,
+                f.to_score,
+                f.to_score - f.from_score,
             )?;
         }
         Ok(())

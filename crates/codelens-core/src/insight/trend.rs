@@ -248,9 +248,33 @@ pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendRe
     let from_snap = load_snapshot(&from_path)?;
     let to_snap = load_snapshot(&to_path)?;
 
-    let from_summary = &from_snap.result.summary;
-    let to_summary = &to_snap.result.summary;
+    let (delta, by_language) = compute_delta(&from_snap.result.summary, &to_snap.result.summary);
 
+    Ok(TrendReport {
+        from: SnapshotMeta {
+            timestamp: from_snap.timestamp,
+            label: from_snap.label,
+            git_commit: from_snap.git_commit,
+            file_path: from_path,
+        },
+        to: SnapshotMeta {
+            timestamp: to_snap.timestamp,
+            label: to_snap.label,
+            git_commit: to_snap.git_commit,
+            file_path: to_path,
+        },
+        delta,
+        by_language,
+        history: Vec::new(),
+    })
+}
+
+/// Metric and per-language deltas between two summaries.
+/// Shared by trend (snapshot vs snapshot) and diff (git ref vs git ref).
+pub fn compute_delta(
+    from_summary: &crate::analyzer::stats::Summary,
+    to_summary: &crate::analyzer::stats::Summary,
+) -> (TrendDelta, Vec<LanguageTrend>) {
     let delta = TrendDelta {
         files: DeltaValue::new(from_summary.total_files, to_summary.total_files),
         lines: DeltaValue::new(from_summary.lines.total, to_summary.lines.total),
@@ -307,23 +331,7 @@ pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendRe
             .cmp(&a.code.signed_delta().unsigned_abs())
     });
 
-    Ok(TrendReport {
-        from: SnapshotMeta {
-            timestamp: from_snap.timestamp,
-            label: from_snap.label,
-            git_commit: from_snap.git_commit,
-            file_path: from_path,
-        },
-        to: SnapshotMeta {
-            timestamp: to_snap.timestamp,
-            label: to_snap.label,
-            git_commit: to_snap.git_commit,
-            file_path: to_path,
-        },
-        delta,
-        by_language,
-        history: Vec::new(),
-    })
+    (delta, by_language)
 }
 
 #[cfg(test)]

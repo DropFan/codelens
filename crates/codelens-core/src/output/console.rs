@@ -115,6 +115,7 @@ impl ConsoleOutput {
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
+            Report::Diff(report) => self.write_diff(report, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
@@ -808,6 +809,107 @@ impl ConsoleOutput {
             "  {} Files changing together share a dependency the module\n  structure does not express — review the strongest pairs first.",
             "hint:".dimmed()
         )?;
+        writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn write_diff(
+        &self,
+        report: &crate::insight::diff::DiffReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer, "{}", " CODELENS - Diff Report ".bold().cyan())?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+        writeln!(writer, "  {} → {}", report.from.bold(), report.to.bold())?;
+
+        let reg = &report.health;
+        let delta_str = if reg.score_delta >= 0.0 {
+            format!("+{:.1}", reg.score_delta).green().to_string()
+        } else {
+            format!("{:.1}", reg.score_delta).red().to_string()
+        };
+        writeln!(
+            writer,
+            "  Health: {} ({:.1}) → {} ({:.1})  Δ {}",
+            reg.baseline_grade, reg.baseline_score, report.to_grade, report.to_score, delta_str
+        )?;
+        if reg.improved_files > 0 {
+            writeln!(writer, "  Improved files: {}", reg.improved_files)?;
+        }
+        writeln!(writer)?;
+
+        if !reg.regressed_files.is_empty() {
+            writeln!(writer, "{}", "  Regressed Files".bold())?;
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            table.set_header(vec![
+                Cell::new("File").add_attribute(Attribute::Bold),
+                Cell::new("Before").add_attribute(Attribute::Bold),
+                Cell::new("After").add_attribute(Attribute::Bold),
+            ]);
+            for f in &reg.regressed_files {
+                table.add_row(vec![
+                    Cell::new(f.path.display().to_string()).fg(Color::Cyan),
+                    Cell::new(format!("{} ({:.1})", f.from_grade, f.from_score))
+                        .fg(Self::grade_color(f.from_grade)),
+                    Cell::new(format!("{} ({:.1})", f.to_grade, f.to_score))
+                        .fg(Self::grade_color(f.to_grade)),
+                ]);
+            }
+            writeln!(writer, "{table}")?;
+            writeln!(writer)?;
+        }
+
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("Metric").add_attribute(Attribute::Bold),
+            Cell::new("Before").add_attribute(Attribute::Bold),
+            Cell::new("After").add_attribute(Attribute::Bold),
+            Cell::new("Delta").add_attribute(Attribute::Bold),
+        ]);
+        let d = &report.delta;
+        let rows = [
+            ("Files", &d.files),
+            ("Code", &d.code),
+            ("Comments", &d.comment),
+            ("Complexity", &d.complexity),
+            ("Functions", &d.functions),
+        ];
+        for (label, dv) in rows {
+            let signed = dv.signed_delta();
+            let delta_cell = if signed > 0 {
+                Cell::new(format!("+{signed}")).fg(Color::Yellow)
+            } else if signed < 0 {
+                Cell::new(signed.to_string()).fg(Color::Cyan)
+            } else {
+                Cell::new("0").fg(Color::DarkGrey)
+            };
+            table.add_row(vec![
+                Cell::new(label),
+                Cell::new(Self::format_number(dv.from)),
+                Cell::new(Self::format_number(dv.to)),
+                delta_cell,
+            ]);
+        }
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+
+        let verdict = if reg.failed {
+            "REGRESSED".red().bold().to_string()
+        } else {
+            "NO REGRESSION".green().bold().to_string()
+        };
+        writeln!(writer, "  Verdict: {verdict}")?;
         writeln!(writer)?;
 
         Ok(())

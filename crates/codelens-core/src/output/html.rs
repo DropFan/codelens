@@ -245,6 +245,7 @@ impl OutputFormat for HtmlOutput {
             Report::Health(report) => self.write_health(report, writer),
             Report::Hotspot(report) => self.write_hotspot(report, writer),
             Report::Coupling(report) => self.write_coupling(report, writer),
+            Report::Diff(report) => self.write_diff(report, writer),
             Report::Trend(report) => self.write_trend(report, writer),
             Report::Estimation(report) => self.write_estimation(report, writer),
             Report::EstimationComparison(report) => {
@@ -450,6 +451,72 @@ impl HtmlOutput {
                     degree_pct: (p.degree.min(100.0)) as u32,
                 })
                 .collect(),
+        };
+        write!(writer, "{}", html.render()?)?;
+        Ok(())
+    }
+
+    fn write_diff(
+        &self,
+        report: &crate::insight::diff::DiffReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        // The trend template renders before/after comparisons; a git-ref
+        // diff is exactly that with ref names in place of snapshot dates.
+        let make_metric = |label: &str, dv: &crate::insight::DeltaValue<usize>| {
+            let signed = dv.signed_delta();
+            HtmlTrendMetric {
+                label: label.to_string(),
+                from_value: dv.from,
+                to_value: dv.to,
+                signed_delta: signed,
+                delta_display: if signed >= 0 {
+                    format!("+{signed}")
+                } else {
+                    format!("{signed}")
+                },
+                percent_display: format!("{:+.1}%", dv.percent),
+            }
+        };
+        let d = &report.delta;
+        let metrics = vec![
+            make_metric("Files", &d.files),
+            make_metric("Code", &d.code),
+            make_metric("Comments", &d.comment),
+            make_metric("Complexity", &d.complexity),
+            make_metric("Functions", &d.functions),
+        ];
+        let by_language = report
+            .by_language
+            .iter()
+            .map(|lt| {
+                let signed = lt.code.signed_delta();
+                HtmlLanguageTrend {
+                    language: lt.language.clone(),
+                    status: lt.status.to_string(),
+                    code_from: lt.code.from,
+                    code_to: lt.code.to,
+                    code_delta: signed,
+                    code_delta_display: if signed >= 0 {
+                        format!("+{signed}")
+                    } else {
+                        format!("{signed}")
+                    },
+                }
+            })
+            .collect();
+
+        let html = TrendHtmlReport {
+            from_date: report.from.clone(),
+            from_label: format!(
+                "health {} ({:.1})",
+                report.health.baseline_grade, report.health.baseline_score
+            ),
+            to_date: report.to.clone(),
+            to_label: format!("health {} ({:.1})", report.to_grade, report.to_score),
+            metrics,
+            by_language,
+            history: Vec::new(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())

@@ -43,6 +43,7 @@ impl OutputFormat for MarkdownOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Coupling(report) => self.write_coupling(report, options, writer),
+            Report::Diff(report) => self.write_diff(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             // Concatenated sections are valid Markdown
             Report::Combined(combined) => {
@@ -494,6 +495,99 @@ impl MarkdownOutput {
             )?;
         }
         writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn write_diff(
+        &self,
+        report: &crate::insight::diff::DiffReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let reg = &report.health;
+        writeln!(writer, "# Diff Report: {} → {}", report.from, report.to)?;
+        writeln!(writer)?;
+        let delta_str = if reg.score_delta >= 0.0 {
+            format!("+{:.1}", reg.score_delta)
+        } else {
+            format!("{:.1}", reg.score_delta)
+        };
+        writeln!(
+            writer,
+            "**Health:** {} ({:.1}) → {} ({:.1}), Δ {} — {}",
+            reg.baseline_grade,
+            reg.baseline_score,
+            report.to_grade,
+            report.to_score,
+            delta_str,
+            if reg.failed {
+                "🔴 REGRESSED"
+            } else {
+                "🟢 NO REGRESSION"
+            }
+        )?;
+        writeln!(writer)?;
+
+        if !reg.regressed_files.is_empty() {
+            writeln!(writer, "## Regressed Files")?;
+            writeln!(writer)?;
+            writeln!(writer, "| File | Before | After |")?;
+            writeln!(writer, "|------|--------|-------|")?;
+            for f in &reg.regressed_files {
+                writeln!(
+                    writer,
+                    "| {} | {} ({:.1}) | {} ({:.1}) |",
+                    f.path.display(),
+                    f.from_grade,
+                    f.from_score,
+                    f.to_grade,
+                    f.to_score
+                )?;
+            }
+            writeln!(writer)?;
+        }
+
+        writeln!(writer, "## Metrics")?;
+        writeln!(writer)?;
+        writeln!(writer, "| Metric | Before | After | Delta |")?;
+        writeln!(writer, "|--------|--------|-------|-------|")?;
+        let d = &report.delta;
+        for (label, dv) in [
+            ("Files", &d.files),
+            ("Code", &d.code),
+            ("Comments", &d.comment),
+            ("Complexity", &d.complexity),
+            ("Functions", &d.functions),
+        ] {
+            writeln!(
+                writer,
+                "| {} | {} | {} | {:+} |",
+                label,
+                dv.from,
+                dv.to,
+                dv.signed_delta()
+            )?;
+        }
+        writeln!(writer)?;
+
+        if !report.by_language.is_empty() {
+            writeln!(writer, "## By Language")?;
+            writeln!(writer)?;
+            writeln!(writer, "| Language | Code Before | Code After | Delta |")?;
+            writeln!(writer, "|----------|-------------|------------|-------|")?;
+            for lt in &report.by_language {
+                writeln!(
+                    writer,
+                    "| {} | {} | {} | {:+} |",
+                    lt.language,
+                    lt.code.from,
+                    lt.code.to,
+                    lt.code.signed_delta()
+                )?;
+            }
+            writeln!(writer)?;
+        }
 
         Ok(())
     }

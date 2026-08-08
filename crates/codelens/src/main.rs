@@ -55,6 +55,8 @@ fn run() -> Result<ExitCode> {
             cli::Command::Coupling(args) => {
                 run_coupling(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
             }
+            // diff owns its exit code: --fail-on-regression can gate CI
+            cli::Command::Diff(args) => run_diff(args, &cli.advanced),
             cli::Command::Trend(args) => run_trend(args, &cli.advanced).map(|()| ExitCode::SUCCESS),
             #[cfg(feature = "mcp")]
             cli::Command::Mcp => mcp::run().map(|()| ExitCode::SUCCESS),
@@ -393,17 +395,26 @@ fn resolve_baseline(
             "baseline '{reference}' is not a snapshot reference, and this is not a git repository"
         )
     })?;
+    let result = analyze_at_git_ref(&git_client, reference, paths, config)?;
+    Ok((result, format!("git:{reference}")))
+}
+
+/// Materialize `reference` in a temporary worktree and analyze the same
+/// locations there; file paths come back repo-root-relative.
+fn analyze_at_git_ref(
+    git_client: &GitClient,
+    reference: &str,
+    paths: &[PathBuf],
+    config: &Config,
+) -> Result<codelens_core::AnalysisResult> {
     if !git_client.rev_exists(reference) {
-        anyhow::bail!(
-            "baseline '{reference}' is neither a snapshot reference (latest, latest~N, YYYY-MM-DD) nor a git ref"
-        );
+        anyhow::bail!("'{reference}' is not a git ref in this repository");
     }
 
     let worktree = git_client.temp_worktree(reference)?;
-    // Analyze the same locations inside the baseline tree. A path that
-    // does not exist there must be a hard error: falling back to the
-    // whole tree would compare mismatched scopes and fabricate a
-    // project-level "regression" with zero regressed files.
+    // A path that does not exist in that tree must be a hard error:
+    // falling back to the whole tree would compare mismatched scopes and
+    // fabricate a project-level "regression" with zero regressed files.
     let repo_root = std::fs::canonicalize(git_client.repo_path())
         .unwrap_or_else(|_| git_client.repo_path().to_path_buf());
     let mut mapped: Vec<PathBuf> = Vec::with_capacity(paths.len());
@@ -416,15 +427,57 @@ fn resolve_baseline(
         match inside.filter(|m| m.exists()) {
             Some(m) => mapped.push(m),
             None => anyhow::bail!(
-                "path '{}' does not exist in baseline '{reference}'; \
-                 compare a path that exists in both trees, or drop --baseline",
+                "path '{}' does not exist in '{reference}'; \
+                 compare a path that exists in both trees",
                 p.display()
             ),
         }
     }
-    let mut result = analyze(&mapped, config).context("Baseline analysis failed")?;
+    let mut result = analyze(&mapped, config).context("Analysis of the git ref failed")?;
     rewrite_paths_repo_relative(&mut result.files, worktree.path());
-    Ok((result, format!("git:{reference}")))
+    Ok(result)
+}
+
+fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Result<ExitCode> {
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
+    let cwd = PathBuf::from(".");
+    let git_client = GitClient::detect(&cwd).context("Not a git repository")?;
+    let paths = vec![cwd];
+
+    // Accept "FROM..TO" in one argument or FROM TO as two.
+    let (from_ref, to_ref) = match args.from.split_once("..") {
+        Some((f, t)) if !t.is_empty() => (f.to_string(), Some(t.to_string())),
+        _ => (args.from.clone(), args.to.clone()),
+    };
+
+    let from_result = analyze_at_git_ref(&git_client, &from_ref, &paths, &config)?;
+    let (to_result, to_label) = match &to_ref {
+        Some(reference) => (
+            analyze_at_git_ref(&git_client, reference, &paths, &config)?,
+            reference.clone(),
+        ),
+        None => {
+            let mut result = analyze(&paths, &config).context("Analysis failed")?;
+            rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+            (result, "worktree".to_string())
+        }
+    };
+
+    let model = DefaultModel::new();
+    let report =
+        codelens_core::insight::diff::build(&from_ref, &to_label, &from_result, &to_result, &model);
+    let failed = report.health.failed;
+    write_report(Report::Diff(Box::new(report)), &config.output)?;
+
+    if args.fail_on_regression && failed {
+        eprintln!(
+            "{}: health regressed from '{from_ref}' to '{to_label}'",
+            "gate failed".red().bold(),
+        );
+        return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Parse a `--fail-under` threshold: a grade letter (A/B/C/D, using the

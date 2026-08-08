@@ -66,6 +66,17 @@ pub enum Command {
         coupling percentage), --max-changeset (bulk commits above this size are ignored)."
     )]
     Coupling(CouplingArgs),
+    /// Compare two git refs: health delta, complexity delta, regressions.
+    #[command(
+        long_about = "Analyze two git refs (or a ref against the working tree) and report \
+        what git diff cannot: health score movement, per-file grade regressions, and \
+        complexity deltas. Line counts are shown as context only.\n\n\
+        Examples:\n\
+        codelens diff main              # main vs working tree\n\
+        codelens diff main..HEAD        # two refs\n\
+        codelens diff v1.0 v2.0 --fail-on-regression"
+    )]
+    Diff(DiffArgs),
     /// Track codebase trends with snapshots.
     #[command(
         long_about = "Save snapshots of codebase metrics and compare them over time. \
@@ -171,6 +182,25 @@ pub struct CouplingArgs {
     /// Ignore commits touching more files than this (bulk changes).
     #[arg(long, default_value_t = 30, value_name = "FILES")]
     pub max_changeset: usize,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct DiffArgs {
+    /// Base git ref, or "FROM..TO" combined form.
+    pub from: String,
+
+    /// Target git ref (defaults to the working tree).
+    pub to: Option<String>,
+
+    /// Exit non-zero when health regressed from FROM to TO.
+    #[arg(long)]
+    pub fail_on_regression: bool,
 
     #[command(flatten)]
     pub filter: FilterArgs,

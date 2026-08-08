@@ -115,6 +115,22 @@ impl OutputFormat for BadgeOutput {
                 }
                 .to_string(),
             },
+            Report::Diff(r) => ShieldsBadge {
+                schema_version: 1,
+                label: "health diff".to_string(),
+                message: format!(
+                    "{} ({:.1}) Δ {:+.1}",
+                    r.to_grade, r.to_score, r.health.score_delta
+                ),
+                color: if r.health.failed {
+                    "red"
+                } else if r.health.score_delta >= 0.0 {
+                    "brightgreen"
+                } else {
+                    "yellow"
+                }
+                .to_string(),
+            },
             Report::Trend(r) => {
                 let delta = r.delta.code.signed_delta();
                 ShieldsBadge {

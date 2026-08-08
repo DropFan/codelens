@@ -50,6 +50,7 @@ impl OutputFormat for SarifOutput {
             Report::Combined(combined) => health_results(&combined.health),
             Report::Hotspot(hotspot) => hotspot_results(hotspot),
             Report::Coupling(coupling) => coupling_results(coupling),
+            Report::Diff(diff) => regression_results(&diff.health),
             // Statistics/trend/estimation reports carry no findings.
             _ => Vec::new(),
         };
@@ -132,8 +133,18 @@ fn health_results(health: &crate::insight::health::HealthReport) -> Vec<Value> {
     }
 
     if let Some(regression) = &health.regression {
-        for file in &regression.regressed_files {
-            results.push(json!({
+        results.extend(regression_results(regression));
+    }
+
+    results
+}
+
+fn regression_results(regression: &crate::insight::health::RegressionReport) -> Vec<Value> {
+    regression
+        .regressed_files
+        .iter()
+        .map(|file| {
+            json!({
                 "ruleId": "codelens/health-regression",
                 "level": "error",
                 "message": { "text": format!(
@@ -143,11 +154,9 @@ fn health_results(health: &crate::insight::health::HealthReport) -> Vec<Value> {
                     file.to_grade, file.to_score
                 )},
                 "locations": [location(&file.path.display().to_string())],
-            }));
-        }
-    }
-
-    results
+            })
+        })
+        .collect()
 }
 
 fn hotspot_results(report: &crate::insight::hotspot::HotspotReport) -> Vec<Value> {
