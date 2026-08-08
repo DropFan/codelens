@@ -6,11 +6,11 @@
 # a virtual cargo workspace, which `cargo install --path .` rejects.
 #
 # Usage in a consuming repo's .pre-commit-config.yaml (rev must be a
-# tag that contains this manifest, i.e. newer than v0.1.5-rust):
+# tag that contains this manifest, v0.1.6-rust or newer):
 #
 #   repos:
 #     - repo: https://github.com/DropFan/codelens
-#       rev: v0.1.5-rust
+#       rev: v0.1.6-rust
 #       hooks:
 #         - id: codelens-health
 #           args: ['--fail-under', 'C']

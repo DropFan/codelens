@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-08
+
 ### Added
 - `codelens coupling` — change coupling analysis: file pairs that keep
   changing in the same commits (hidden dependencies), with
@@ -43,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git collection now parses per-commit records (author, timestamp,
   per-file changes) as the shared foundation for coupling, code age,
   and future author analyses; `FileChurn` gained `last_commit_ts`
+
+### Fixed
+- Non-ASCII filenames were C-quoted by git and silently dropped from
+  churn/hotspot/coupling/age (`core.quotepath` now disabled)
+- Rename tracking was time-blind: a new file created under a
+  renamed-away name had its history folded into the rename target
+- `health --baseline` compared mismatched scopes (and fabricated a
+  regression) when the analyzed path did not exist in the baseline;
+  now a hard error
+- `--by-dir` produced meaningless "/", "/Users" rows for absolute
+  path arguments; the tree now anchors at the files' common root
 
 ## [0.1.5] - 2026-08-08
 

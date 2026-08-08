@@ -179,12 +179,12 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
     fail-on-regression: 'true'
 ```
 
-**pre-commit** — gate commits locally with the bundled [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml). Install codelens first (the hooks run the binary on your PATH), and pin `rev` to a tag that contains the hook manifest (newer than v0.1.5-rust):
+**pre-commit** — gate commits locally with the bundled [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml). Install codelens first (the hooks run the binary on your PATH), and pin `rev` to v0.1.6-rust or newer (earlier tags do not ship the hook manifest):
 
 ```yaml
 repos:
   - repo: https://github.com/DropFan/codelens
-    rev: v0.1.5-rust  # use the first release that ships .pre-commit-hooks.yaml
+    rev: v0.1.6-rust
     hooks:
       - id: codelens-health
         args: ['--fail-under', 'C']
