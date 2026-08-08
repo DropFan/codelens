@@ -117,8 +117,34 @@ jobs:
         with:
           tag_name: v${{ needs.create-release.outputs.version }}-rust
           files: codelens-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
+          # Keep the release as a draft while assets are uploading. Without an
+          # explicit draft input, current action-gh-release@v2 finalizes
+          # (publishes) the release as soon as the first matrix job finishes
+          # uploading, exposing a half-assembled release. The publish-release
+          # job flips it to published once every build has completed.
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-release:
+    name: Publish Release
+    # Flip the draft release to published once all assets are attached, so the
+    # public download URLs (used by the homebrew job) stop returning 404.
+    # Intentionally no prerelease filter: alpha/beta/rc drafts must be
+    # published as well. If any build fails, this job is skipped and the
+    # release stays in draft.
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.create-release.outputs.version }}-rust
+        run: |
+          # gh release edit resolves a draft release by its pending tag name
+          # (REST lookup with a GraphQL fallback for drafts), so this works
+          # while the release is still a draft.
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
 
   publish-crates:
     name: Publish to crates.io
@@ -140,7 +166,7 @@ jobs:
 
   homebrew:
     name: Update Homebrew Formula
-    needs: [create-release, build]
+    needs: [create-release, build, publish-release]
     runs-on: ubuntu-latest
     if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
     steps:
