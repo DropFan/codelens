@@ -113,6 +113,7 @@ impl ConsoleOutput {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
+            Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
@@ -477,6 +478,87 @@ impl ConsoleOutput {
         }
 
         writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn write_coupling(
+        &self,
+        report: &crate::insight::coupling::CouplingReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer)?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer, "{}", " CODELENS - Change Coupling ".bold().cyan())?;
+        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
+        writeln!(writer)?;
+
+        writeln!(
+            writer,
+            "  Period: {}  Total Commits: {}",
+            report.since.bold(),
+            Self::format_number(report.total_commits).bold()
+        )?;
+        if let Some(focus) = &report.focus {
+            writeln!(writer, "  Focus: {}", focus.display().to_string().bold())?;
+        }
+        if report.skipped_large_commits > 0 {
+            writeln!(
+                writer,
+                "  {} bulk commit(s) excluded from pairing",
+                report.skipped_large_commits
+            )?;
+        }
+        writeln!(writer)?;
+
+        if report.pairs.is_empty() {
+            writeln!(writer, "  No coupled file pairs found.")?;
+            writeln!(
+                writer,
+                "  (thresholds: --min-shared / --min-coupling can be lowered)"
+            )?;
+            return Ok(());
+        }
+
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("File A").add_attribute(Attribute::Bold),
+            Cell::new("File B").add_attribute(Attribute::Bold),
+            Cell::new("Shared").add_attribute(Attribute::Bold),
+            Cell::new("Coupling").add_attribute(Attribute::Bold),
+        ]);
+
+        for pair in &report.pairs {
+            let color = if pair.degree >= 70.0 {
+                Color::Red
+            } else if pair.degree >= 50.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+            table.add_row(vec![
+                Cell::new(pair.file_a.display().to_string()).fg(Color::Cyan),
+                Cell::new(pair.file_b.display().to_string()).fg(Color::Cyan),
+                Cell::new(format!(
+                    "{} ({}/{})",
+                    pair.shared_commits, pair.commits_a, pair.commits_b
+                )),
+                Cell::new(format!("{:.0}%", pair.degree)).fg(color),
+            ]);
+        }
+
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "  {} Files changing together share a dependency the module\n  structure does not express — review the strongest pairs first.",
+            "hint:".dimmed()
+        )?;
         writeln!(writer)?;
 
         Ok(())

@@ -5,6 +5,7 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::config::SortBy;
 use crate::error::Result;
+use crate::insight::coupling::CouplingReport;
 use crate::insight::estimation::{EstimationComparison, EstimationReport};
 use crate::insight::health::HealthReport;
 use crate::insight::hotspot::HotspotReport;
@@ -16,6 +17,7 @@ pub enum Report {
     Analysis(AnalysisResult),
     Health(HealthReport),
     Hotspot(HotspotReport),
+    Coupling(CouplingReport),
     Trend(TrendReport),
     Estimation(EstimationReport),
     EstimationComparison(EstimationComparison),

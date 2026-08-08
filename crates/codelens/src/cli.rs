@@ -57,6 +57,15 @@ pub enum Command {
         the most likely sources of bugs. Requires a git repository."
     )]
     Hotspot(HotspotArgs),
+    /// Find files that keep changing together (change coupling).
+    #[command(
+        long_about = "Mine git history for file pairs that repeatedly change in the same \
+        commit. Strong coupling between files that the module structure does not connect \
+        reveals hidden dependencies and refactoring targets. Requires a git repository.\n\n\
+        Noise controls: --min-shared (minimum shared commits), --min-coupling (minimum \
+        coupling percentage), --max-changeset (bulk commits above this size are ignored)."
+    )]
+    Coupling(CouplingArgs),
     /// Track codebase trends with snapshots.
     #[command(
         long_about = "Save snapshots of codebase metrics and compare them over time. \
@@ -104,6 +113,39 @@ pub struct HotspotArgs {
     /// Time window (e.g. 30d, 4w, 6m, 1y, or YYYY-MM-DD).
     #[arg(long, default_value = "90d")]
     pub since: String,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct CouplingArgs {
+    /// Directories to analyze (defaults to current directory).
+    #[arg(default_value = ".")]
+    pub paths: Vec<PathBuf>,
+
+    /// Time window (e.g. 30d, 4w, 6m, 1y, or YYYY-MM-DD).
+    #[arg(long, default_value = "90d")]
+    pub since: String,
+
+    /// Only show files coupled to this file (repo-relative path).
+    #[arg(long = "for", value_name = "FILE")]
+    pub focus: Option<PathBuf>,
+
+    /// Minimum shared commits for a pair to be reported.
+    #[arg(long, default_value_t = 5)]
+    pub min_shared: usize,
+
+    /// Minimum coupling percentage for a pair to be reported.
+    #[arg(long, default_value_t = 30.0, value_name = "PERCENT")]
+    pub min_coupling: f64,
+
+    /// Ignore commits touching more files than this (bulk changes).
+    #[arg(long, default_value_t = 30, value_name = "FILES")]
+    pub max_changeset: usize,
 
     #[command(flatten)]
     pub filter: FilterArgs,

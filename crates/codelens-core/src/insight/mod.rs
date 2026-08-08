@@ -1,5 +1,6 @@
 //! Code insight analysis — health scoring, hotspot detection, trend tracking.
 
+pub mod coupling;
 pub mod estimation;
 pub mod health;
 pub mod hotspot;

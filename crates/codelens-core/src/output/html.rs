@@ -80,6 +80,27 @@ struct HotspotHtmlReport {
     files: Vec<HtmlFileHotspot>,
 }
 
+// ── Coupling ─────────────────────────────────────────────
+
+struct HtmlCouplingPair {
+    file_a: String,
+    file_b: String,
+    shared_commits: usize,
+    commits_a: usize,
+    commits_b: usize,
+    degree_display: String,
+    degree_pct: u32,
+}
+
+#[derive(Template)]
+#[template(path = "coupling.html")]
+struct CouplingHtmlReport {
+    generated_at: String,
+    since: String,
+    total_commits: usize,
+    pairs: Vec<HtmlCouplingPair>,
+}
+
 // ── Trend ────────────────────────────────────────────────
 
 struct HtmlTrendMetric {
@@ -214,6 +235,7 @@ impl OutputFormat for HtmlOutput {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, writer),
             Report::Hotspot(report) => self.write_hotspot(report, writer),
+            Report::Coupling(report) => self.write_coupling(report, writer),
             Report::Trend(report) => self.write_trend(report, writer),
             Report::Estimation(report) => self.write_estimation(report, writer),
             Report::EstimationComparison(report) => {
@@ -390,6 +412,33 @@ impl HtmlOutput {
                     score_display: format!("{:.2}", h.hotspot_score),
                     score_pct: (h.hotspot_score * 100.0) as u32,
                     risk: h.risk.to_string(),
+                })
+                .collect(),
+        };
+        write!(writer, "{}", html.render()?)?;
+        Ok(())
+    }
+
+    fn write_coupling(
+        &self,
+        report: &crate::insight::coupling::CouplingReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let html = CouplingHtmlReport {
+            generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            since: report.since.clone(),
+            total_commits: report.total_commits,
+            pairs: report
+                .pairs
+                .iter()
+                .map(|p| HtmlCouplingPair {
+                    file_a: p.file_a.display().to_string(),
+                    file_b: p.file_b.display().to_string(),
+                    shared_commits: p.shared_commits,
+                    commits_a: p.commits_a,
+                    commits_b: p.commits_b,
+                    degree_display: format!("{:.0}%", p.degree),
+                    degree_pct: (p.degree.min(100.0)) as u32,
                 })
                 .collect(),
         };

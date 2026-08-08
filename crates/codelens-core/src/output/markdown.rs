@@ -42,6 +42,7 @@ impl OutputFormat for MarkdownOutput {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
+            Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             // Concatenated sections are valid Markdown
             Report::Combined(combined) => {
@@ -260,6 +261,57 @@ impl MarkdownOutput {
                 age,
                 file.hotspot_score,
                 file.risk,
+            )?;
+        }
+        writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn write_coupling(
+        &self,
+        report: &crate::insight::coupling::CouplingReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(writer, "# Change Coupling")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "**Period:** {} | **Total Commits:** {}",
+            report.since, report.total_commits
+        )?;
+        if let Some(focus) = &report.focus {
+            writeln!(writer)?;
+            writeln!(writer, "**Focus:** {}", focus.display())?;
+        }
+        if report.skipped_large_commits > 0 {
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "_{} bulk commit(s) excluded from pairing._",
+                report.skipped_large_commits
+            )?;
+        }
+        writeln!(writer)?;
+
+        if report.pairs.is_empty() {
+            writeln!(writer, "No coupled file pairs found.")?;
+            return Ok(());
+        }
+
+        writeln!(writer, "| File A | File B | Shared | Coupling |")?;
+        writeln!(writer, "|--------|--------|--------|----------|")?;
+        for pair in &report.pairs {
+            writeln!(
+                writer,
+                "| {} | {} | {} ({}/{}) | {:.0}% |",
+                pair.file_a.display(),
+                pair.file_b.display(),
+                pair.shared_commits,
+                pair.commits_a,
+                pair.commits_b,
+                pair.degree,
             )?;
         }
         writeln!(writer)?;

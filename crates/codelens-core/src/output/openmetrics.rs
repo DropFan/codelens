@@ -53,6 +53,12 @@ impl OutputFormat for OpenMetricsOutput {
                 writeln!(writer, "# TYPE codelens_hotspot_commits gauge")?;
                 writeln!(writer, "codelens_hotspot_commits {}", report.total_commits)?;
             }
+            Report::Coupling(report) => {
+                writeln!(writer, "# TYPE codelens_coupling_pairs gauge")?;
+                writeln!(writer, "codelens_coupling_pairs {}", report.pairs.len())?;
+                writeln!(writer, "# TYPE codelens_coupling_commits gauge")?;
+                writeln!(writer, "codelens_coupling_commits {}", report.total_commits)?;
+            }
             Report::Trend(report) => {
                 writeln!(writer, "# TYPE codelens_trend_code_delta gauge")?;
                 writeln!(

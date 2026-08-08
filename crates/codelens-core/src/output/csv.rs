@@ -42,6 +42,7 @@ impl OutputFormat for CsvOutput {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
+            Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             // CSV can't hold three differently-shaped tables in one file;
             // emit the analysis table only (health/estimation are available
@@ -156,6 +157,31 @@ impl CsvOutput {
                 age,
                 file.hotspot_score,
                 file.risk,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_coupling(
+        &self,
+        report: &crate::insight::coupling::CouplingReport,
+        _options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        writeln!(
+            writer,
+            "FileA,FileB,SharedCommits,CommitsA,CommitsB,Coupling"
+        )?;
+        for pair in &report.pairs {
+            writeln!(
+                writer,
+                "{},{},{},{},{},{:.1}",
+                csv_field(&pair.file_a.display().to_string()),
+                csv_field(&pair.file_b.display().to_string()),
+                pair.shared_commits,
+                pair.commits_a,
+                pair.commits_b,
+                pair.degree,
             )?;
         }
         Ok(())

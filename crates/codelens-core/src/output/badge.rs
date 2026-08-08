@@ -104,6 +104,17 @@ impl OutputFormat for BadgeOutput {
                 }
                 .to_string(),
             },
+            Report::Coupling(r) => ShieldsBadge {
+                schema_version: 1,
+                label: "coupled pairs".to_string(),
+                message: r.pairs.len().to_string(),
+                color: if r.pairs.is_empty() {
+                    "brightgreen"
+                } else {
+                    "orange"
+                }
+                .to_string(),
+            },
             Report::Trend(r) => {
                 let delta = r.delta.code.signed_delta();
                 ShieldsBadge {

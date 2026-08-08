@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codelens - Change Coupling</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+            --text-primary: #f0f6fc; --text-secondary: #8b949e;
+            --accent-blue: #58a6ff; --accent-green: #3fb950; --accent-yellow: #d29922;
+            --accent-purple: #a371f7; --accent-red: #f85149;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
+        header h1 { font-size: 2.5rem; background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+        .stat-card { background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; text-align: center; border: 1px solid var(--bg-tertiary); }
+        .stat-card .value { font-size: 2rem; font-weight: bold; color: var(--accent-green); }
+        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; }
+        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
+        th { background: var(--bg-tertiary); font-weight: 600; color: var(--text-secondary); }
+        tr:hover { background: var(--bg-tertiary); }
+        .deg-high { color: var(--accent-red); font-weight: bold; }
+        .deg-med { color: var(--accent-yellow); font-weight: bold; }
+        .deg-low { color: var(--accent-green); }
+        .progress-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; min-width: 80px; }
+        .progress-bar .fill { height: 100%; border-radius: 4px; }
+        .hint { color: var(--text-secondary); margin-top: 1.5rem; font-size: 0.9rem; }
+        footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Change Coupling</h1>
+            <p style="color: var(--text-secondary)">Generated: {{ generated_at }}</p>
+        </header>
+
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="value">{{ since }}</div>
+                <div class="label">Time Window</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ total_commits }}</div>
+                <div class="label">Total Commits</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ pairs.len() }}</div>
+                <div class="label">Coupled Pairs</div>
+            </div>
+        </section>
+
+        {% if !pairs.is_empty() %}
+        <section>
+            <h2 style="margin-bottom: 1rem">Coupled File Pairs</h2>
+            <table>
+                <thead>
+                    <tr><th>File A</th><th>File B</th><th>Shared Commits</th><th>Coupling</th><th></th></tr>
+                </thead>
+                <tbody>
+                {% for p in pairs %}
+                <tr>
+                    <td><strong>{{ p.file_a }}</strong></td>
+                    <td><strong>{{ p.file_b }}</strong></td>
+                    <td>{{ p.shared_commits }} ({{ p.commits_a }}/{{ p.commits_b }})</td>
+                    <td class="{% if p.degree_pct >= 70 %}deg-high{% else if p.degree_pct >= 50 %}deg-med{% else %}deg-low{% endif %}">{{ p.degree_display }}</td>
+                    <td><div class="progress-bar"><div class="fill" style="width: {{ p.degree_pct }}%; background: {% if p.degree_pct >= 70 %}var(--accent-red){% else if p.degree_pct >= 50 %}var(--accent-yellow){% else %}var(--accent-green){% endif %}"></div></div></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <p class="hint">Files changing together share a dependency the module structure does not express — review the strongest pairs first.</p>
+        </section>
+        {% else %}
+        <section style="text-align: center; padding: 3rem; color: var(--text-secondary);">
+            <p>No coupled file pairs found in this time window.</p>
+        </section>
+        {% endif %}
+
+        <footer>
+            <p>Generated by <a href="https://github.com/DropFan/codelens" style="color: var(--accent-blue)"><strong>Codelens</strong></a> by <a href="https://github.com/DropFan" style="color: var(--accent-blue)">Tiger</a> | High-performance code analysis tool powered by Rust</p>
+        </footer>
+    </div>
+</body>
+</html>
