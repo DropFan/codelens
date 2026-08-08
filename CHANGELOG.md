@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `codelens diff <FROM> [<TO>]` (or `FROM..TO`) — compare two git refs
+  (TO defaults to the working tree) with health-score movement,
+  per-file grade regressions, and complexity deltas as the primary
+  output; `--fail-on-regression` gates CI
+- Duplication as the sixth health dimension: ULOC + DRYness% in the
+  stats summary, per-file duplicated-line counts, copy-paste directly
+  moves the health score (lines under 8 trimmed bytes never count,
+  keeping structural brace/import noise out of the signal)
+- Knowledge risk in hotspots: per-file author count and ownership
+  share; a MED/HIGH-risk file owned ≥75% by one author is flagged as a
+  knowledge island (frequently changed + complex + one person knows it)
+
+### Changed
+- Old trend snapshots lack duplication data and default to a perfect
+  duplication score; regenerate baselines for meaningful comparisons
+
 ## [0.1.6] - 2026-08-08
 
 ### Added

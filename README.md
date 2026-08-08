@@ -9,9 +9,9 @@ High performance code analysis tool written in Rust — stats, health scores, ho
 - **Smart Filtering**: Respects `.gitignore`, `.gitattributes` linguist attributes, auto-excludes build directories
 - **Multiple Outputs**: Console, JSON, CSV, Markdown, HTML with charts, OpenMetrics, badge JSON, SARIF
 - **Complexity Analysis**: Function count, cyclomatic + cognitive complexity, nesting depth
-- **Health Score**: Project/directory/file-level health grading (A-F) with pluggable scoring models
-- **CI Quality Gates**: `--fail-under` absolute gate and `--baseline` regression gate ("clean as you code"), plus an official GitHub Action and pre-commit hooks
-- **Hotspot Detection**: Risky files via churn × complexity, with code age and function-level breakdown
+- **Health Score**: Project/directory/file-level health grading (A-F) across six dimensions including line duplication (ULOC/DRYness), with pluggable scoring models
+- **CI Quality Gates**: `--fail-under` absolute gate, `--baseline` regression gate, and `codelens diff` for ref-to-ref health deltas ("clean as you code"), plus an official GitHub Action and pre-commit hooks
+- **Hotspot Detection**: Risky files via churn × complexity, with code age, author knowledge risk, and function-level breakdown
 - **Change Coupling**: Files that keep changing together — hidden dependencies the module structure doesn't show
 - **Trend Tracking**: Save snapshots, compare evolution, chart the full history
 - **Cost Estimation**: Multi-model development cost estimation (COCOMO Basic/II, Putnam, LOCOMO)
@@ -104,10 +104,28 @@ codelens hotspot . --since 6m --top 5  # Last 6 months, top 5
 codelens hotspot . --functions  # Which functions inside absorb the churn
 ```
 
-Each hotspot shows its **age** (days since first commit, rename-aware):
-an old file that is still a hotspot signals chronic instability.
-`--functions` intersects diff hunks with function spans to show which
-functions inside the top files actually change (approximate, no AST).
+Each hotspot shows its **age** (days since first commit, rename-aware)
+and its **author concentration**: a risky file owned ≥75% by a single
+author is flagged as a ★ knowledge island — frequently changed, complex,
+and effectively known by one person. `--functions` intersects diff hunks
+with function spans to show which functions inside the top files
+actually change (approximate, no AST).
+
+### Diff Two Refs
+
+Compare two git refs — or a ref against your working tree — with health
+movement as the headline (raw line counts are already covered by
+`git diff`):
+
+```bash
+codelens diff main                   # main vs working tree
+codelens diff main..HEAD             # two refs
+codelens diff v1.0 v2.0 --fail-on-regression   # CI gate
+```
+
+Output: project health before → after, the files whose grade dropped,
+and complexity deltas. This is the data source behind the PR story
+"this change takes health from B to C — blocked".
 
 ### Change Coupling
 
