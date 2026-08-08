@@ -250,6 +250,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 5,
                     cyclomatic: 40,
+                    cognitive: 0,
                     max_depth: 6,
                     avg_func_lines: 50.0,
                 },
@@ -267,6 +268,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 4,
                     cyclomatic: 10,
+                    cognitive: 0,
                     max_depth: 3,
                     avg_func_lines: 20.0,
                 },
@@ -284,6 +286,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 2,
                     cyclomatic: 4,
+                    cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 20.0,
                 },

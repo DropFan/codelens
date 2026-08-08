@@ -49,15 +49,22 @@ impl ComplexityAnalyzer {
         }
 
         // Count complexity keywords (single alternation regex, one pass)
-        if let Some(ref re) = patterns.keywords_re {
-            complexity.cyclomatic = re.find_iter(content).count();
-        }
+        let keyword_offsets: Vec<usize> = patterns
+            .keywords_re
+            .as_ref()
+            .map(|re| re.find_iter(content).map(|m| m.start()).collect())
+            .unwrap_or_default();
+        complexity.cyclomatic = keyword_offsets.len();
 
         // Base complexity is 1 per function
         complexity.cyclomatic += complexity.functions;
 
-        // Calculate max nesting depth
-        complexity.max_depth = self.calculate_max_depth(content, &lang.line_comments);
+        // One bracket scan yields both the max nesting depth and the
+        // nesting-weighted (cognitive) keyword cost.
+        let (max_depth, cognitive) =
+            self.scan_depth(content, &lang.line_comments, &keyword_offsets);
+        complexity.max_depth = max_depth;
+        complexity.cognitive = cognitive;
 
         // Calculate average lines per function
         if complexity.functions > 0 {
@@ -119,17 +126,37 @@ impl ComplexityAnalyzer {
             .collect()
     }
 
-    /// Calculate maximum nesting depth from bracket pairs, ignoring
-    /// brackets inside string literals, char literals, and line comments —
+    /// One pass over the content computing (max nesting depth, cognitive
+    /// complexity). Depth comes from bracket pairs, ignoring brackets
+    /// inside string literals, char literals, and line comments —
     /// otherwise text like ANSI codes (`\x1b[1;32m`) in string constants
     /// inflates the depth without bound.
-    fn calculate_max_depth(&self, content: &str, line_comments: &[String]) -> usize {
+    ///
+    /// Cognitive complexity: each control-flow keyword (already located
+    /// by the caller, offsets ascending) costs its bracket depth at that
+    /// point (min 1), so `if` nested three levels deep costs more than
+    /// `if` at the top of a function.
+    fn scan_depth(
+        &self,
+        content: &str,
+        line_comments: &[String],
+        keyword_offsets: &[usize],
+    ) -> (usize, usize) {
         let bytes = content.as_bytes();
         let mut max_depth: usize = 0;
         let mut current_depth: usize = 0;
+        let mut cognitive: usize = 0;
+        let mut next_kw = 0;
         let mut i = 0;
 
         while i < bytes.len() {
+            // Charge keywords we've reached (or jumped past when skipping
+            // strings/comments) at the current depth.
+            while next_kw < keyword_offsets.len() && keyword_offsets[next_kw] <= i {
+                cognitive += current_depth.max(1);
+                next_kw += 1;
+            }
+
             // Line comment: skip to end of line
             if line_comments
                 .iter()
@@ -174,8 +201,14 @@ impl ComplexityAnalyzer {
             }
             i += 1;
         }
+        // Keywords sitting past the final byte position (e.g. inside a
+        // trailing string) still need charging.
+        while next_kw < keyword_offsets.len() {
+            cognitive += current_depth.max(1);
+            next_kw += 1;
+        }
 
-        max_depth
+        (max_depth, cognitive)
     }
 }
 
@@ -316,6 +349,41 @@ fn main() {
             "brackets after lifetimes must still count, got {}",
             complexity.max_depth
         );
+    }
+
+    #[test]
+    fn test_cognitive_weights_nesting() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+
+        // Flat: two `if` at function-body depth.
+        let flat = "fn f() { if a() { b(); } if c() { d(); } }\n";
+        // Nested: the second `if` sits inside the first.
+        let nested = "fn f() { if a() { if c() { d(); } } }\n";
+
+        let flat_c = analyzer.analyze(flat, &lang);
+        let nested_c = analyzer.analyze(nested, &lang);
+        assert_eq!(
+            flat_c.cyclomatic, nested_c.cyclomatic,
+            "cyclomatic can't tell these apart"
+        );
+        assert!(
+            nested_c.cognitive > flat_c.cognitive,
+            "cognitive must punish nesting: flat {} vs nested {}",
+            flat_c.cognitive,
+            nested_c.cognitive
+        );
+    }
+
+    #[test]
+    fn test_cognitive_zero_for_documents() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = Language {
+            name: "Markdown".to_string(),
+            ..Default::default()
+        };
+        let c = analyzer.analyze("# if else while\n", &lang);
+        assert_eq!(c.cognitive, 0);
     }
 
     #[test]

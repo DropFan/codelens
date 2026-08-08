@@ -24,6 +24,7 @@ fn make_realistic_result() -> AnalysisResult {
             complexity: Complexity {
                 functions: 5,
                 cyclomatic: 12,
+                cognitive: 0,
                 max_depth: 3,
                 avg_func_lines: 18.0,
             },
@@ -41,6 +42,7 @@ fn make_realistic_result() -> AnalysisResult {
             complexity: Complexity {
                 functions: 8,
                 cyclomatic: 35,
+                cognitive: 0,
                 max_depth: 6,
                 avg_func_lines: 35.0,
             },
@@ -58,6 +60,7 @@ fn make_realistic_result() -> AnalysisResult {
             complexity: Complexity {
                 functions: 12,
                 cyclomatic: 60,
+                cognitive: 0,
                 max_depth: 8,
                 avg_func_lines: 42.0,
             },
@@ -75,6 +78,7 @@ fn make_realistic_result() -> AnalysisResult {
             complexity: Complexity {
                 functions: 6,
                 cyclomatic: 8,
+                cognitive: 0,
                 max_depth: 2,
                 avg_func_lines: 10.0,
             },
@@ -92,6 +96,7 @@ fn make_realistic_result() -> AnalysisResult {
             complexity: Complexity {
                 functions: 10,
                 cyclomatic: 15,
+                cognitive: 0,
                 max_depth: 3,
                 avg_func_lines: 15.0,
             },
@@ -172,6 +177,7 @@ fn test_trend_save_and_diff() {
         complexity: Complexity {
             functions: 8,
             cyclomatic: 16,
+            cognitive: 0,
             max_depth: 3,
             avg_func_lines: 20.0,
         },

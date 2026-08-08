@@ -191,6 +191,16 @@ impl ConsoleOutput {
             Cell::new("Functions"),
             Cell::new(Self::format_number(summary.complexity.functions)),
         ]);
+        if summary.complexity.cyclomatic > 0 {
+            table.add_row(vec![
+                Cell::new("Complexity (CC / Cognitive)"),
+                Cell::new(format!(
+                    "{} / {}",
+                    Self::format_number(summary.complexity.cyclomatic),
+                    Self::format_number(summary.complexity.cognitive)
+                )),
+            ]);
+        }
         if summary.test_files > 0 {
             let prod_code = summary.lines.code.saturating_sub(summary.test_lines.code);
             table.add_row(vec![

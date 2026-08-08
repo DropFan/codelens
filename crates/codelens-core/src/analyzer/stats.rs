@@ -75,6 +75,11 @@ pub struct Complexity {
     pub functions: usize,
     /// Total cyclomatic complexity.
     pub cyclomatic: usize,
+    /// Cognitive complexity: control-flow keywords weighted by nesting
+    /// depth, so deeply nested branching costs more than flat branching.
+    /// `serde(default)` keeps snapshots from older versions loadable.
+    #[serde(default)]
+    pub cognitive: usize,
     /// Maximum nesting depth.
     pub max_depth: usize,
     /// Average lines per function.
@@ -86,6 +91,7 @@ impl Complexity {
     pub fn add(&mut self, other: &Complexity) {
         self.functions += other.functions;
         self.cyclomatic += other.cyclomatic;
+        self.cognitive += other.cognitive;
         self.max_depth = self.max_depth.max(other.max_depth);
     }
 }
@@ -419,6 +425,7 @@ mod tests {
             complexity: Complexity {
                 functions: 1,
                 cyclomatic: 2,
+                cognitive: 0,
                 max_depth: 1,
                 avg_func_lines: 10.0,
             },
@@ -653,12 +660,14 @@ mod tests {
         let mut c1 = Complexity {
             functions: 10,
             cyclomatic: 20,
+            cognitive: 0,
             max_depth: 5,
             avg_func_lines: 0.0,
         };
         let c2 = Complexity {
             functions: 5,
             cyclomatic: 10,
+            cognitive: 0,
             max_depth: 8,
             avg_func_lines: 0.0,
         };
@@ -704,6 +713,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 5,
                     cyclomatic: 10,
+                    cognitive: 0,
                     max_depth: 3,
                     avg_func_lines: 16.0,
                 },
@@ -721,6 +731,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 3,
                     cyclomatic: 6,
+                    cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 13.3,
                 },
@@ -738,6 +749,7 @@ mod tests {
                 complexity: Complexity {
                     functions: 2,
                     cyclomatic: 4,
+                    cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 10.0,
                 },

@@ -530,6 +530,7 @@ mod tests {
                 complexity: crate::analyzer::stats::Complexity {
                     cyclomatic: complexity,
                     functions: 0,
+                    cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
@@ -557,6 +558,7 @@ mod tests {
                 complexity: crate::analyzer::stats::Complexity {
                     cyclomatic: 400,
                     functions: 0,
+                    cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
@@ -577,6 +579,7 @@ mod tests {
                 complexity: crate::analyzer::stats::Complexity {
                     cyclomatic: 100,
                     functions: 0,
+                    cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
