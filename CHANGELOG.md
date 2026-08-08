@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `codelens coupling` — change coupling analysis: file pairs that keep
+  changing in the same commits (hidden dependencies), with
+  `--min-shared` / `--min-coupling` / `--max-changeset` noise controls
+  and `--for FILE` blast-radius view
+- `codelens health --baseline <REF> --fail-on-regression` — regression
+  gate against a trend snapshot or any git ref (materialized via a
+  temporary worktree): only grade drops fail CI, never pre-existing
+  debt ("clean as you code")
+- `codelens mcp` — MCP server over stdio for AI coding agents
+  (repo_overview / code_health / hotspots / change_coupling /
+  file_metrics), behind the default-on `mcp` cargo feature
+- Official GitHub Action (`action.yml`): health gate + sticky PR
+  comment + step summary + badge JSON, plus `.pre-commit-hooks.yaml`
+- `hotspot --functions` — function-level hotspot breakdown (diff hunks
+  intersected with heuristic function spans, no AST)
+- Hotspot `Age` column: days since each file's first commit,
+  rename-aware full-history scan
+- `--by-dir` / `--dir-depth` — cumulative directory tree statistics
+- `--tokens` — estimated LLM token counts per language plus
+  context-window fit (byte-based estimate, always shown with ≈)
+- Test code separation: Test Files / Test Code Lines / Test-to-Code
+  ratio in the summary, detected by path conventions
+- Cognitive complexity metric (nesting-weighted control flow),
+  alongside cyclomatic in stats and per-file data
+- `-f sarif` — SARIF 2.1.0 output for GitHub code scanning / reviewdog
+- `.gitattributes` linguist support: `linguist-language` overrides,
+  `linguist-vendored`/`linguist-generated` exclusion (`--no-linguist`
+  opts out)
+- Trend HTML report now charts the full snapshot history (code lines +
+  complexity), and trend JSON carries the history series
+
+### Changed
+- Git collection now parses per-commit records (author, timestamp,
+  per-file changes) as the shared foundation for coupling, code age,
+  and future author analyses; `FileChurn` gained `last_commit_ts`
+
 ## [0.1.5] - 2026-08-08
 
 ### Added

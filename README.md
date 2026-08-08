@@ -1,18 +1,22 @@
 # Codelens
 
-High performance code analysis tool written in Rust — stats, health scores, hotspots, trends, and cost estimation.
+High performance code analysis tool written in Rust — stats, health scores, hotspots, change coupling, trends, cost estimation, and CI/AI quality gates.
 
 ## Features
 
 - **Fast**: Parallel file traversal, 30-50x faster than Python alternatives
 - **65+ Languages**: Built-in support for popular programming languages
-- **Smart Filtering**: Respects `.gitignore`, auto-excludes build directories
-- **Multiple Outputs**: Console, JSON, CSV, Markdown, HTML with charts
-- **Complexity Analysis**: Function count, cyclomatic complexity, nesting depth
+- **Smart Filtering**: Respects `.gitignore`, `.gitattributes` linguist attributes, auto-excludes build directories
+- **Multiple Outputs**: Console, JSON, CSV, Markdown, HTML with charts, OpenMetrics, badge JSON, SARIF
+- **Complexity Analysis**: Function count, cyclomatic + cognitive complexity, nesting depth
 - **Health Score**: Project/directory/file-level health grading (A-F) with pluggable scoring models
-- **Hotspot Detection**: Identify risky files via churn × complexity analysis
-- **Trend Tracking**: Save snapshots and compare codebase evolution over time
+- **CI Quality Gates**: `--fail-under` absolute gate and `--baseline` regression gate ("clean as you code"), plus an official GitHub Action and pre-commit hooks
+- **Hotspot Detection**: Risky files via churn × complexity, with code age and function-level breakdown
+- **Change Coupling**: Files that keep changing together — hidden dependencies the module structure doesn't show
+- **Trend Tracking**: Save snapshots, compare evolution, chart the full history
 - **Cost Estimation**: Multi-model development cost estimation (COCOMO Basic/II, Putnam, LOCOMO)
+- **LLM Token Estimation**: How many tokens a repo is, and whether it fits a model's context window
+- **AI Agent Integration**: Built-in MCP server (`codelens mcp`) for Claude Code, Cursor, and friends
 - **Extensible**: Add custom languages via TOML configuration
 
 ## Installation
@@ -74,11 +78,20 @@ codelens health .               # Project, directory, and file-level report
 codelens health . --top 20      # Show top 20 worst files
 codelens health . -f json       # Output as JSON
 codelens health . --fail-under B   # CI gate: exit 1 if health is below B
+codelens health . --baseline main --fail-on-regression   # regression gate
 ```
 
 `--fail-under` accepts a grade (`A`/`B`/`C`/`D`) or a numeric score
 (`75`), turning the health report into a CI quality gate — fail a PR
 when project health drops below your threshold.
+
+`--baseline` compares against a trend snapshot (`latest`, `latest~1`, a
+date) or any git ref (`main`, `HEAD~1`, a tag — analyzed via a temporary
+worktree). With `--fail-on-regression`, the gate fails only when the
+project letter grade drops or a file present in both trees drops a
+grade: legacy debt never blocks a PR, only the changes do ("clean as
+you code"). The delta ("B 87.9 → C 77.2") renders in console, markdown
+(great for PR comments), and JSON.
 
 ### Hotspot Detection
 
@@ -88,7 +101,27 @@ Find the riskiest files by combining git change frequency (churn) with code comp
 codelens hotspot .              # Last 90 days (default)
 codelens hotspot . --since 30d  # Last 30 days
 codelens hotspot . --since 6m --top 5  # Last 6 months, top 5
+codelens hotspot . --functions  # Which functions inside absorb the churn
 ```
+
+Each hotspot shows its **age** (days since first commit, rename-aware):
+an old file that is still a hotspot signals chronic instability.
+`--functions` intersects diff hunks with function spans to show which
+functions inside the top files actually change (approximate, no AST).
+
+### Change Coupling
+
+Find file pairs that keep changing in the same commits — hidden dependencies the module structure does not express, and prime refactoring targets.
+
+```bash
+codelens coupling .                   # Last 90 days, noise-filtered
+codelens coupling . --for src/api.rs  # What changes together with this file
+codelens coupling . --min-shared 3 --min-coupling 20  # Lower thresholds
+```
+
+Bulk commits (more than `--max-changeset` files, default 30) are
+excluded from pairing and reported, so formatting sweeps don't fake
+coupling.
 
 ### Trend Tracking
 
@@ -132,11 +165,46 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 | HTML | `-f html` | Interactive report with charts |
 | OpenMetrics | `-f openmetrics` | Prometheus text format for scraping |
 | Badge | `-f badge` | shields.io endpoint JSON (`codelens health -f badge` → live code-health badge) |
+| SARIF | `-f sarif` | SARIF 2.1.0 for GitHub code scanning (`upload-sarif`) or `reviewdog -f=sarif` |
+
+## CI Integration
+
+**GitHub Action** — health gate + sticky PR comment + step summary in one step (see [docs/github-action.md](docs/github-action.md)):
+
+```yaml
+- uses: DropFan/codelens@rust
+  with:
+    fail-under: 'C'
+    baseline: 'origin/${{ github.base_ref }}'
+    fail-on-regression: 'true'
+```
+
+**pre-commit** — gate commits locally with the bundled [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml):
+
+```yaml
+repos:
+  - repo: https://github.com/DropFan/codelens
+    rev: v0.1.5-rust
+    hooks:
+      - id: codelens-health
+        args: ['--fail-under', 'C']
+```
+
+## AI Agent Integration
+
+`codelens mcp` runs a built-in MCP server so coding agents can query repository stats, health, hotspots, and coupling before editing code (see [docs/ai-integration.md](docs/ai-integration.md)):
+
+```bash
+claude mcp add codelens -- codelens mcp
+```
+
+`codelens . --tokens` estimates the repository's LLM token count and whether it fits common context windows (byte-based estimate).
 
 ## Filtering & Detection
 
 ```bash
 codelens --by-file --top 20         # Per-file statistics (respects --sort/--top)
+codelens --by-dir --dir-depth 2     # Directory tree rollups (files/code/complexity)
 codelens --count-as jsp:html        # Count .jsp files as HTML
 codelens --no-duplicates            # Skip files with identical content
 codelens --no-min-gen               # Skip minified/generated files
@@ -145,6 +213,12 @@ codelens --no-min-gen               # Skip minified/generated files
 - Extensionless scripts are detected via shebang (`#!/usr/bin/env python`).
 - Drop a `.codelensignore` file (gitignore syntax) anywhere in the tree to
   exclude paths, like scc's `.sccignore` / tokei's `.tokeignore`.
+- `.gitattributes` linguist attributes are honored by default so numbers
+  match GitHub: `linguist-language=X` overrides detection,
+  `linguist-vendored` / `linguist-generated` exclude files
+  (`--no-linguist` opts out).
+- Files matching test conventions (`tests/`, `*_test.go`, `*.spec.ts`,
+  `FooTest.java`, ...) are reported separately with a test/code ratio.
 
 ## Configuration
 
