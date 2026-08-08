@@ -400,24 +400,28 @@ fn resolve_baseline(
     }
 
     let worktree = git_client.temp_worktree(reference)?;
-    // Analyze the same locations inside the baseline tree; paths that do
-    // not exist there (e.g. a directory added since) fall back to the root.
+    // Analyze the same locations inside the baseline tree. A path that
+    // does not exist there must be a hard error: falling back to the
+    // whole tree would compare mismatched scopes and fabricate a
+    // project-level "regression" with zero regressed files.
     let repo_root = std::fs::canonicalize(git_client.repo_path())
         .unwrap_or_else(|_| git_client.repo_path().to_path_buf());
-    let mapped: Vec<PathBuf> = paths
-        .iter()
-        .map(|p| {
-            std::fs::canonicalize(p)
+    let mut mapped: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    for p in paths {
+        let inside = std::fs::canonicalize(p).ok().and_then(|abs| {
+            abs.strip_prefix(&repo_root)
                 .ok()
-                .and_then(|abs| {
-                    abs.strip_prefix(&repo_root)
-                        .ok()
-                        .map(|rel| worktree.path().join(rel))
-                })
-                .filter(|mapped| mapped.exists())
-                .unwrap_or_else(|| worktree.path().to_path_buf())
-        })
-        .collect();
+                .map(|rel| worktree.path().join(rel))
+        });
+        match inside.filter(|m| m.exists()) {
+            Some(m) => mapped.push(m),
+            None => anyhow::bail!(
+                "path '{}' does not exist in baseline '{reference}'; \
+                 compare a path that exists in both trees, or drop --baseline",
+                p.display()
+            ),
+        }
+    }
     let mut result = analyze(&mapped, config).context("Baseline analysis failed")?;
     rewrite_paths_repo_relative(&mut result.files, worktree.path());
     Ok((result, format!("git:{reference}")))
