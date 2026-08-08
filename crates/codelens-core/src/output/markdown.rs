@@ -81,7 +81,35 @@ impl MarkdownOutput {
         writeln!(writer, "| Blank Lines | {} |", summary.lines.blank)?;
         writeln!(writer, "| Total Lines | {} |", summary.lines.total)?;
         writeln!(writer, "| Languages | {} |", summary.by_language.len())?;
+        if options.show_tokens {
+            writeln!(
+                writer,
+                "| LLM Tokens (est.) | {} |",
+                crate::analyzer::tokens::format_tokens(summary.tokens_est)
+            )?;
+        }
         writeln!(writer)?;
+
+        if options.show_tokens && summary.tokens_est > 0 {
+            for window in crate::analyzer::tokens::CONTEXT_WINDOWS {
+                let ratio = summary.tokens_est as f64 / window.tokens as f64;
+                if ratio <= 1.0 {
+                    writeln!(
+                        writer,
+                        "- {}: fits ({:.0}% used)",
+                        window.label,
+                        ratio * 100.0
+                    )?;
+                } else {
+                    writeln!(writer, "- {}: {:.1}x over", window.label, ratio)?;
+                }
+            }
+            writeln!(
+                writer,
+                "\n_Token counts are byte-based estimates, not tokenizer-exact._"
+            )?;
+            writeln!(writer)?;
+        }
 
         // Language breakdown
         if !options.summary_only && !summary.by_language.is_empty() {

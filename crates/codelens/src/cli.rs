@@ -387,6 +387,10 @@ pub struct OutputArgs {
     /// Directory tree depth for --by-dir [default: 3].
     #[arg(long, value_name = "N")]
     pub dir_depth: Option<usize>,
+
+    /// Show estimated LLM token counts and context-window fit.
+    #[arg(long)]
+    pub tokens: bool,
 }
 
 /// Advanced options.

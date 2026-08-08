@@ -533,6 +533,7 @@ mod tests {
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
+                tokens_est: 0,
             },
         );
         summary
@@ -559,6 +560,7 @@ mod tests {
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
+                tokens_est: 0,
             },
         );
         summary.by_language.insert(
@@ -578,6 +580,7 @@ mod tests {
                     max_depth: 0,
                     avg_func_lines: 0.0,
                 },
+                tokens_est: 0,
             },
         );
         summary

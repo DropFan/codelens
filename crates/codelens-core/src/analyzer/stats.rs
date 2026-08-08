@@ -129,6 +129,10 @@ pub struct LanguageSummary {
     pub size: u64,
     /// Complexity metrics.
     pub complexity: Complexity,
+    /// Estimated LLM tokens (rule-of-thumb, see `analyzer::tokens`).
+    /// `serde(default)` keeps snapshots from older versions loadable.
+    #[serde(default)]
+    pub tokens_est: u64,
 }
 
 /// Repository statistics.
@@ -193,6 +197,10 @@ pub struct Summary {
     pub size_distribution: SizeDistribution,
     /// Complexity metrics.
     pub complexity: Complexity,
+    /// Estimated LLM tokens for the whole tree (rule-of-thumb).
+    /// `serde(default)` keeps snapshots from older versions loadable.
+    #[serde(default)]
+    pub tokens_est: u64,
 }
 
 impl Summary {
@@ -208,11 +216,15 @@ impl Summary {
             summary.size_distribution.add(file.size);
             summary.complexity.add(&file.complexity);
 
+            let file_tokens = super::tokens::estimate_tokens(&file.language, file.size);
+            summary.tokens_est += file_tokens;
+
             let lang_summary = by_language.entry(file.language.clone()).or_default();
             lang_summary.files += 1;
             lang_summary.lines.add(&file.lines);
             lang_summary.size += file.size;
             lang_summary.complexity.add(&file.complexity);
+            lang_summary.tokens_est += file_tokens;
         }
 
         // Sort by code lines (descending)
@@ -462,6 +474,21 @@ mod tests {
     #[test]
     fn test_aggregate_by_dir_empty() {
         assert!(aggregate_by_dir(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn test_summary_estimates_tokens() {
+        let mut rust = file_at("src/a.rs", 100);
+        rust.size = 3300;
+        let mut md = file_at("README.md", 50);
+        md.language = "Markdown".to_string();
+        md.size = 4000;
+
+        let summary = Summary::from_file_stats(&[rust, md]);
+        // Rust: 3300 / 3.3 = 1000; Markdown: 4000 / 4.0 = 1000.
+        assert_eq!(summary.tokens_est, 2000);
+        assert_eq!(summary.by_language["Rust"].tokens_est, 1000);
+        assert_eq!(summary.by_language["Markdown"].tokens_est, 1000);
     }
 
     fn summary_with_langs() -> Summary {

@@ -79,6 +79,7 @@ fn run() -> Result<ExitCode> {
         by_file: config.output.by_file,
         by_dir: config.output.by_dir,
         dir_depth: config.output.dir_depth,
+        show_tokens: config.output.show_tokens,
         sort_by: config.output.sort_by,
         top_n: config.output.top_n,
         colorize: should_colorize(&config.output),
@@ -266,6 +267,9 @@ fn resolve_config(
     }
     if let Some(depth) = output.dir_depth {
         config.output.dir_depth = depth.max(1);
+    }
+    if output.tokens {
+        config.output.show_tokens = true;
     }
     if let Some(sort) = output.sort {
         config.output.sort_by = sort.into();
@@ -716,6 +720,7 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
         by_file: output.by_file,
         by_dir: output.by_dir,
         dir_depth: output.dir_depth,
+        show_tokens: output.show_tokens,
         sort_by: output.sort_by,
         top_n: output.top_n,
         colorize: should_colorize(output),

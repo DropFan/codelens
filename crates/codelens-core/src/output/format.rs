@@ -82,6 +82,8 @@ pub struct OutputOptions {
     pub by_dir: bool,
     /// Directory depth for --by-dir.
     pub dir_depth: usize,
+    /// Show estimated LLM token counts.
+    pub show_tokens: bool,
     /// Sort order.
     pub sort_by: SortBy,
     /// Limit to top N results.
@@ -99,6 +101,7 @@ impl Default for OutputOptions {
             by_file: false,
             by_dir: false,
             dir_depth: 3,
+            show_tokens: false,
             sort_by: SortBy::Lines,
             top_n: None,
             colorize: true,
@@ -128,6 +131,7 @@ mod tests {
             by_file: false,
             by_dir: false,
             dir_depth: 3,
+            show_tokens: false,
             sort_by: SortBy::Code,
             top_n: Some(10),
             colorize: false,

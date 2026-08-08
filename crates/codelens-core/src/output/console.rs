@@ -191,9 +191,37 @@ impl ConsoleOutput {
             Cell::new("Functions"),
             Cell::new(Self::format_number(summary.complexity.functions)),
         ]);
+        if options.show_tokens {
+            table.add_row(vec![
+                Cell::new("LLM Tokens (est.)"),
+                Cell::new(crate::analyzer::tokens::format_tokens(summary.tokens_est))
+                    .fg(Color::Magenta),
+            ]);
+        }
 
         writeln!(writer, "{table}")?;
         writeln!(writer)?;
+
+        // Context-window fit (--tokens)
+        if options.show_tokens && summary.tokens_est > 0 {
+            for window in crate::analyzer::tokens::CONTEXT_WINDOWS {
+                let ratio = summary.tokens_est as f64 / window.tokens as f64;
+                let verdict = if ratio <= 1.0 {
+                    format!("fits ({:.0}% used)", ratio * 100.0)
+                        .green()
+                        .to_string()
+                } else {
+                    format!("{ratio:.1}x over").yellow().to_string()
+                };
+                writeln!(writer, "  {}: {}", window.label.dimmed(), verdict)?;
+            }
+            writeln!(
+                writer,
+                "  {}",
+                "token counts are byte-based estimates, not tokenizer-exact".dimmed()
+            )?;
+            writeln!(writer)?;
+        }
 
         // Language breakdown
         if !options.summary_only && !summary.by_language.is_empty() {
@@ -205,14 +233,18 @@ impl ConsoleOutput {
                 .load_preset(UTF8_FULL)
                 .set_content_arrangement(ContentArrangement::Dynamic);
 
-            lang_table.set_header(vec![
+            let mut headers = vec![
                 Cell::new("Language").add_attribute(Attribute::Bold),
                 Cell::new("Files").add_attribute(Attribute::Bold),
                 Cell::new("Code").add_attribute(Attribute::Bold),
                 Cell::new("Comment").add_attribute(Attribute::Bold),
                 Cell::new("Blank").add_attribute(Attribute::Bold),
                 Cell::new("Total").add_attribute(Attribute::Bold),
-            ]);
+            ];
+            if options.show_tokens {
+                headers.push(Cell::new("Tokens").add_attribute(Attribute::Bold));
+            }
+            lang_table.set_header(headers);
 
             let mut langs: Vec<_> = summary.by_language.iter().collect();
 
@@ -222,14 +254,21 @@ impl ConsoleOutput {
             }
 
             for (name, stats) in langs {
-                lang_table.add_row(vec![
+                let mut row = vec![
                     Cell::new(name).fg(Color::Cyan),
                     Cell::new(Self::format_number(stats.files)),
                     Cell::new(Self::format_number(stats.lines.code)).fg(Color::Green),
                     Cell::new(Self::format_number(stats.lines.comment)).fg(Color::Yellow),
                     Cell::new(Self::format_number(stats.lines.blank)).fg(Color::DarkGrey),
                     Cell::new(Self::format_number(stats.lines.total)),
-                ]);
+                ];
+                if options.show_tokens {
+                    row.push(
+                        Cell::new(crate::analyzer::tokens::format_tokens(stats.tokens_est))
+                            .fg(Color::Magenta),
+                    );
+                }
+                lang_table.add_row(row);
             }
 
             writeln!(writer, "{lang_table}")?;
