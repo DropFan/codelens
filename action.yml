@@ -1,0 +1,188 @@
+name: 'Codelens Health Gate'
+description: >-
+  Code statistics, health score, and CI quality gate: fail a PR when code
+  health drops below a threshold or regresses against a baseline, with a
+  sticky PR comment and step-summary report.
+author: 'Tiger <DropFan@Gmail.com>'
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Paths to analyze (space-separated)'
+    required: false
+    default: '.'
+  version:
+    description: >-
+      codelens release tag to install (e.g. "v0.1.5-rust") or "latest".
+    required: false
+    default: 'latest'
+  fail-under:
+    description: 'Fail if project health is below this grade (A/B/C/D) or score (0-100)'
+    required: false
+    default: ''
+  baseline:
+    description: >-
+      Compare health against this git ref (e.g. "origin/main"). Use
+      actions/checkout with fetch-depth: 0 (or fetch the ref) so it exists.
+    required: false
+    default: ''
+  fail-on-regression:
+    description: 'Fail when health regressed against the baseline'
+    required: false
+    default: 'false'
+  summary:
+    description: 'Write the health report to the GitHub step summary'
+    required: false
+    default: 'true'
+  comment:
+    description: 'Post/update a sticky PR comment with the health report (pull_request events only)'
+    required: false
+    default: 'true'
+
+outputs:
+  score:
+    description: 'Project health score (0-100)'
+    value: ${{ steps.health.outputs.score }}
+  grade:
+    description: 'Project health grade (A-F)'
+    value: ${{ steps.health.outputs.grade }}
+  gate:
+    description: 'Gate result: "passed" or "failed"'
+    value: ${{ steps.health.outputs.gate }}
+
+# Inputs are passed to bash exclusively via env (never interpolated into
+# run: bodies) so attacker-controlled values cannot inject shell commands.
+runs:
+  using: 'composite'
+  steps:
+    - name: Install codelens
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        REPO="DropFan/codelens"
+        TAG="$INPUT_VERSION"
+        if ! printf '%s' "$TAG" | grep -Eq '^[A-Za-z0-9._+-]+$'; then
+          echo "::error::invalid version input"; exit 1
+        fi
+        if [ "$TAG" = "latest" ]; then
+          TAG=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/releases/latest" \
+            | grep -m1 '"tag_name"' | cut -d '"' -f 4)
+        fi
+        VER="${TAG#v}"; VER="${VER%-rust}"
+        case "$(uname -s)-$(uname -m)" in
+          Linux-x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+          Linux-aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
+          Darwin-x86_64) TARGET="x86_64-apple-darwin" ;;
+          Darwin-arm64)  TARGET="aarch64-apple-darwin" ;;
+          *) echo "::error::unsupported runner platform: $(uname -s)-$(uname -m)"; exit 1 ;;
+        esac
+        BIN_DIR="$RUNNER_TEMP/codelens-bin"
+        mkdir -p "$BIN_DIR"
+        URL="https://github.com/$REPO/releases/download/$TAG/codelens-$VER-$TARGET.tar.gz"
+        echo "Downloading $URL"
+        if curl -fsSL "$URL" | tar xz -C "$BIN_DIR"; then
+          echo "Installed codelens $VER from release binaries"
+        else
+          echo "::warning::prebuilt binary not available for $TAG/$TARGET, falling back to cargo install (slow)"
+          cargo install codelens --version "$VER" --root "$RUNNER_TEMP/codelens-cargo"
+          cp "$RUNNER_TEMP/codelens-cargo/bin/codelens" "$BIN_DIR/"
+        fi
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+    - name: Fetch baseline ref
+      if: inputs.baseline != ''
+      shell: bash
+      env:
+        INPUT_BASELINE: ${{ inputs.baseline }}
+      run: |
+        # Best-effort: make the baseline resolvable on shallow checkouts.
+        git rev-parse --verify --quiet "$INPUT_BASELINE^{commit}" >/dev/null \
+          || git fetch --no-tags origin -- "${INPUT_BASELINE#origin/}" || true
+
+    - name: Run codelens health
+      id: health
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_UNDER: ${{ inputs.fail-under }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+      run: |
+        set -uo pipefail
+        GATE_ARGS=()
+        [ -n "$INPUT_FAIL_UNDER" ] && GATE_ARGS+=(--fail-under "$INPUT_FAIL_UNDER")
+        if [ -n "$INPUT_BASELINE" ]; then
+          GATE_ARGS+=(--baseline "$INPUT_BASELINE")
+          [ "$INPUT_FAIL_ON_REGRESSION" = "true" ] && GATE_ARGS+=(--fail-on-regression)
+        fi
+        # Multiple paths arrive space-separated; split through a variable,
+        # never by interpolating the input into the command line.
+        read -r -a PATHS <<<"$INPUT_PATH"
+
+        codelens health "${PATHS[@]}" ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} -f markdown -O codelens-health.md
+        GATE_CODE=$?
+        codelens health "${PATHS[@]}" -f json -O codelens-health.json || true
+        codelens health "${PATHS[@]}" -f badge -O codelens-badge.json || true
+
+        SCORE=$(jq -r '.score // empty' codelens-health.json 2>/dev/null || true)
+        GRADE=$(jq -r '.grade // empty' codelens-health.json 2>/dev/null || true)
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
+        if [ "$GATE_CODE" -eq 0 ]; then
+          echo "gate=passed" >> "$GITHUB_OUTPUT"
+        else
+          echo "gate=failed" >> "$GITHUB_OUTPUT"
+        fi
+
+        if [ "$INPUT_SUMMARY" = "true" ]; then
+          cat codelens-health.md >> "$GITHUB_STEP_SUMMARY"
+        fi
+        # Defer the gate verdict until after the PR comment step.
+        echo "GATE_CODE=$GATE_CODE" >> "$GITHUB_ENV"
+
+    - name: Post sticky PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- codelens-health-report -->';
+          const report = fs.readFileSync('codelens-health.md', 'utf8');
+          const body = `${marker}\n${report}`;
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            per_page: 100,
+          });
+          const existing = comments.find(c => c.body && c.body.startsWith(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
+
+    - name: Enforce gate
+      shell: bash
+      run: |
+        if [ "${GATE_CODE:-0}" -ne 0 ]; then
+          echo "::error::codelens health gate failed (see step summary / PR comment)"
+          exit "$GATE_CODE"
+        fi
