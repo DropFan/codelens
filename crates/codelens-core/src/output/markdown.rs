@@ -116,6 +116,34 @@ impl MarkdownOutput {
             writeln!(writer)?;
         }
 
+        // Per-directory breakdown (--by-dir)
+        if options.by_dir && !result.files.is_empty() {
+            writeln!(writer, "## By Directory")?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "| Directory | Files | Code | Comment | Blank | Total | CC |"
+            )?;
+            writeln!(
+                writer,
+                "|-----------|-------|------|---------|-------|-------|-----|"
+            )?;
+            for d in crate::analyzer::stats::aggregate_by_dir(&result.files, options.dir_depth) {
+                writeln!(
+                    writer,
+                    "| {} | {} | {} | {} | {} | {} | {} |",
+                    d.path.display(),
+                    d.files,
+                    d.lines.code,
+                    d.lines.comment,
+                    d.lines.blank,
+                    d.lines.total,
+                    d.cyclomatic,
+                )?;
+            }
+            writeln!(writer)?;
+        }
+
         // Per-file breakdown (--by-file)
         if options.by_file && !result.files.is_empty() {
             writeln!(writer, "## By File")?;

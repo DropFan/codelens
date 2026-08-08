@@ -78,6 +78,10 @@ pub struct OutputOptions {
     pub summary_only: bool,
     /// Show per-file statistics.
     pub by_file: bool,
+    /// Show per-directory statistics (tree view).
+    pub by_dir: bool,
+    /// Directory depth for --by-dir.
+    pub dir_depth: usize,
     /// Sort order.
     pub sort_by: SortBy,
     /// Limit to top N results.
@@ -93,6 +97,8 @@ impl Default for OutputOptions {
         Self {
             summary_only: false,
             by_file: false,
+            by_dir: false,
+            dir_depth: 3,
             sort_by: SortBy::Lines,
             top_n: None,
             colorize: true,
@@ -120,6 +126,8 @@ mod tests {
         let options = OutputOptions {
             summary_only: true,
             by_file: false,
+            by_dir: false,
+            dir_depth: 3,
             sort_by: SortBy::Code,
             top_n: Some(10),
             colorize: false,

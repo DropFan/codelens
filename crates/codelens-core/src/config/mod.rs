@@ -72,6 +72,10 @@ pub struct OutputConfig {
     pub summary_only: bool,
     /// Show per-file statistics.
     pub by_file: bool,
+    /// Show per-directory statistics (tree view).
+    pub by_dir: bool,
+    /// Directory depth for --by-dir.
+    pub dir_depth: usize,
     /// Sort order.
     pub sort_by: SortBy,
     /// Limit results to top N.
@@ -91,6 +95,8 @@ impl Default for OutputConfig {
             file: None,
             summary_only: false,
             by_file: false,
+            by_dir: false,
+            dir_depth: 3,
             sort_by: SortBy::Lines,
             top_n: None,
             verbose: false,

@@ -236,6 +236,48 @@ impl ConsoleOutput {
             writeln!(writer)?;
         }
 
+        // Per-directory breakdown (--by-dir)
+        if options.by_dir && !result.files.is_empty() {
+            writeln!(writer, "{}", "By Directory".bold())?;
+            writeln!(writer)?;
+
+            let mut dir_table = Table::new();
+            dir_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            dir_table.set_header(vec![
+                Cell::new("Directory").add_attribute(Attribute::Bold),
+                Cell::new("Files").add_attribute(Attribute::Bold),
+                Cell::new("Code").add_attribute(Attribute::Bold),
+                Cell::new("Comment").add_attribute(Attribute::Bold),
+                Cell::new("Blank").add_attribute(Attribute::Bold),
+                Cell::new("Total").add_attribute(Attribute::Bold),
+                Cell::new("CC").add_attribute(Attribute::Bold),
+            ]);
+
+            let dirs = crate::analyzer::stats::aggregate_by_dir(&result.files, options.dir_depth);
+            for d in &dirs {
+                let name = d
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| d.path.display().to_string());
+                let label = format!("{}{}/", "  ".repeat(d.depth - 1), name);
+                dir_table.add_row(vec![
+                    Cell::new(label).fg(Color::Cyan),
+                    Cell::new(Self::format_number(d.files)),
+                    Cell::new(Self::format_number(d.lines.code)).fg(Color::Green),
+                    Cell::new(Self::format_number(d.lines.comment)).fg(Color::Yellow),
+                    Cell::new(Self::format_number(d.lines.blank)).fg(Color::DarkGrey),
+                    Cell::new(Self::format_number(d.lines.total)),
+                    Cell::new(Self::format_number(d.cyclomatic)),
+                ]);
+            }
+
+            writeln!(writer, "{dir_table}")?;
+            writeln!(writer)?;
+        }
+
         // Per-file breakdown (--by-file)
         if options.by_file && !result.files.is_empty() {
             writeln!(writer, "{}", "By File".bold())?;

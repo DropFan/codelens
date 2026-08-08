@@ -77,6 +77,8 @@ fn run() -> Result<ExitCode> {
     let output_options = OutputOptions {
         summary_only: config.output.summary_only,
         by_file: config.output.by_file,
+        by_dir: config.output.by_dir,
+        dir_depth: config.output.dir_depth,
         sort_by: config.output.sort_by,
         top_n: config.output.top_n,
         colorize: should_colorize(&config.output),
@@ -258,6 +260,12 @@ fn resolve_config(
     }
     if output.by_file {
         config.output.by_file = true;
+    }
+    if output.by_dir {
+        config.output.by_dir = true;
+    }
+    if let Some(depth) = output.dir_depth {
+        config.output.dir_depth = depth.max(1);
     }
     if let Some(sort) = output.sort {
         config.output.sort_by = sort.into();
@@ -623,6 +631,8 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
     let output_options = OutputOptions {
         summary_only: output.summary_only,
         by_file: output.by_file,
+        by_dir: output.by_dir,
+        dir_depth: output.dir_depth,
         sort_by: output.sort_by,
         top_n: output.top_n,
         colorize: should_colorize(output),

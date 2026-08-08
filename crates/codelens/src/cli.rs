@@ -368,6 +368,14 @@ pub struct OutputArgs {
     /// Show per-file statistics (respects --sort and --top).
     #[arg(long)]
     pub by_file: bool,
+
+    /// Show per-directory statistics as a tree (cumulative totals).
+    #[arg(long)]
+    pub by_dir: bool,
+
+    /// Directory tree depth for --by-dir [default: 3].
+    #[arg(long, value_name = "N")]
+    pub dir_depth: Option<usize>,
 }
 
 /// Advanced options.

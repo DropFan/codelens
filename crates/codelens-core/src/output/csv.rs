@@ -73,6 +73,30 @@ impl CsvOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        // --by-dir replaces the per-language table with directory rollups
+        if options.by_dir {
+            writeln!(
+                writer,
+                "Directory,Depth,Files,Code,Comment,Blank,Total,Size,CC"
+            )?;
+            for d in crate::analyzer::stats::aggregate_by_dir(&result.files, options.dir_depth) {
+                writeln!(
+                    writer,
+                    "{},{},{},{},{},{},{},{},{}",
+                    csv_field(&d.path.display().to_string()),
+                    d.depth,
+                    d.files,
+                    d.lines.code,
+                    d.lines.comment,
+                    d.lines.blank,
+                    d.lines.total,
+                    d.size,
+                    d.cyclomatic,
+                )?;
+            }
+            return Ok(());
+        }
+
         // --by-file replaces the per-language table (matching scc/cloc)
         if options.by_file {
             writeln!(writer, "File,Language,Code,Comment,Blank,Total,Size")?;
