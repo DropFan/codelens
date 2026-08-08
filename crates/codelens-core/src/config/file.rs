@@ -29,6 +29,8 @@ pub struct PartialConfig {
     pub lang: Option<String>,
     /// Extension → language mappings, e.g. "jsp:html,tpl:php".
     pub count_as: Option<String>,
+    /// Custom language definitions file.
+    pub languages_file: Option<String>,
     /// Minimum lines.
     pub min_lines: Option<usize>,
     /// Maximum lines.
@@ -97,6 +99,9 @@ impl PartialConfig {
         }
         if let Some(ref v) = self.count_as {
             config.count_as = parse_count_as_list(v);
+        }
+        if let Some(ref v) = self.languages_file {
+            config.languages_file = Some(v.into());
         }
         if let Some(min_lines) = self.min_lines {
             config.filter.min_lines = Some(min_lines);
@@ -204,6 +209,7 @@ mod tests {
             threads = 4
             depth = 5
             git_info = true
+            languages_file = "my-langs.toml"
         "#
         )
         .unwrap();
@@ -218,6 +224,10 @@ mod tests {
         assert_eq!(config.walker.threads, 4);
         assert_eq!(config.walker.max_depth, Some(5));
         assert!(config.output.show_git_info);
+        assert_eq!(
+            config.languages_file,
+            Some(std::path::PathBuf::from("my-langs.toml"))
+        );
     }
 
     #[test]

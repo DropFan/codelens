@@ -80,7 +80,15 @@ impl LanguageRegistry {
             path: path.to_path_buf(),
             source: e,
         })?;
-        self.load_toml(&content)
+        // Attach the path to parse errors — a bare "failed to parse
+        // language definitions" is undiagnosable for user-supplied files.
+        self.load_toml(&content).map_err(|e| match e {
+            crate::error::Error::LanguageParse(source) => crate::error::Error::LanguageFileParse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            },
+            other => other,
+        })
     }
 
     /// Map an extra file extension onto an already-registered language

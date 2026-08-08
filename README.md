@@ -270,21 +270,37 @@ depth = 10
 git_info = true
 ```
 
-## Custom Languages (Planned)
+## Custom Languages
 
-> **Note**: This feature is planned but not yet implemented.
-
-Custom language definitions will be supported in `~/.config/codelens/languages.toml`:
+Teach codelens new languages with `--languages-file`: a TOML file with one
+table per language id, merged on top of the built-in definitions. Every
+field except `name` is optional; the built-in
+[languages.toml](crates/codelens-core/languages.toml) shows all fields in
+use, including `string_delimiters` for accurate string/comment parsing.
 
 ```toml
+# my-langs.toml
 [mylang]
 name = "MyLang"
-extensions = [".ml", ".mli"]
+extensions = [".myl"]
+filenames = ["Mylfile"]           # exact filename matches (like Makefile)
 line_comments = ["#"]
-block_comments = [["/*", "*/"]]
-function_pattern = "^\\s*def\\s+\\w+"
-complexity_keywords = ["if", "for", "while"]
+block_comments = [["/*", "*/"]]   # [open, close] pairs
+nested_comments = false           # true if /* /* */ */ nests
+function_pattern = "(?m)^\\s*def\\s+\\w+"
+complexity_keywords = ["if", "elif", "else", "for", "while"]
 ```
+
+```bash
+codelens --languages-file my-langs.toml                    # analyze with the extra definitions
+codelens --languages-file my-langs.toml --list-languages   # verify: MyLang appears in the list
+codelens health . --languages-file my-langs.toml           # works on subcommands too
+```
+
+`--count-as` can map further extensions onto a custom language
+(`--count-as myx:mylang`). Analysis commands also pick the path up from
+`.codelens.toml` (`languages_file = "my-langs.toml"`); `--list-languages`
+only honors the explicit flag.
 
 ## License
 

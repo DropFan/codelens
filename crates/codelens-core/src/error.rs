@@ -81,6 +81,15 @@ pub enum Error {
     /// Language definition file parse error.
     #[error("failed to parse language definitions")]
     LanguageParse(#[from] toml::de::Error),
+
+    /// Language definition file parse error with the offending path.
+    /// Boxed source: keeps the enum below clippy's result_large_err limit.
+    #[error("failed to parse language definitions file: {path}")]
+    LanguageFileParse {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::de::Error>,
+    },
 }
 
 /// Result type alias for codelens-core operations.

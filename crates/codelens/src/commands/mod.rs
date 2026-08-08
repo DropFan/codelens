@@ -100,8 +100,11 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn list_languages() -> Result<()> {
-    let registry = LanguageRegistry::with_builtin()?;
+pub(crate) fn list_languages(languages_file: Option<&Path>) -> Result<()> {
+    let mut registry = LanguageRegistry::with_builtin()?;
+    if let Some(path) = languages_file {
+        registry.load_file(path)?;
+    }
 
     println!("{}", "Supported Languages".bold());
     println!("{}", "─".repeat(40));
@@ -164,6 +167,9 @@ fn resolve_config(
     }
     if advanced.no_dup_scan {
         config.no_dup_scan = true;
+    }
+    if let Some(ref path) = advanced.languages_file {
+        config.languages_file = Some(path.clone());
     }
     if filter.no_gitignore {
         config.walker.use_gitignore = false;
@@ -488,6 +494,40 @@ mod tests {
         let cli = parse(&["codelens"]);
         let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
         assert!(!config.no_dup_scan);
+    }
+
+    #[test]
+    fn languages_file_reaches_config_from_subcommands() {
+        // Global flag: must parse after a subcommand and land in Config.
+        let cli = parse(&["codelens", "health", ".", "--languages-file", "custom.toml"]);
+        let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected health subcommand");
+        };
+        let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
+        assert_eq!(config.languages_file, Some(PathBuf::from("custom.toml")));
+
+        // Default stays off.
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
+        assert!(config.languages_file.is_none());
+    }
+
+    #[test]
+    fn languages_file_cli_overrides_config_file() {
+        let p = partial(r#"languages_file = "from-config.toml""#);
+
+        // Config file value survives when the CLI flag is absent.
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+        assert_eq!(
+            config.languages_file,
+            Some(PathBuf::from("from-config.toml"))
+        );
+
+        // An explicit CLI flag wins.
+        let cli = parse(&["codelens", "--languages-file", "from-cli.toml"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&p));
+        assert_eq!(config.languages_file, Some(PathBuf::from("from-cli.toml")));
     }
 
     #[test]

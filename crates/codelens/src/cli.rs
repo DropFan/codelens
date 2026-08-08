@@ -466,6 +466,11 @@ pub struct AdvancedArgs {
     #[arg(long, global = true)]
     pub no_config: bool,
 
+    /// Load custom language definitions from a TOML file, merged on top
+    /// of the built-in languages (verify with --list-languages).
+    #[arg(long, global = true, value_name = "PATH")]
+    pub languages_file: Option<PathBuf>,
+
     /// Show git repository information.
     #[arg(long, global = true)]
     pub git_info: bool,

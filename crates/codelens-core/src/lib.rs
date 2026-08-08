@@ -67,6 +67,11 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
 
     // Initialize components
     let mut registry = LanguageRegistry::with_builtin()?;
+    // Custom definitions load before --count-as so the extension
+    // mappings can reference custom language names.
+    if let Some(ref path) = config.languages_file {
+        registry.load_file(path)?;
+    }
     for (ext, lang) in &config.count_as {
         registry.map_extension(ext, lang)?;
     }
@@ -341,6 +346,77 @@ fn main() {
         assert!(result.summary.dup_scanned);
         assert!(result.summary.uloc > 0);
         assert!(result.summary.duplicate_lines > 0);
+    }
+
+    #[test]
+    fn test_analyze_with_custom_languages_file() {
+        // The definitions file lives OUTSIDE the analyzed tree: .toml is a
+        // built-in language and would pollute total_files otherwise.
+        let lang_dir = TempDir::new().unwrap();
+        let langs_path = lang_dir.path().join("custom.toml");
+        fs::write(
+            &langs_path,
+            r##"
+            [mylang]
+            name = "MyLang"
+            extensions = [".myl"]
+            line_comments = ["#"]
+            "##,
+        )
+        .unwrap();
+
+        let dir = TempDir::new().unwrap();
+        create_test_file(dir.path(), "hello.myl", "# a comment\ncode line\n");
+        // --count-as must be able to reference the custom language name,
+        // which requires the definitions to load before the mappings.
+        create_test_file(dir.path(), "extra.myx", "more code\n");
+
+        let config = Config {
+            languages_file: Some(langs_path),
+            count_as: vec![("myx".to_string(), "MyLang".to_string())],
+            ..Config::default()
+        };
+        let result = analyze(&[dir.path()], &config).unwrap();
+
+        assert_eq!(result.summary.total_files, 2);
+        let mylang = &result.summary.by_language["MyLang"];
+        assert_eq!(mylang.files, 2);
+        assert_eq!(mylang.lines.comment, 1);
+        assert_eq!(mylang.lines.code, 2);
+    }
+
+    #[test]
+    fn test_analyze_missing_languages_file_is_hard_error() {
+        let dir = TempDir::new().unwrap();
+        let config = Config {
+            languages_file: Some(PathBuf::from("/nonexistent/langs.toml")),
+            ..Config::default()
+        };
+
+        let err = analyze(&[dir.path()], &config).unwrap_err();
+        assert!(
+            err.to_string().contains("/nonexistent/langs.toml"),
+            "error must name the offending path: {err}"
+        );
+    }
+
+    #[test]
+    fn test_analyze_invalid_languages_file_error_names_path() {
+        let lang_dir = TempDir::new().unwrap();
+        let langs_path = lang_dir.path().join("broken.toml");
+        fs::write(&langs_path, "not = [ valid toml").unwrap();
+
+        let dir = TempDir::new().unwrap();
+        let config = Config {
+            languages_file: Some(langs_path.clone()),
+            ..Config::default()
+        };
+
+        let err = analyze(&[dir.path()], &config).unwrap_err();
+        assert!(
+            err.to_string().contains(&langs_path.display().to_string()),
+            "error must name the offending path: {err}"
+        );
     }
 
     #[test]

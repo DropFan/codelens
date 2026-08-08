@@ -17,6 +17,9 @@ pub struct Config {
     pub output: OutputConfig,
     /// Extra extension → language mappings (`--count-as jsp:html`).
     pub count_as: Vec<(String, String)>,
+    /// Custom language definitions TOML loaded on top of the built-in
+    /// languages (`--languages-file`).
+    pub languages_file: Option<std::path::PathBuf>,
     /// Skip line-level duplication collection (ULOC / duplicate_lines).
     /// The collector keeps every line hash in memory until the walk
     /// finishes, which can cost hundreds of MB on very large codebases;

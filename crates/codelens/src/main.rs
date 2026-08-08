@@ -32,7 +32,8 @@ fn run() -> Result<ExitCode> {
 
     // Handle special commands
     if cli.advanced.list_languages {
-        return commands::list_languages().map(|()| ExitCode::SUCCESS);
+        return commands::list_languages(cli.advanced.languages_file.as_deref())
+            .map(|()| ExitCode::SUCCESS);
     }
 
     // Handle subcommands (they share config loading with the main command)
