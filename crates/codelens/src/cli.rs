@@ -44,8 +44,8 @@ pub struct Cli {
 pub enum Command {
     /// Analyze code health score.
     #[command(
-        long_about = "Score code health across five dimensions: complexity, function size, \
-        comment ratio, file size, and nesting depth. Reports at project, directory, and file \
+        long_about = "Score code health across six dimensions: complexity, function size, \
+        comment ratio, file size, nesting depth, and line duplication. Reports at project, directory, and file \
         levels with grades from A (best) to F (worst). Use --top to control how many items \
         are shown per level."
     )]

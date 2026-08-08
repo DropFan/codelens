@@ -257,8 +257,10 @@ impl CsvOutput {
         for f in &report.health.regressed_files {
             writeln!(
                 writer,
-                "Regressed:{},{:.1},{:.1},{:.1}",
-                csv_field(&f.path.display().to_string()),
+                "{},{:.1},{:.1},{:.1}",
+                // Quote prefix+path as ONE field: a comma in the path must
+                // not split the row.
+                csv_field(&format!("Regressed:{}", f.path.display())),
                 f.from_score,
                 f.to_score,
                 f.to_score - f.from_score,

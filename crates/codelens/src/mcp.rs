@@ -104,7 +104,7 @@ impl CodelensServer {
     }
 
     #[tool(
-        description = "Change hotspots: files that are both complex and frequently changed (the likeliest bug sources), with code age. Requires a git repository. Use to gauge risk before touching a file."
+        description = "Change hotspots: files that are both complex and frequently changed (the likeliest bug sources), with code age and author concentration (knowledge islands: risky files effectively one person knows). Requires a git repository. Use to gauge risk before touching a file."
     )]
     async fn hotspots(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
         run_blocking(move || {
@@ -112,11 +112,17 @@ impl CodelensServer {
             let since_arg = args.since.unwrap_or_else(|| "90d".to_string());
             let since = codelens_core::git::parse_since(&since_arg);
             let git_client = GitClient::detect(&path)?;
-            let result = analyze(&[path], &default_config())?;
-            let churns = git_client.file_churn(&since)?;
+            let mut result = analyze(&[path], &default_config())?;
+            // Git paths are repo-root-relative; align the analysis side so
+            // churn/knowledge joins work when `path` is a subdirectory.
+            crate::rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+            let commits = git_client.commit_log(&since)?;
+            let churns = codelens_core::git::churn_from_commits(&commits);
+            let authors = codelens_core::git::aggregate_authors(&commits);
             let total = git_client.commit_count(&since)?;
             let mut report =
                 hotspot::analyze(&churns, &result, &since_arg, total, args.top.unwrap_or(10));
+            hotspot::attach_knowledge(&mut report, &authors);
             if let Ok(first_commits) = git_client.first_commit_times() {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

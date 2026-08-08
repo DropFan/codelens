@@ -66,6 +66,7 @@ struct HtmlFileHotspot {
     lines_deleted: usize,
     cyclomatic: usize,
     age: String,
+    authors: String,
     score_display: String,
     score_pct: u32,
     risk: String,
@@ -419,6 +420,16 @@ impl HtmlOutput {
                         .age_days
                         .map(crate::insight::hotspot::format_age)
                         .unwrap_or_else(|| "-".to_string()),
+                    authors: match &h.knowledge {
+                        Some(k) if k.knowledge_island => format!(
+                            "{} ★ ({} {:.0}%)",
+                            k.authors,
+                            k.main_author,
+                            k.ownership * 100.0
+                        ),
+                        Some(k) => k.authors.to_string(),
+                        None => "-".to_string(),
+                    },
                     score_display: format!("{:.2}", h.hotspot_score),
                     score_pct: (h.hotspot_score * 100.0) as u32,
                     risk: h.risk.to_string(),

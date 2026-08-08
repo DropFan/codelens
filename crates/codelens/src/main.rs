@@ -326,10 +326,18 @@ fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<Ex
     let regression = if let Some(baseline_ref) = &args.baseline {
         // Normalize current paths to repo-root-relative so they line up
         // with the baseline tree regardless of the working directory.
-        if let Ok(git_client) = GitClient::detect(&args.paths[0]) {
-            rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+        let git_client = GitClient::detect(&args.paths[0]).ok();
+        if let Some(client) = &git_client {
+            rewrite_paths_repo_relative(&mut result.files, client.repo_path());
         }
-        let (baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        let (mut baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        // Worktree-materialized baselines never contain submodules;
+        // exclude them on both sides for a like-for-like comparison.
+        if let Some(client) = &git_client {
+            let submodules = client.submodule_paths();
+            drop_submodule_files(&mut result, &submodules);
+            drop_submodule_files(&mut baseline_result, &submodules);
+        }
         Some(health::compare_with_baseline(
             &baseline_result,
             &result,
@@ -445,14 +453,30 @@ fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Result<ExitCo
     let git_client = GitClient::detect(&cwd).context("Not a git repository")?;
     let paths = vec![cwd];
 
-    // Accept "FROM..TO" in one argument or FROM TO as two.
-    let (from_ref, to_ref) = match args.from.split_once("..") {
-        Some((f, t)) if !t.is_empty() => (f.to_string(), Some(t.to_string())),
-        _ => (args.from.clone(), args.to.clone()),
+    // Accept "FROM..TO", git's "FROM...TO" (compare from the merge base),
+    // or FROM TO as two arguments. An empty side means HEAD, like git.
+    let (from_ref, to_ref) = if let Some((a, b)) = args.from.split_once("...") {
+        let a = if a.is_empty() { "HEAD" } else { a };
+        let b = if b.is_empty() { "HEAD" } else { b };
+        let base = git_client
+            .merge_base(a, b)
+            .with_context(|| format!("no merge base between '{a}' and '{b}'"))?;
+        (base[..base.len().min(12)].to_string(), Some(b.to_string()))
+    } else if let Some((a, b)) = args.from.split_once("..") {
+        let a = if a.is_empty() { "HEAD" } else { a };
+        let b = if b.is_empty() { "HEAD" } else { b };
+        (a.to_string(), Some(b.to_string()))
+    } else {
+        (args.from.clone(), args.to.clone())
     };
 
-    let from_result = analyze_at_git_ref(&git_client, &from_ref, &paths, &config)?;
-    let (to_result, to_label) = match &to_ref {
+    // Temporary worktrees never materialize submodules; exclude them on
+    // both sides or a clean tree would diff non-zero against its own HEAD.
+    let submodules = git_client.submodule_paths();
+
+    let mut from_result = analyze_at_git_ref(&git_client, &from_ref, &paths, &config)?;
+    drop_submodule_files(&mut from_result, &submodules);
+    let (mut to_result, to_label) = match &to_ref {
         Some(reference) => (
             analyze_at_git_ref(&git_client, reference, &paths, &config)?,
             reference.clone(),
@@ -463,6 +487,7 @@ fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Result<ExitCo
             (result, "worktree".to_string())
         }
     };
+    drop_submodule_files(&mut to_result, &submodules);
 
     let model = DefaultModel::new();
     let report =
@@ -647,6 +672,20 @@ fn run_coupling(args: &cli::CouplingArgs, advanced: &cli::AdvancedArgs) -> Resul
     };
     let report = coupling::analyze(&commits, Some(&universe), &args.since, &opts);
     write_report(Report::Coupling(report), &config.output)
+}
+
+/// Drop files living inside git submodules and rebuild the summary.
+/// Ref comparisons need this symmetrically on both sides: temporary
+/// worktrees never materialize submodules, the real tree does.
+fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: &[PathBuf]) {
+    if submodules.is_empty() {
+        return;
+    }
+    result.files.retain(|f| {
+        let p = f.path.strip_prefix("./").unwrap_or(&f.path);
+        !submodules.iter().any(|s| p.starts_with(s))
+    });
+    result.summary = codelens_core::Summary::from_file_stats(&result.files);
 }
 
 /// Rewrite analysis file paths to be repo-root-relative.

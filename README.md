@@ -71,7 +71,7 @@ codelens --list-languages
 
 ### Health Score
 
-Score code health across five dimensions (complexity, function size, comment ratio, file size, nesting depth) with grades from A to F.
+Score code health across six dimensions (complexity, function size, comment ratio, file size, nesting depth, line duplication) with grades from A to F.
 
 ```bash
 codelens health .               # Project, directory, and file-level report

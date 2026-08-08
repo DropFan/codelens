@@ -215,7 +215,19 @@ impl FileAnalyzer {
 
         // Contribute line hashes for the post-walk duplication pass.
         if let Some(sink) = &self.dup_sink {
-            sink.record(path.to_path_buf(), super::duplication::line_hashes(content));
+            let mut hashes = super::duplication::line_hashes(content);
+            // Documents and data formats (languages with no complexity
+            // signals) repeat lines by the format's nature, not by
+            // copy-paste; they count toward ULOC but never toward the
+            // duplication metric — same policy that keeps them out of
+            // complexity scoring.
+            let patterns = language.complexity_patterns();
+            if patterns.function_re.is_none() && patterns.keywords_re.is_none() {
+                for hash in &mut hashes {
+                    hash.1 = false;
+                }
+            }
+            sink.record(path.to_path_buf(), hashes);
         }
 
         Ok(Some(FileStats {

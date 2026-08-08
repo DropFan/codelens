@@ -220,6 +220,29 @@ impl GitClient {
         Ok(parse_hunk_ranges(&String::from_utf8_lossy(&output.stdout)))
     }
 
+    /// Merge base of two refs (what `git diff A...B` compares from).
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
+        self.run_git(&["merge-base", a, b])
+    }
+
+    /// Submodule paths declared in .gitmodules, repo-root-relative.
+    /// Empty when there are no submodules.
+    pub fn submodule_paths(&self) -> Vec<PathBuf> {
+        self.run_git(&[
+            "config",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ])
+        .map(|out| {
+            out.lines()
+                .filter_map(|l| l.split_once(' ').map(|(_, p)| PathBuf::from(p)))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
     /// Check whether `reference` resolves to a commit in this repository.
     pub fn rev_exists(&self, reference: &str) -> bool {
         self.run_git(&[
@@ -1001,6 +1024,35 @@ mod tests {
         assert_eq!(churns[0].path, PathBuf::from("hello.rs"));
         assert_eq!(churns[0].commits, 2);
         assert!(churns[0].last_commit_ts > 0);
+    }
+
+    #[test]
+    fn test_merge_base_and_submodule_paths() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+        std::fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "base"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        let client = GitClient::detect(temp.path()).unwrap();
+        let head = client.run_git(&["rev-parse", "HEAD"]).unwrap();
+        assert_eq!(client.merge_base("HEAD", "HEAD").unwrap(), head);
+        assert!(client.submodule_paths().is_empty());
+
+        std::fs::write(
+            temp.path().join(".gitmodules"),
+            "[submodule \"vendor-lib\"]\n\tpath = vendor/lib\n\turl = ../lib\n",
+        )
+        .unwrap();
+        assert_eq!(client.submodule_paths(), vec![PathBuf::from("vendor/lib")]);
     }
 
     #[test]

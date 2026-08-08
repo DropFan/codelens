@@ -59,7 +59,12 @@ impl DuplicationSink {
     /// eligible line instance is duplicated when its content occurs 2+
     /// times across the whole tree (including repeats within one file).
     pub fn finish(&self) -> (usize, HashMap<PathBuf, usize>) {
-        let files = std::mem::take(&mut *self.files.lock().unwrap());
+        let mut files = std::mem::take(&mut *self.files.lock().unwrap());
+
+        // Overlapping input roots (`codelens . src`) walk a file twice;
+        // keep one record per path or every line would count duplicate.
+        let mut seen = std::collections::HashSet::new();
+        files.retain(|(path, _)| seen.insert(path.clone()));
 
         let mut counts: HashMap<u64, u32> = HashMap::new();
         for (_, hashes) in &files {
@@ -126,6 +131,23 @@ mod tests {
             per_file[&PathBuf::from("b.rs")],
             3,
             "shared + both gamma instances; brace lines are ineligible"
+        );
+    }
+
+    #[test]
+    fn test_sink_dedupes_twice_walked_files() {
+        let sink = DuplicationSink::default();
+        let hashes = line_hashes(b"only_line_in_repo();\n");
+        sink.record(PathBuf::from("src/a.rs"), hashes.clone());
+        // Overlapping roots walk the same file again.
+        sink.record(PathBuf::from("src/a.rs"), hashes);
+
+        let (uloc, per_file) = sink.finish();
+        assert_eq!(uloc, 1);
+        assert_eq!(
+            per_file[&PathBuf::from("src/a.rs")],
+            0,
+            "a twice-walked unique file must not become 100% duplicate"
         );
     }
 

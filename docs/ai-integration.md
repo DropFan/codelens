@@ -23,8 +23,8 @@ claude mcp add codelens -- codelens mcp
 | 工具 | 用途 |
 |------|------|
 | `repo_overview` | 仓库概览：文件/行数/语言分布/复杂度/测试占比/token 估算 |
-| `code_health` | 健康报告：项目评分（A-F）、五维度得分、最差目录与文件 |
-| `hotspots` | 变更热点：又复杂又频繁改动的文件（最可能出 bug），含代码年龄 |
+| `code_health` | 健康报告：项目评分（A-F）、六维度得分（含重复度）、最差目录与文件 |
+| `hotspots` | 变更热点：又复杂又频繁改动的文件（最可能出 bug），含代码年龄与作者集中度（知识孤岛标记） |
 | `change_coupling` | 变更耦合：总是一起改的文件对（改 A 通常还要改 B） |
 | `file_metrics` | 单文件指标：行数、圈/认知复杂度、嵌套深度、健康分 |
 
@@ -37,10 +37,11 @@ MCP 属于默认开启的 cargo feature；如需更小的二进制，可用 `car
 有 Bash 能力的代理不需要 MCP，直接执行命令并读 JSON：
 
 ```bash
-codelens . -f json                 # 仓库统计（含 token 估算、测试占比）
-codelens health . -f json          # 健康报告
+codelens . -f json                 # 仓库统计（含 token 估算、测试占比、ULOC）
+codelens health . -f json          # 健康报告（六维度）
 codelens health . --baseline main -f json   # 相对 main 分支的健康回归
-codelens hotspot . -f json --top 10          # 热点文件
+codelens diff main -f json                   # 改动前后健康分对比（改完代码后验证）
+codelens hotspot . -f json --top 10          # 热点文件（含知识孤岛）
 codelens hotspot . --functions -f json       # 函数级热点
 codelens coupling . -f json                  # 变更耦合
 ```
