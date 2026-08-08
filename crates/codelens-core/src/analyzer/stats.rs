@@ -312,6 +312,35 @@ pub struct DirStats {
     pub functions: usize,
 }
 
+/// Longest directory prefix shared by every file, used to anchor the
+/// tree when files carry absolute paths (a `codelens /abs/dir` run) —
+/// without it the rollup would emit meaningless "/", "/Users", ... rows.
+fn common_dir_prefix(files: &[FileStats]) -> PathBuf {
+    let mut iter = files.iter().filter(|f| f.path.is_absolute());
+    let Some(first) = iter.next() else {
+        return PathBuf::new();
+    };
+    let mut prefix: Vec<std::path::Component> = first
+        .path
+        .parent()
+        .map(|p| p.components().collect())
+        .unwrap_or_default();
+    for f in iter {
+        let parent: Vec<std::path::Component> = f
+            .path
+            .parent()
+            .map(|p| p.components().collect())
+            .unwrap_or_default();
+        let shared = prefix
+            .iter()
+            .zip(parent.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        prefix.truncate(shared);
+    }
+    prefix.iter().collect()
+}
+
 /// Aggregate per-file statistics into a directory tree, cumulative per
 /// directory, at most `max_depth` components deep (deeper files still
 /// roll up into their visible ancestors). Rows come back in tree order
@@ -322,9 +351,11 @@ pub fn aggregate_by_dir(files: &[FileStats], max_depth: usize) -> Vec<DirStats> 
 
     let max_depth = max_depth.max(1);
     let mut map: HashMap<PathBuf, DirStats> = HashMap::new();
+    let abs_prefix = common_dir_prefix(files);
 
     for f in files {
         let path = f.path.strip_prefix("./").unwrap_or(&f.path);
+        let path = path.strip_prefix(&abs_prefix).unwrap_or(path);
         let parent = path.parent().unwrap_or_else(|| Path::new(""));
 
         let mut dirs: Vec<PathBuf> = Vec::new();
@@ -492,6 +523,34 @@ mod tests {
     #[test]
     fn test_aggregate_by_dir_empty() {
         assert!(aggregate_by_dir(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn test_aggregate_by_dir_absolute_paths_anchor_at_common_root() {
+        let files = vec![
+            file_at("/home/user/proj/src/a.rs", 100),
+            file_at("/home/user/proj/src/sub/b.rs", 50),
+            file_at("/home/user/proj/tests/t.rs", 30),
+        ];
+        let dirs = aggregate_by_dir(&files, 5);
+        let paths: Vec<&str> = dirs.iter().map(|d| d.path.to_str().unwrap()).collect();
+        assert_eq!(
+            paths,
+            vec!["src", "src/sub", "tests"],
+            "no '/', '/home', ... noise rows"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_by_dir_single_absolute_file() {
+        let files = vec![file_at("/home/user/proj/src/a.rs", 10)];
+        let dirs = aggregate_by_dir(&files, 5);
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(
+            dirs[0].path,
+            PathBuf::from("."),
+            "its own parent is the anchor"
+        );
     }
 
     #[test]
