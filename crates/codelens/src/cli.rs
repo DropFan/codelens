@@ -451,10 +451,11 @@ pub struct AdvancedArgs {
     #[arg(short = 'j', long, global = true)]
     pub threads: Option<usize>,
 
-    /// Skip line-level duplication statistics (ULOC and the Duplication
-    /// health dimension report "not measured"); saves memory on very
-    /// large codebases. Unlike --no-duplicates, which skips files whose
-    /// content duplicates an already-counted file, no files are excluded.
+    /// Skip line-level duplication analysis (ULOC is not collected and
+    /// the Duplication dimension is omitted from the health score);
+    /// saves memory on very large codebases. Unlike --no-duplicates,
+    /// which skips files whose content duplicates an already-counted
+    /// file, no files are excluded.
     #[arg(long, global = true)]
     pub no_dup_scan: bool,
 
@@ -583,3 +584,25 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens estimate . --model locomo\x1b[0m         \x1b[2m# LLM generation cost\x1b[0m
   \x1b[1;36mcodelens estimate . --avg-wage 100000\x1b[0m      \x1b[2m# Custom salary\x1b[0m
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn no_dup_scan_help_matches_rendered_behavior() {
+        // No formatter renders a "not measured" placeholder: with
+        // --no-dup-scan the Duplication dimension is simply omitted
+        // from the health report. Help must not promise otherwise.
+        let help = Cli::command().render_long_help().to_string();
+        assert!(
+            !help.contains("not measured"),
+            "--no-dup-scan help must not promise a \"not measured\" rendering"
+        );
+        assert!(
+            help.contains("omitted"),
+            "--no-dup-scan help should say the Duplication dimension is omitted"
+        );
+    }
+}

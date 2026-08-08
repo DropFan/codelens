@@ -232,6 +232,11 @@ fn score_file(file: &FileStats, model: &dyn ScoringModel) -> FileHealth {
 }
 
 fn score_dimensions(metrics: &RawMetrics, model: &dyn ScoringModel) -> Vec<DimensionScore> {
+    // `total_score` divides by the weight sum, so serialized weights are
+    // normalized the same way: they always describe each dimension's real
+    // share of the total, even for models whose raw weights don't sum to 1
+    // (e.g. the without-duplication variant).
+    let total_weight: f64 = model.dimensions().iter().map(|d| d.weight).sum();
     model
         .dimensions()
         .iter()
@@ -241,7 +246,11 @@ fn score_dimensions(metrics: &RawMetrics, model: &dyn ScoringModel) -> Vec<Dimen
                 dimension: dw.dimension,
                 score: s,
                 grade: model.grade(s),
-                weight: dw.weight,
+                weight: if total_weight > 0.0 {
+                    dw.weight / total_weight
+                } else {
+                    0.0
+                },
             }
         })
         .collect()
@@ -351,6 +360,42 @@ mod tests {
                 .iter()
                 .all(|d| d.dimension != HealthDimension::Duplication)
         }));
+    }
+
+    #[test]
+    fn test_serialized_weights_are_normalized() {
+        // The total score divides by the weight sum, so the serialized
+        // per-dimension weights must be normalized the same way — a
+        // five-dim report whose raw weights sum to 0.9 would misstate
+        // every dimension's real contribution to the total.
+        let result = make_test_result();
+
+        let full = score(&result, &DefaultModel::new(), 10);
+        let full_sum: f64 = full.dimensions.iter().map(|d| d.weight).sum();
+        assert!((full_sum - 1.0).abs() < 1e-9);
+        let complexity = full
+            .dimensions
+            .iter()
+            .find(|d| d.dimension == HealthDimension::Complexity)
+            .unwrap();
+        assert!(
+            (complexity.weight - 0.25).abs() < 1e-9,
+            "six-dim weights already sum to 1 and must stay as declared"
+        );
+
+        let nodup = score(&result, &DefaultModel::without_duplication(), 10);
+        let nodup_sum: f64 = nodup.dimensions.iter().map(|d| d.weight).sum();
+        assert!(
+            (nodup_sum - 1.0).abs() < 1e-9,
+            "five-dim weights must renormalize to 1, got {nodup_sum}"
+        );
+        // File-level dimensions go through the same path.
+        let file_sum: f64 = nodup.worst_files[0]
+            .dimensions
+            .iter()
+            .map(|d| d.weight)
+            .sum();
+        assert!((file_sum - 1.0).abs() < 1e-9);
     }
 
     #[test]

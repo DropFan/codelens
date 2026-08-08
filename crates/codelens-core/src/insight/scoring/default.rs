@@ -33,23 +33,28 @@ const ALL_DIMENSIONS: &[DimensionWeight] = &[
 
 pub struct DefaultModel {
     dimensions: &'static [DimensionWeight],
+    name: &'static str,
 }
 
 impl DefaultModel {
     pub fn new() -> Self {
         Self {
             dimensions: ALL_DIMENSIONS,
+            name: "default",
         }
     }
 
     /// Model for analyses where line duplication was not collected
     /// (--no-dup-scan or a snapshot without duplication data): the
     /// Duplication dimension is excluded rather than scored as clean.
-    /// The remaining weights are renormalized by `total_score`, which
-    /// divides by the weight sum.
+    /// The remaining weights are renormalized by the weight sum, both
+    /// in `total_score` and in the serialized per-dimension weights.
+    /// The distinct name lets machine-read output (JSON, openmetrics)
+    /// tell the reduced scoring basis apart from the full model.
     pub fn without_duplication() -> Self {
         Self {
             dimensions: &ALL_DIMENSIONS[..ALL_DIMENSIONS.len() - 1],
+            name: "default-no-dup",
         }
     }
 }
@@ -62,7 +67,7 @@ impl Default for DefaultModel {
 
 impl ScoringModel for DefaultModel {
     fn name(&self) -> &str {
-        "default"
+        self.name
     }
 
     fn dimensions(&self) -> &[DimensionWeight] {
@@ -298,6 +303,10 @@ mod tests {
     #[test]
     fn test_default_model_name() {
         assert_eq!(DefaultModel::new().name(), "default");
+        // The reduced-scope variant must be distinguishable in
+        // machine-read output (JSON "model" field, openmetrics label),
+        // or consumers cannot tell the scoring basis changed.
+        assert_eq!(DefaultModel::without_duplication().name(), "default-no-dup");
     }
 
     #[test]

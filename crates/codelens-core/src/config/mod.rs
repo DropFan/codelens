@@ -23,7 +23,8 @@ pub struct Config {
     /// Skip line-level duplication collection (ULOC / duplicate_lines).
     /// The collector keeps every line hash in memory until the walk
     /// finishes, which can cost hundreds of MB on very large codebases;
-    /// with this set the metrics report as "not measured" instead.
+    /// with this set the Duplication dimension is omitted from health
+    /// scoring instead of being fabricated from zero data.
     pub no_dup_scan: bool,
 }
 

@@ -32,7 +32,7 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
     let top_n = config.output.top_n.unwrap_or(10);
 
-    let (model, regression) = if let Some(baseline_ref) = &args.baseline {
+    let regression = if let Some(baseline_ref) = &args.baseline {
         // Normalize current paths to repo-root-relative so they line up
         // with the baseline tree regardless of the working directory.
         let git_client = GitClient::detect(&args.paths[0]).ok();
@@ -47,18 +47,28 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
             drop_submodule_files(&mut result, &submodules);
             drop_submodule_files(&mut baseline_result, &submodules);
         }
-        // Score with the Duplication dimension only when BOTH sides
+        // Compare with the Duplication dimension only when BOTH sides
         // measured it — an unmeasured side's zero duplicate counts would
         // otherwise fabricate phantom regressions or improvements. Old
         // snapshots without the flag keep the historical measured path.
-        let model =
+        // This joint model scopes the comparison ONLY; the main report
+        // below keeps the current analysis's own measurement scope.
+        let compare_model =
             scoring_model_for(result.summary.dup_scanned && baseline_result.summary.dup_scanned);
-        let regression = health::compare_with_baseline(&baseline_result, &result, &model, &label);
-        (model, Some(regression))
+        Some(health::compare_with_baseline(
+            &baseline_result,
+            &result,
+            &compare_model,
+            &label,
+        ))
     } else {
-        (scoring_model_for(result.summary.dup_scanned), None)
+        None
     };
 
+    // The main report and the absolute --fail-under gate always follow
+    // what THIS analysis measured: the same tree must score the same no
+    // matter how an unrelated baseline snapshot was collected.
+    let model = scoring_model_for(result.summary.dup_scanned);
     let mut report = health::score(&result, &model, top_n);
     report.regression = regression;
     let score = report.score;
@@ -142,6 +152,64 @@ fn parse_fail_under(input: &str) -> Result<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn fail_under_gate_follows_current_measurement_not_baseline() {
+        // Current tree: heavy measured duplication drags the six-dim
+        // score below the gate. A baseline snapshot that never measured
+        // duplication must not renormalize the absolute score above the
+        // threshold — the joint (both-sides-measured) model is only for
+        // the regression comparison, never the main report or the
+        // --fail-under gate.
+        let dir = tempfile::tempdir().unwrap();
+        let mut src = String::new();
+        for i in 0..4 {
+            src.push_str(&format!("# distinct comment line number {i}\n"));
+        }
+        for _ in 0..40 {
+            src.push_str("value = compute_something(1, 2, 3)\n");
+        }
+        std::fs::write(dir.path().join("dup.py"), src).unwrap();
+
+        // Baseline snapshot whose analysis skipped duplication collection.
+        let files: Vec<codelens_core::FileStats> = Vec::new();
+        let mut summary = codelens_core::Summary::from_file_stats(&files);
+        summary.dup_scanned = false;
+        let baseline = codelens_core::AnalysisResult {
+            files,
+            summary,
+            elapsed: std::time::Duration::from_millis(1),
+            scanned_files: 0,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        trend::save_snapshot(dir.path(), baseline, None, None, None).unwrap();
+
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--baseline",
+            "latest",
+            "--fail-under",
+            "95",
+            "-l",
+            "python",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+        let code = run_health(args, &cli.advanced).unwrap();
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::FAILURE),
+            "measured duplication must keep failing the gate no matter \
+             how the baseline snapshot was collected"
+        );
+    }
 
     #[test]
     fn fail_under_accepts_grades_and_scores() {
