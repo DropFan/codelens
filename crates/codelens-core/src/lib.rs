@@ -71,9 +71,14 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         registry.map_extension(ext, lang)?;
     }
     let registry = Arc::new(registry);
-    let dup_sink = Arc::new(analyzer::duplication::DuplicationSink::default());
-    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config)
-        .with_duplication_sink(Arc::clone(&dup_sink));
+    // The duplication sink holds every line hash until the walk ends;
+    // --no-dup-scan skips it entirely so huge trees don't pay the memory.
+    let dup_sink =
+        (!config.no_dup_scan).then(|| Arc::new(analyzer::duplication::DuplicationSink::default()));
+    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config);
+    if let Some(ref sink) = dup_sink {
+        file_analyzer = file_analyzer.with_duplication_sink(Arc::clone(sink));
+    }
     if !config.filter.no_linguist {
         // Root .gitattributes of the first analyzed tree; matches GitHub's
         // counting for the common single-root case.
@@ -123,16 +128,21 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
 
     // Duplication post-pass: with all line hashes gathered, each file
     // learns its duplicated-line count and the project gets its ULOC.
-    let (uloc, mut per_file_dup) = dup_sink.finish();
-    for stats in &mut all_stats {
-        if let Some(dup) = per_file_dup.remove(&stats.path) {
-            stats.duplicate_lines = dup;
+    let mut uloc = 0;
+    if let Some(ref sink) = dup_sink {
+        let (unique, mut per_file_dup) = sink.finish();
+        uloc = unique;
+        for stats in &mut all_stats {
+            if let Some(dup) = per_file_dup.remove(&stats.path) {
+                stats.duplicate_lines = dup;
+            }
         }
     }
 
     // Build summary, ordered by the configured sort key
     let mut summary = Summary::from_file_stats(&all_stats);
     summary.uloc = uloc;
+    summary.dup_scanned = dup_sink.is_some();
     summary.sort_languages(config.output.sort_by);
     let elapsed = start.elapsed();
 
@@ -304,6 +314,33 @@ fn main() {
 
         // Elapsed time should be > 0
         assert!(result.elapsed.as_nanos() > 0);
+    }
+
+    #[test]
+    fn test_analyze_no_dup_scan_skips_duplication_collection() {
+        let dir = TempDir::new().unwrap();
+        // Two files sharing a long duplicated line.
+        let content = "fn duplicated_line_content_here() { body(); }\n";
+        create_test_file(dir.path(), "a.rs", content);
+        create_test_file(dir.path(), "b.rs", content);
+
+        let config = Config {
+            no_dup_scan: true,
+            ..Config::default()
+        };
+        let result = analyze(&[dir.path()], &config).unwrap();
+
+        assert!(!result.summary.dup_scanned);
+        assert_eq!(result.summary.uloc, 0, "ULOC must stay unmeasured");
+        assert_eq!(result.summary.duplicate_lines, 0);
+        assert!(result.files.iter().all(|f| f.duplicate_lines == 0));
+
+        // Control: the default config measures the duplication.
+        let config = Config::default();
+        let result = analyze(&[dir.path()], &config).unwrap();
+        assert!(result.summary.dup_scanned);
+        assert!(result.summary.uloc > 0);
+        assert!(result.summary.duplicate_lines > 0);
     }
 
     #[test]

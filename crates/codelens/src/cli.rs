@@ -43,12 +43,11 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Analyze code health score.
-    #[command(
-        long_about = "Score code health across six dimensions: complexity, function size, \
-        comment ratio, file size, nesting depth, and line duplication. Reports at project, directory, and file \
+    #[command(long_about = "Score code health across complexity, function size, \
+        comment ratio, file size, nesting depth, and line duplication (skipped with \
+        --no-dup-scan). Reports at project, directory, and file \
         levels with grades from A (best) to F (worst). Use --top to control how many items \
-        are shown per level."
-    )]
+        are shown per level.")]
     Health(HealthArgs),
     /// Detect change hotspots (churn x complexity).
     #[command(
@@ -451,6 +450,13 @@ pub struct AdvancedArgs {
     /// Number of threads (defaults to CPU count).
     #[arg(short = 'j', long, global = true)]
     pub threads: Option<usize>,
+
+    /// Skip line-level duplication statistics (ULOC and the Duplication
+    /// health dimension report "not measured"); saves memory on very
+    /// large codebases. Unlike --no-duplicates, which skips files whose
+    /// content duplicates an already-counted file, no files are excluded.
+    #[arg(long, global = true)]
+    pub no_dup_scan: bool,
 
     /// Configuration file path.
     #[arg(short, long, global = true)]

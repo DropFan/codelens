@@ -226,6 +226,7 @@ codelens --by-dir --dir-depth 2     # Directory tree rollups (files/code/complex
 codelens --count-as jsp:html        # Count .jsp files as HTML
 codelens --no-duplicates            # Skip files with identical content
 codelens --no-min-gen               # Skip minified/generated files
+codelens --no-dup-scan              # Skip line-duplication analysis (saves memory on huge repos)
 ```
 
 - Extensionless scripts are detected via shebang (`#!/usr/bin/env python`).

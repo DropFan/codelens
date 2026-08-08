@@ -10,13 +10,12 @@ use colored::Colorize;
 use codelens_core::analyze;
 use codelens_core::config::Config;
 use codelens_core::git::GitClient;
-use codelens_core::insight::scoring::default::DefaultModel;
 use codelens_core::insight::{health, trend};
 use codelens_core::output::Report;
 
 use super::{
     analyze_at_git_ref, drop_submodule_files, load_partial_config, resolve_config,
-    rewrite_paths_repo_relative, write_report,
+    rewrite_paths_repo_relative, scoring_model_for, write_report,
 };
 use crate::cli;
 
@@ -31,10 +30,9 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
-    let model = DefaultModel::new();
     let top_n = config.output.top_n.unwrap_or(10);
 
-    let regression = if let Some(baseline_ref) = &args.baseline {
+    let (model, regression) = if let Some(baseline_ref) = &args.baseline {
         // Normalize current paths to repo-root-relative so they line up
         // with the baseline tree regardless of the working directory.
         let git_client = GitClient::detect(&args.paths[0]).ok();
@@ -49,14 +47,16 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
             drop_submodule_files(&mut result, &submodules);
             drop_submodule_files(&mut baseline_result, &submodules);
         }
-        Some(health::compare_with_baseline(
-            &baseline_result,
-            &result,
-            &model,
-            &label,
-        ))
+        // Score with the Duplication dimension only when BOTH sides
+        // measured it — an unmeasured side's zero duplicate counts would
+        // otherwise fabricate phantom regressions or improvements. Old
+        // snapshots without the flag keep the historical measured path.
+        let model =
+            scoring_model_for(result.summary.dup_scanned && baseline_result.summary.dup_scanned);
+        let regression = health::compare_with_baseline(&baseline_result, &result, &model, &label);
+        (model, Some(regression))
     } else {
-        None
+        (scoring_model_for(result.summary.dup_scanned), None)
     };
 
     let mut report = health::score(&result, &model, top_n);

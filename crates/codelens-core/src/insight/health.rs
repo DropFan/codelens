@@ -336,6 +336,24 @@ mod tests {
     }
 
     #[test]
+    fn test_score_without_duplication_dimension() {
+        // Unmeasured duplication: the dimension disappears from the
+        // report entirely instead of showing a misleading perfect grade.
+        let result = make_test_result();
+        let model = DefaultModel::without_duplication();
+        let report = score(&result, &model, 10);
+        assert!(report
+            .dimensions
+            .iter()
+            .all(|d| d.dimension != HealthDimension::Duplication));
+        assert!(report.worst_files.iter().all(|f| {
+            f.dimensions
+                .iter()
+                .all(|d| d.dimension != HealthDimension::Duplication)
+        }));
+    }
+
+    #[test]
     fn test_worst_files_sorted_ascending() {
         let result = make_test_result();
         let model = DefaultModel::new();

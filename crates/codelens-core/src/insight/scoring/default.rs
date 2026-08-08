@@ -2,11 +2,55 @@
 
 use super::{DimensionWeight, HealthDimension, RawMetrics, ScoringModel};
 
-pub struct DefaultModel;
+/// Duplication must stay last: `without_duplication` drops it by
+/// slicing off the tail (checked by test).
+const ALL_DIMENSIONS: &[DimensionWeight] = &[
+    DimensionWeight {
+        dimension: HealthDimension::Complexity,
+        weight: 0.25,
+    },
+    DimensionWeight {
+        dimension: HealthDimension::FuncSize,
+        weight: 0.20,
+    },
+    DimensionWeight {
+        dimension: HealthDimension::CommentRatio,
+        weight: 0.10,
+    },
+    DimensionWeight {
+        dimension: HealthDimension::FileSize,
+        weight: 0.20,
+    },
+    DimensionWeight {
+        dimension: HealthDimension::NestingDepth,
+        weight: 0.15,
+    },
+    DimensionWeight {
+        dimension: HealthDimension::Duplication,
+        weight: 0.10,
+    },
+];
+
+pub struct DefaultModel {
+    dimensions: &'static [DimensionWeight],
+}
 
 impl DefaultModel {
     pub fn new() -> Self {
-        Self
+        Self {
+            dimensions: ALL_DIMENSIONS,
+        }
+    }
+
+    /// Model for analyses where line duplication was not collected
+    /// (--no-dup-scan or a snapshot without duplication data): the
+    /// Duplication dimension is excluded rather than scored as clean.
+    /// The remaining weights are renormalized by `total_score`, which
+    /// divides by the weight sum.
+    pub fn without_duplication() -> Self {
+        Self {
+            dimensions: &ALL_DIMENSIONS[..ALL_DIMENSIONS.len() - 1],
+        }
     }
 }
 
@@ -22,32 +66,7 @@ impl ScoringModel for DefaultModel {
     }
 
     fn dimensions(&self) -> &[DimensionWeight] {
-        &[
-            DimensionWeight {
-                dimension: HealthDimension::Complexity,
-                weight: 0.25,
-            },
-            DimensionWeight {
-                dimension: HealthDimension::FuncSize,
-                weight: 0.20,
-            },
-            DimensionWeight {
-                dimension: HealthDimension::CommentRatio,
-                weight: 0.10,
-            },
-            DimensionWeight {
-                dimension: HealthDimension::FileSize,
-                weight: 0.20,
-            },
-            DimensionWeight {
-                dimension: HealthDimension::NestingDepth,
-                weight: 0.15,
-            },
-            DimensionWeight {
-                dimension: HealthDimension::Duplication,
-                weight: 0.10,
-            },
-        ]
+        self.dimensions
     }
 
     fn score_dimension(&self, dimension: HealthDimension, metrics: &RawMetrics) -> f64 {
@@ -286,5 +305,39 @@ mod tests {
         let model = DefaultModel::new();
         let total: f64 = model.dimensions().iter().map(|d| d.weight).sum();
         assert!((total - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_without_duplication_excludes_only_that_dimension() {
+        let model = DefaultModel::without_duplication();
+        assert_eq!(model.dimensions().len(), ALL_DIMENSIONS.len() - 1);
+        assert!(model
+            .dimensions()
+            .iter()
+            .all(|d| d.dimension != HealthDimension::Duplication));
+    }
+
+    #[test]
+    fn test_without_duplication_renormalizes_weights() {
+        // Perfect metrics except a terrible duplication ratio: the full
+        // model is dragged down by the Duplication dimension, while the
+        // unmeasured model must land on a full 100 — not the 90 that an
+        // un-renormalized weight sum would produce.
+        let metrics = RawMetrics {
+            avg_cyclomatic: 2.0,
+            avg_func_lines: 10.0,
+            comment_ratio: 0.15,
+            depth: 2,
+            avg_file_lines: 100.0,
+            total_files: 10,
+            duplication_ratio: 0.9,
+        };
+        let full = DefaultModel::new().total_score(&metrics);
+        let unmeasured = DefaultModel::without_duplication().total_score(&metrics);
+        assert!(full < 95.0, "full model must feel the duplication penalty");
+        assert!(
+            (unmeasured - 100.0).abs() < 0.001,
+            "unmeasured model must renormalize to 100, got {unmeasured}"
+        );
     }
 }

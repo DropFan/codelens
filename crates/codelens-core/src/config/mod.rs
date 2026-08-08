@@ -17,6 +17,11 @@ pub struct Config {
     pub output: OutputConfig,
     /// Extra extension → language mappings (`--count-as jsp:html`).
     pub count_as: Vec<(String, String)>,
+    /// Skip line-level duplication collection (ULOC / duplicate_lines).
+    /// The collector keeps every line hash in memory until the walk
+    /// finishes, which can cost hundreds of MB on very large codebases;
+    /// with this set the metrics report as "not measured" instead.
+    pub no_dup_scan: bool,
 }
 
 /// Filter configuration.

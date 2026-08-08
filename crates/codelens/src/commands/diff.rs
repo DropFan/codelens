@@ -9,12 +9,11 @@ use colored::Colorize;
 
 use codelens_core::analyze;
 use codelens_core::git::GitClient;
-use codelens_core::insight::scoring::default::DefaultModel;
 use codelens_core::output::Report;
 
 use super::{
     analyze_at_git_ref, drop_submodule_files, load_partial_config, resolve_config,
-    rewrite_paths_repo_relative, write_report,
+    rewrite_paths_repo_relative, scoring_model_for, write_report,
 };
 use crate::cli;
 
@@ -61,7 +60,9 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     };
     drop_submodule_files(&mut to_result, &submodules);
 
-    let model = DefaultModel::new();
+    // Both sides were analyzed with the same config, so the duplication
+    // dimension is either measured on both or excluded on both.
+    let model = scoring_model_for(!config.no_dup_scan);
     let report =
         codelens_core::insight::diff::build(&from_ref, &to_label, &from_result, &to_result, &model);
     let failed = report.health.failed;

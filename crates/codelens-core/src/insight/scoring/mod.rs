@@ -46,7 +46,11 @@ pub struct RawMetrics {
     pub avg_file_lines: f64,
     pub total_files: usize,
     /// Duplicated line instances / non-blank lines (0.0 when duplication
-    /// data is absent, e.g. snapshots from older versions).
+    /// data is absent, e.g. snapshots from older versions). Analyses that
+    /// explicitly skipped collection (--no-dup-scan, summary.dup_scanned
+    /// is false) should instead be scored with a model that excludes the
+    /// Duplication dimension (`DefaultModel::without_duplication`), so
+    /// "not measured" never masquerades as a perfect score.
     pub duplication_ratio: f64,
 }
 

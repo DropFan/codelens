@@ -226,6 +226,18 @@ pub struct Summary {
     /// Total duplicated line instances (sum of per-file duplicate_lines).
     #[serde(default)]
     pub duplicate_lines: usize,
+    /// Whether line-level duplication was collected for this analysis
+    /// (false under --no-dup-scan). Serde-defaults to true so snapshots
+    /// from older versions keep their historical scoring behavior:
+    /// absent duplication data reads as measured-and-clean. Only
+    /// analyses that explicitly skipped collection take the
+    /// "not measured" path (Duplication dimension excluded).
+    #[serde(default = "default_true")]
+    pub dup_scanned: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Summary {
@@ -878,5 +890,42 @@ mod tests {
         assert!(stats.path.as_os_str().is_empty());
         assert!(stats.language.is_empty());
         assert_eq!(stats.size, 0);
+    }
+
+    fn analysis_result_json() -> serde_json::Value {
+        let files = vec![file_at("src/a.rs", 100)];
+        let result = AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: std::time::Duration::from_millis(10),
+            scanned_files: 1,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        serde_json::to_value(&result).unwrap()
+    }
+
+    #[test]
+    fn test_old_snapshot_without_dup_scanned_reads_as_measured() {
+        // Snapshots written before the field existed must keep their
+        // historical behavior: no duplication data scores as clean.
+        let mut json = analysis_result_json();
+        json["summary"]
+            .as_object_mut()
+            .unwrap()
+            .remove("dup_scanned");
+        let result: AnalysisResult = serde_json::from_value(json).unwrap();
+        assert!(
+            result.summary.dup_scanned,
+            "missing dup_scanned must default to true (old-snapshot path)"
+        );
+    }
+
+    #[test]
+    fn test_snapshot_with_explicit_dup_scanned_false_roundtrips() {
+        let mut json = analysis_result_json();
+        json["summary"]["dup_scanned"] = serde_json::Value::Bool(false);
+        let result: AnalysisResult = serde_json::from_value(json).unwrap();
+        assert!(!result.summary.dup_scanned);
     }
 }

@@ -62,7 +62,7 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
 
     // Bundle stats + health + estimation into ONE report so machine
     // formats (JSON/HTML) stay parseable as a single document.
-    let scoring_model = DefaultModel::new();
+    let scoring_model = scoring_model_for(result.summary.dup_scanned);
     let health_top_n = config.output.top_n.unwrap_or(10);
     let health_report =
         codelens_core::insight::health::score(&result, &scoring_model, health_top_n);
@@ -161,6 +161,9 @@ fn resolve_config(
     // CLI overrides: only fields the user explicitly passed.
     if let Some(threads) = advanced.threads {
         config.walker.threads = threads;
+    }
+    if advanced.no_dup_scan {
+        config.no_dup_scan = true;
     }
     if filter.no_gitignore {
         config.walker.use_gitignore = false;
@@ -306,7 +309,23 @@ fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: 
         let p = f.path.strip_prefix("./").unwrap_or(&f.path);
         !submodules.iter().any(|s| p.starts_with(s))
     });
+    // Rebuilding from file stats cannot know whether duplication was
+    // collected — carry the flag over or measured trees would silently
+    // read as unmeasured downstream.
+    let dup_scanned = result.summary.dup_scanned;
     result.summary = codelens_core::Summary::from_file_stats(&result.files);
+    result.summary.dup_scanned = dup_scanned;
+}
+
+/// Scoring model matching an analysis: when duplication was not
+/// collected the Duplication dimension is excluded (its weight
+/// redistributed) instead of scoring the absent data as clean.
+pub(crate) fn scoring_model_for(dup_scanned: bool) -> DefaultModel {
+    if dup_scanned {
+        DefaultModel::new()
+    } else {
+        DefaultModel::without_duplication()
+    }
 }
 
 /// Rewrite analysis file paths to be repo-root-relative.
@@ -452,6 +471,76 @@ mod tests {
         };
         let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
         assert_eq!(config.filter.min_lines, Some(5));
+    }
+
+    #[test]
+    fn no_dup_scan_reaches_config_from_subcommands() {
+        // Global flag: must parse after a subcommand and land in Config.
+        let cli = parse(&["codelens", "health", ".", "--no-dup-scan"]);
+        assert!(cli.advanced.no_dup_scan);
+        let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected health subcommand");
+        };
+        let config = resolve_config(&args.filter, &args.output, &cli.advanced, None);
+        assert!(config.no_dup_scan);
+
+        // Default stays off.
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
+        assert!(!config.no_dup_scan);
+    }
+
+    #[test]
+    fn drop_submodule_files_preserves_dup_scanned() {
+        let files = vec![
+            codelens_core::FileStats {
+                path: PathBuf::from("src/a.rs"),
+                ..Default::default()
+            },
+            codelens_core::FileStats {
+                path: PathBuf::from("vendor/sub/b.rs"),
+                ..Default::default()
+            },
+        ];
+        let mut summary = codelens_core::Summary::from_file_stats(&files);
+        summary.dup_scanned = false;
+        let mut result = codelens_core::AnalysisResult {
+            files,
+            summary,
+            elapsed: std::time::Duration::from_millis(1),
+            scanned_files: 2,
+            skipped_files: 0,
+            error_files: 0,
+        };
+
+        drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
+        assert_eq!(result.files.len(), 1);
+        assert!(
+            !result.summary.dup_scanned,
+            "summary rebuild must not resurrect the flag"
+        );
+
+        // And the measured state survives too.
+        result.summary.dup_scanned = true;
+        drop_submodule_files(&mut result, &[PathBuf::from("other")]);
+        assert!(result.summary.dup_scanned);
+    }
+
+    #[test]
+    fn scoring_model_drops_duplication_when_not_scanned() {
+        use codelens_core::insight::scoring::{HealthDimension, ScoringModel};
+
+        let with_dup = scoring_model_for(true);
+        assert!(with_dup
+            .dimensions()
+            .iter()
+            .any(|d| d.dimension == HealthDimension::Duplication));
+
+        let without_dup = scoring_model_for(false);
+        assert!(without_dup
+            .dimensions()
+            .iter()
+            .all(|d| d.dimension != HealthDimension::Duplication));
     }
 
     #[test]
