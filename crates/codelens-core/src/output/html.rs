@@ -65,6 +65,7 @@ struct HtmlFileHotspot {
     lines_added: usize,
     lines_deleted: usize,
     cyclomatic: usize,
+    age: String,
     score_display: String,
     score_pct: u32,
     risk: String,
@@ -382,6 +383,10 @@ impl HtmlOutput {
                     lines_added: h.churn.lines_added,
                     lines_deleted: h.churn.lines_deleted,
                     cyclomatic: h.complexity.cyclomatic,
+                    age: h
+                        .age_days
+                        .map(crate::insight::hotspot::format_age)
+                        .unwrap_or_else(|| "-".to_string()),
                     score_display: format!("{:.2}", h.hotspot_score),
                     score_pct: (h.hotspot_score * 100.0) as u32,
                     risk: h.risk.to_string(),

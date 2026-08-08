@@ -70,7 +70,7 @@
             <h2 style="margin-bottom: 1rem">Hotspot Details</h2>
             <table>
                 <thead>
-                    <tr><th>File</th><th>Language</th><th>Commits</th><th>+/-</th><th>Complexity</th><th>Score</th><th>Risk</th><th></th></tr>
+                    <tr><th>File</th><th>Language</th><th>Commits</th><th>+/-</th><th>Complexity</th><th>Age</th><th>Score</th><th>Risk</th><th></th></tr>
                 </thead>
                 <tbody>
                 {% for h in files %}
@@ -80,6 +80,7 @@
                     <td>{{ h.commits }}</td>
                     <td>+{{ h.lines_added }}/-{{ h.lines_deleted }}</td>
                     <td>{{ h.cyclomatic }}</td>
+                    <td>{{ h.age }}</td>
                     <td>{{ h.score_display }}</td>
                     <td class="{% if h.risk == "HIGH" %}risk-high{% else if h.risk == "MED" %}risk-med{% else %}risk-low{% endif %}">{{ h.risk }}</td>
                     <td><div class="progress-bar"><div class="fill" style="width: {{ h.score_pct }}%; background: {% if h.risk == "HIGH" %}var(--accent-red){% else if h.risk == "MED" %}var(--accent-yellow){% else %}var(--accent-green){% endif %}"></div></div></td>

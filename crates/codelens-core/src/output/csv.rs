@@ -138,17 +138,22 @@ impl CsvOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "File,Commits,Added,Deleted,Churn,CC,Score,Risk")?;
+        writeln!(
+            writer,
+            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Score,Risk"
+        )?;
         for file in &report.files {
+            let age = file.age_days.map(|d| d.to_string()).unwrap_or_default();
             writeln!(
                 writer,
-                "{},{},{},{},{},{},{:.2},{}",
+                "{},{},{},{},{},{},{},{:.2},{}",
                 csv_field(&file.path.display().to_string()),
                 file.churn.commits,
                 file.churn.lines_added,
                 file.churn.lines_deleted,
                 file.churn.lines_churn,
                 file.complexity.cyclomatic,
+                age,
                 file.hotspot_score,
                 file.risk,
             )?;

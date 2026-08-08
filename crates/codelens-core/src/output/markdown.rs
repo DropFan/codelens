@@ -242,17 +242,22 @@ impl MarkdownOutput {
             return Ok(());
         }
 
-        writeln!(writer, "| File | Chg | +/- | CC | Score | Risk |")?;
-        writeln!(writer, "|------|-----|-----|----|-------|------|")?;
+        writeln!(writer, "| File | Chg | +/- | CC | Age | Score | Risk |")?;
+        writeln!(writer, "|------|-----|-----|----|-----|-------|------|")?;
         for file in &report.files {
+            let age = file
+                .age_days
+                .map(crate::insight::hotspot::format_age)
+                .unwrap_or_else(|| "-".to_string());
             writeln!(
                 writer,
-                "| {} | {} | +{}/-{} | {} | {:.2} | {} |",
+                "| {} | {} | +{}/-{} | {} | {} | {:.2} | {} |",
                 file.path.display(),
                 file.churn.commits,
                 file.churn.lines_added,
                 file.churn.lines_deleted,
                 file.complexity.cyclomatic,
+                age,
                 file.hotspot_score,
                 file.risk,
             )?;

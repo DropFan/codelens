@@ -447,6 +447,7 @@ impl ConsoleOutput {
             Cell::new("Chg").add_attribute(Attribute::Bold),
             Cell::new("+/-").add_attribute(Attribute::Bold),
             Cell::new("CC").add_attribute(Attribute::Bold),
+            Cell::new("Age").add_attribute(Attribute::Bold),
             Cell::new("Score").add_attribute(Attribute::Bold),
             Cell::new("Risk").add_attribute(Attribute::Bold),
         ]);
@@ -457,6 +458,10 @@ impl ConsoleOutput {
                 RiskLevel::Medium => Color::Yellow,
                 RiskLevel::Low => Color::Green,
             };
+            let age = file
+                .age_days
+                .map(crate::insight::hotspot::format_age)
+                .unwrap_or_else(|| "-".to_string());
             table.add_row(vec![
                 Cell::new(file.path.display().to_string()).fg(Color::Cyan),
                 Cell::new(Self::format_number(file.churn.commits)),
@@ -465,6 +470,7 @@ impl ConsoleOutput {
                     file.churn.lines_added, file.churn.lines_deleted
                 )),
                 Cell::new(file.complexity.cyclomatic.to_string()),
+                Cell::new(age),
                 Cell::new(format!("{:.2}", file.hotspot_score)),
                 Cell::new(file.risk.to_string()).fg(risk_color),
             ]);

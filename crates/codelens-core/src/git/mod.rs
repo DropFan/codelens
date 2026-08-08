@@ -112,13 +112,39 @@ impl GitClient {
     ///
     /// `since` is passed directly to `git log --since`, e.g. "90 days ago", "2025-01-01".
     pub fn commit_log(&self, since: &str) -> Result<Vec<CommitRecord>> {
+        self.commit_log_range(Some(since))
+    }
+
+    /// Get each file's first-commit timestamp (unix epoch) across the full
+    /// history. Rename-aware: a renamed file keeps the age of its original.
+    ///
+    /// Walks the entire history once, so this is noticeably slower than the
+    /// windowed queries on repositories with very long histories.
+    pub fn first_commit_times(&self) -> Result<HashMap<PathBuf, i64>> {
+        let commits = self.commit_log_range(None)?;
+        let mut first: HashMap<PathBuf, i64> = HashMap::new();
+        for commit in &commits {
+            for change in &commit.files {
+                first
+                    .entry(change.path.clone())
+                    .and_modify(|ts| *ts = (*ts).min(commit.timestamp))
+                    .or_insert(commit.timestamp);
+            }
+        }
+        Ok(first)
+    }
+
+    fn commit_log_range(&self, since: Option<&str>) -> Result<Vec<CommitRecord>> {
+        let mut args = vec![
+            "log".to_string(),
+            "--numstat".to_string(),
+            "--format=%x01%H%x1f%aN%x1f%ct".to_string(),
+        ];
+        if let Some(since) = since {
+            args.push(format!("--since={since}"));
+        }
         let output = Command::new("git")
-            .args([
-                "log",
-                "--numstat",
-                "--format=%x01%H%x1f%aN%x1f%ct",
-                &format!("--since={since}"),
-            ])
+            .args(&args)
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| Error::GitError {

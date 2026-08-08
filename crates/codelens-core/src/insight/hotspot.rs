@@ -41,6 +41,9 @@ pub struct FileHotspot {
     pub complexity: Complexity,
     pub hotspot_score: f64,
     pub risk: RiskLevel,
+    /// Days since the file's first commit (None when unknown).
+    /// An old file that is still a hotspot signals chronic instability.
+    pub age_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +86,7 @@ pub fn analyze(
                 complexity: stats.complexity.clone(),
                 hotspot_score: 0.0,
                 risk: RiskLevel::Low,
+                age_days: None,
             })
         })
         .collect();
@@ -99,6 +103,28 @@ pub fn analyze(
         files: hotspots,
         since: since.to_string(),
         total_commits,
+    }
+}
+
+/// Fill in each hotspot's age from a map of first-commit timestamps
+/// (as returned by `GitClient::first_commit_times`).
+pub fn attach_ages(report: &mut HotspotReport, first_commits: &HashMap<PathBuf, i64>, now_ts: i64) {
+    for file in &mut report.files {
+        let key: &Path = file.path.strip_prefix("./").unwrap_or(&file.path);
+        if let Some(&first_ts) = first_commits.get(key) {
+            file.age_days = Some((now_ts - first_ts).max(0) as u64 / 86_400);
+        }
+    }
+}
+
+/// Format an age in days as a compact human unit: "12d", "5mo", "2.1y".
+pub fn format_age(days: u64) -> String {
+    if days >= 365 {
+        format!("{:.1}y", days as f64 / 365.0)
+    } else if days >= 60 {
+        format!("{}mo", days / 30)
+    } else {
+        format!("{days}d")
     }
 }
 
@@ -296,5 +322,52 @@ mod tests {
         let report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
         let risks: Vec<RiskLevel> = report.files.iter().map(|f| f.risk).collect();
         assert!(risks.contains(&RiskLevel::High));
+    }
+
+    #[test]
+    fn test_attach_ages() {
+        let mut report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
+        let now = 1_700_000_000;
+        let mut first_commits = HashMap::new();
+        // hot.rs created 400 days before "now"; warm.rs missing from the map.
+        first_commits.insert(PathBuf::from("hot.rs"), now - 400 * 86_400);
+        attach_ages(&mut report, &first_commits, now);
+
+        let hot = report
+            .files
+            .iter()
+            .find(|f| f.path == Path::new("hot.rs"))
+            .unwrap();
+        assert_eq!(hot.age_days, Some(400));
+        let warm = report
+            .files
+            .iter()
+            .find(|f| f.path == Path::new("warm.rs"))
+            .unwrap();
+        assert_eq!(warm.age_days, None);
+    }
+
+    #[test]
+    fn test_attach_ages_clock_skew_clamps_to_zero() {
+        let mut report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
+        let now = 1_700_000_000;
+        let mut first_commits = HashMap::new();
+        first_commits.insert(PathBuf::from("hot.rs"), now + 86_400);
+        attach_ages(&mut report, &first_commits, now);
+        let hot = report
+            .files
+            .iter()
+            .find(|f| f.path == Path::new("hot.rs"))
+            .unwrap();
+        assert_eq!(hot.age_days, Some(0));
+    }
+
+    #[test]
+    fn test_format_age() {
+        assert_eq!(format_age(0), "0d");
+        assert_eq!(format_age(59), "59d");
+        assert_eq!(format_age(90), "3mo");
+        assert_eq!(format_age(365), "1.0y");
+        assert_eq!(format_age(800), "2.2y");
     }
 }

@@ -361,7 +361,19 @@ fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<
         );
     }
     let top_n = config.output.top_n.unwrap_or(20);
-    let report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
+    let mut report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
+
+    // Age enrichment walks the full history; a failure here (or a clock
+    // before the epoch) only costs the Age column, never the report.
+    if let Ok(first_commits) = git_client.first_commit_times() {
+        let now_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        if now_ts > 0 {
+            hotspot::attach_ages(&mut report, &first_commits, now_ts);
+        }
+    }
     write_report(Report::Hotspot(report), &config.output)
 }
 
