@@ -8,9 +8,39 @@ use serde::Serialize;
 
 use crate::error::{Error, Result};
 
+/// Start-of-header sentinel in `git log` output (`%x01`).
+/// Header lines never collide with numstat records (`added\tdeleted\tpath`).
+const HEADER_MARK: char = '\u{01}';
+/// Field separator within a header line (`%x1f`).
+const FIELD_SEP: char = '\u{1f}';
+
 /// Git repository client using system git CLI.
 pub struct GitClient {
     repo_path: PathBuf,
+}
+
+/// A single file's change within one commit.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChange {
+    pub path: PathBuf,
+    pub added: usize,
+    pub deleted: usize,
+}
+
+/// One commit with metadata and per-file changes.
+///
+/// `files` is empty for merge commits (plain `git log --numstat` emits no
+/// records for them). Paths are normalized to each file's final name when
+/// the history contains renames.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitRecord {
+    pub hash: String,
+    /// Author name (`%aN`, folded through .mailmap when present).
+    pub author: String,
+    /// Committer date as unix epoch (`%ct`), consistent with how
+    /// `git log --since` filters commits.
+    pub timestamp: i64,
+    pub files: Vec<FileChange>,
 }
 
 /// File change frequency data.
@@ -20,6 +50,8 @@ pub struct FileChurn {
     pub commits: usize,
     pub lines_added: usize,
     pub lines_deleted: usize,
+    /// Unix epoch of the newest commit touching this file within the window.
+    pub last_commit_ts: i64,
 }
 
 /// Repository metadata.
@@ -76,15 +108,15 @@ impl GitClient {
         })
     }
 
-    /// Get file change frequency within the given time window.
+    /// Get per-commit change records (newest first) within the given time window.
     ///
     /// `since` is passed directly to `git log --since`, e.g. "90 days ago", "2025-01-01".
-    pub fn file_churn(&self, since: &str) -> Result<Vec<FileChurn>> {
+    pub fn commit_log(&self, since: &str) -> Result<Vec<CommitRecord>> {
         let output = Command::new("git")
             .args([
                 "log",
                 "--numstat",
-                "--format=%H",
+                "--format=%x01%H%x1f%aN%x1f%ct",
                 &format!("--since={since}"),
             ])
             .current_dir(&self.repo_path)
@@ -106,7 +138,14 @@ impl GitClient {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_numstat(&stdout))
+        Ok(parse_log(&stdout))
+    }
+
+    /// Get file change frequency within the given time window.
+    ///
+    /// `since` is passed directly to `git log --since`, e.g. "90 days ago", "2025-01-01".
+    pub fn file_churn(&self, since: &str) -> Result<Vec<FileChurn>> {
+        Ok(aggregate_churn(&self.commit_log(since)?))
     }
 
     /// Get total commit count in the given time window.
@@ -164,15 +203,16 @@ fn parse_rename(raw: &str) -> Option<(PathBuf, PathBuf)> {
         .map(|(old, new)| (PathBuf::from(old), PathBuf::from(new)))
 }
 
-/// Parse `git log --numstat` output into per-file churn data.
+/// Parse `git log --numstat --format=%x01%H%x1f%aN%x1f%ct` output into
+/// per-commit records (newest first, matching git log order).
 ///
 /// Rename entries (`old => new`) are followed so that a renamed file's
-/// full history is aggregated under its current name. Relies on git log
-/// listing commits newest-first, so a rename is seen before the renamed
-/// file's older entries.
-fn parse_numstat(output: &str) -> Vec<FileChurn> {
+/// full history appears under its current name. Relies on git log listing
+/// commits newest-first, so a rename is seen before the renamed file's
+/// older entries.
+fn parse_log(output: &str) -> Vec<CommitRecord> {
     let mut final_name: HashMap<PathBuf, PathBuf> = HashMap::new();
-    let mut records: Vec<(usize, usize, PathBuf)> = Vec::new();
+    let mut commits: Vec<CommitRecord> = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
@@ -180,39 +220,90 @@ fn parse_numstat(output: &str) -> Vec<FileChurn> {
             continue;
         }
 
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() == 3 {
-            let added = parts[0].parse::<usize>().unwrap_or(0);
-            let deleted = parts[1].parse::<usize>().unwrap_or(0);
+        if let Some(header) = line.strip_prefix(HEADER_MARK) {
+            let mut fields = header.splitn(3, FIELD_SEP);
+            let hash = fields.next().unwrap_or("").to_string();
+            let author = fields.next().unwrap_or("").to_string();
+            let timestamp = fields
+                .next()
+                .and_then(|t| t.parse::<i64>().ok())
+                .unwrap_or(0);
+            commits.push(CommitRecord {
+                hash,
+                author,
+                timestamp,
+                files: Vec::new(),
+            });
+            continue;
+        }
 
-            if let Some((old, new)) = parse_rename(parts[2]) {
-                // Chained renames resolve to the newest name because newer
-                // commits (and their rename entries) were processed first.
-                let target = final_name.get(&new).cloned().unwrap_or(new);
-                final_name.insert(old, target.clone());
-                records.push((added, deleted, target));
-            } else {
-                records.push((added, deleted, PathBuf::from(parts[2])));
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() != 3 {
+            continue;
+        }
+        // Numstat before any header would indicate malformed input; skip it.
+        let Some(commit) = commits.last_mut() else {
+            continue;
+        };
+
+        let added = parts[0].parse::<usize>().unwrap_or(0);
+        let deleted = parts[1].parse::<usize>().unwrap_or(0);
+
+        let path = if let Some((old, new)) = parse_rename(parts[2]) {
+            // Chained renames resolve to the newest name because newer
+            // commits (and their rename entries) were processed first.
+            let target = final_name.get(&new).cloned().unwrap_or(new);
+            final_name.insert(old, target.clone());
+            target
+        } else {
+            PathBuf::from(parts[2])
+        };
+
+        commit.files.push(FileChange {
+            path,
+            added,
+            deleted,
+        });
+    }
+
+    // Second pass: non-rename records were stored with their raw path,
+    // which may be an old name whose rename entry appeared earlier
+    // (i.e. in a newer commit). Rewrite them to the final name.
+    if !final_name.is_empty() {
+        for commit in &mut commits {
+            for change in &mut commit.files {
+                if let Some(target) = final_name.get(&change.path) {
+                    change.path = target.clone();
+                }
             }
         }
     }
 
-    let mut file_map: HashMap<PathBuf, (usize, usize, usize)> = HashMap::new();
-    for (added, deleted, path) in records {
-        let key = final_name.get(&path).cloned().unwrap_or(path);
-        let entry = file_map.entry(key).or_insert((0, 0, 0));
-        entry.0 += 1;
-        entry.1 += added;
-        entry.2 += deleted;
+    commits
+}
+
+/// Aggregate per-commit records into per-file churn data,
+/// sorted by commit count (descending).
+fn aggregate_churn(commits: &[CommitRecord]) -> Vec<FileChurn> {
+    let mut file_map: HashMap<PathBuf, (usize, usize, usize, i64)> = HashMap::new();
+    for commit in commits {
+        for change in &commit.files {
+            let entry = file_map.entry(change.path.clone()).or_insert((0, 0, 0, 0));
+            entry.0 += 1;
+            entry.1 += change.added;
+            entry.2 += change.deleted;
+            entry.3 = entry.3.max(commit.timestamp);
+        }
     }
 
     let mut churns: Vec<FileChurn> = file_map
         .into_iter()
-        .map(|(path, (commits, added, deleted))| FileChurn {
+        .map(|(path, (commits, added, deleted, last_ts))| FileChurn {
             path,
             commits,
             lines_added: added,
             lines_deleted: deleted,
+            last_commit_ts: last_ts,
         })
         .collect();
 
@@ -258,16 +349,53 @@ pub fn parse_since(input: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_numstat_empty() {
-        let result = parse_numstat("");
-        assert!(result.is_empty());
+    /// Build a header line in the `%x01%H%x1f%aN%x1f%ct` format.
+    fn header(hash: &str, author: &str, ts: i64) -> String {
+        format!("\u{01}{hash}\u{1f}{author}\u{1f}{ts}")
     }
 
     #[test]
-    fn test_parse_numstat_single_commit() {
-        let input = "abc1234\n5\t3\tsrc/main.rs\n2\t1\tsrc/lib.rs\n";
-        let result = parse_numstat(input);
+    fn test_parse_log_empty() {
+        assert!(parse_log("").is_empty());
+    }
+
+    #[test]
+    fn test_parse_log_single_commit() {
+        let input = format!(
+            "{}\n5\t3\tsrc/main.rs\n2\t1\tsrc/lib.rs\n",
+            header("abc1234", "Alice", 1_700_000_000)
+        );
+        let commits = parse_log(&input);
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].hash, "abc1234");
+        assert_eq!(commits[0].author, "Alice");
+        assert_eq!(commits[0].timestamp, 1_700_000_000);
+        assert_eq!(commits[0].files.len(), 2);
+        assert_eq!(commits[0].files[0].path, Path::new("src/main.rs"));
+        assert_eq!(commits[0].files[0].added, 5);
+        assert_eq!(commits[0].files[0].deleted, 3);
+    }
+
+    #[test]
+    fn test_parse_log_merge_commit_has_no_files() {
+        let input = format!(
+            "{}\n{}\n5\t3\tsrc/main.rs\n",
+            header("merge01", "Alice", 1_700_000_100),
+            header("abc1234", "Bob", 1_700_000_000)
+        );
+        let commits = parse_log(&input);
+        assert_eq!(commits.len(), 2);
+        assert!(commits[0].files.is_empty());
+        assert_eq!(commits[1].files.len(), 1);
+    }
+
+    #[test]
+    fn test_churn_single_commit() {
+        let input = format!(
+            "{}\n5\t3\tsrc/main.rs\n2\t1\tsrc/lib.rs\n",
+            header("abc1234", "Alice", 1_700_000_000)
+        );
+        let result = aggregate_churn(&parse_log(&input));
         assert_eq!(result.len(), 2);
         let main = result
             .iter()
@@ -276,23 +404,33 @@ mod tests {
         assert_eq!(main.commits, 1);
         assert_eq!(main.lines_added, 5);
         assert_eq!(main.lines_deleted, 3);
+        assert_eq!(main.last_commit_ts, 1_700_000_000);
     }
 
     #[test]
-    fn test_parse_numstat_multiple_commits_same_file() {
-        let input = "abc1234\n5\t3\tsrc/main.rs\n\ndef5678\n10\t2\tsrc/main.rs\n";
-        let result = parse_numstat(input);
+    fn test_churn_multiple_commits_same_file() {
+        // Newest first: last_commit_ts must come from the newest commit.
+        let input = format!(
+            "{}\n5\t3\tsrc/main.rs\n\n{}\n10\t2\tsrc/main.rs\n",
+            header("abc1234", "Alice", 1_700_000_200),
+            header("def5678", "Bob", 1_700_000_100)
+        );
+        let result = aggregate_churn(&parse_log(&input));
         assert_eq!(result.len(), 1);
         let main = &result[0];
         assert_eq!(main.commits, 2);
         assert_eq!(main.lines_added, 15);
         assert_eq!(main.lines_deleted, 5);
+        assert_eq!(main.last_commit_ts, 1_700_000_200);
     }
 
     #[test]
-    fn test_parse_numstat_binary_files() {
-        let input = "abc1234\n-\t-\timage.png\n5\t3\tsrc/main.rs\n";
-        let result = parse_numstat(input);
+    fn test_churn_binary_files() {
+        let input = format!(
+            "{}\n-\t-\timage.png\n5\t3\tsrc/main.rs\n",
+            header("abc1234", "Alice", 1_700_000_000)
+        );
+        let result = aggregate_churn(&parse_log(&input));
         let png = result
             .iter()
             .find(|f| f.path == Path::new("image.png"))
@@ -328,34 +466,52 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_numstat_rename_merges_history() {
+    fn test_rename_merges_history() {
         // newest-first: rename commit, then older history under the old name
-        let input = "\
-aaa111\n3\t1\tsrc/new.rs\n\n\
-bbb222\n0\t0\tsrc/{old.rs => new.rs}\n\n\
-ccc333\n10\t2\tsrc/old.rs\n\n\
-ddd444\n5\t0\tsrc/old.rs\n";
-        let result = parse_numstat(input);
+        let input = format!(
+            "{}\n3\t1\tsrc/new.rs\n\n{}\n0\t0\tsrc/{{old.rs => new.rs}}\n\n{}\n10\t2\tsrc/old.rs\n\n{}\n5\t0\tsrc/old.rs\n",
+            header("aaa111", "Alice", 1_700_000_400),
+            header("bbb222", "Alice", 1_700_000_300),
+            header("ccc333", "Bob", 1_700_000_200),
+            header("ddd444", "Bob", 1_700_000_100)
+        );
+        let result = aggregate_churn(&parse_log(&input));
         assert_eq!(result.len(), 1, "old and new names must merge: {result:?}");
         let f = &result[0];
         assert_eq!(f.path, PathBuf::from("src/new.rs"));
         assert_eq!(f.commits, 4);
         assert_eq!(f.lines_added, 18);
         assert_eq!(f.lines_deleted, 3);
+        assert_eq!(f.last_commit_ts, 1_700_000_400);
     }
 
     #[test]
-    fn test_parse_numstat_chained_rename() {
+    fn test_chained_rename() {
         // b => c (newer), then a => b (older): everything lands on c
-        let input = "\
-aaa\n0\t0\tb.rs => c.rs\n\n\
-bbb\n0\t0\ta.rs => b.rs\n\n\
-ccc\n7\t1\ta.rs\n";
-        let result = parse_numstat(input);
+        let input = format!(
+            "{}\n0\t0\tb.rs => c.rs\n\n{}\n0\t0\ta.rs => b.rs\n\n{}\n7\t1\ta.rs\n",
+            header("aaa", "Alice", 1_700_000_300),
+            header("bbb", "Alice", 1_700_000_200),
+            header("ccc", "Alice", 1_700_000_100)
+        );
+        let result = aggregate_churn(&parse_log(&input));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].path, PathBuf::from("c.rs"));
         assert_eq!(result[0].commits, 3);
         assert_eq!(result[0].lines_added, 7);
+    }
+
+    #[test]
+    fn test_rename_rewrites_commit_records() {
+        // A commit under the old name must surface the final name in
+        // CommitRecord.files too, not just in the churn aggregate.
+        let input = format!(
+            "{}\n0\t0\told.rs => new.rs\n\n{}\n7\t1\told.rs\n",
+            header("aaa", "Alice", 1_700_000_200),
+            header("bbb", "Alice", 1_700_000_100)
+        );
+        let commits = parse_log(&input);
+        assert_eq!(commits[1].files[0].path, PathBuf::from("new.rs"));
     }
 
     #[test]
@@ -408,24 +564,28 @@ ccc\n7\t1\ta.rs\n";
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_file_churn_empty_repo() {
-        let temp = tempfile::TempDir::new().unwrap();
+    fn init_repo(dir: &Path) {
         Command::new("git")
             .args(["init"])
-            .current_dir(temp.path())
+            .current_dir(dir)
             .output()
             .unwrap();
         Command::new("git")
             .args(["config", "user.email", "test@test.com"])
-            .current_dir(temp.path())
+            .current_dir(dir)
             .output()
             .unwrap();
         Command::new("git")
             .args(["config", "user.name", "Test"])
-            .current_dir(temp.path())
+            .current_dir(dir)
             .output()
             .unwrap();
+    }
+
+    #[test]
+    fn test_file_churn_empty_repo() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
         let client = GitClient::detect(temp.path()).unwrap();
         let churns = client.file_churn("90 days ago").unwrap();
         assert!(churns.is_empty());
@@ -434,21 +594,7 @@ ccc\n7\t1\ta.rs\n";
     #[test]
     fn test_file_churn_with_commits() {
         let temp = tempfile::TempDir::new().unwrap();
-        Command::new("git")
-            .args(["init"])
-            .current_dir(temp.path())
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(temp.path())
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(temp.path())
-            .output()
-            .unwrap();
+        init_repo(temp.path());
 
         std::fs::write(temp.path().join("hello.rs"), "fn main() {}\n").unwrap();
         Command::new("git")
@@ -483,5 +629,33 @@ ccc\n7\t1\ta.rs\n";
         assert_eq!(churns.len(), 1);
         assert_eq!(churns[0].path, PathBuf::from("hello.rs"));
         assert_eq!(churns[0].commits, 2);
+        assert!(churns[0].last_commit_ts > 0);
+    }
+
+    #[test]
+    fn test_commit_log_with_commits() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+
+        std::fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        let client = GitClient::detect(temp.path()).unwrap();
+        let commits = client.commit_log("90 days ago").unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].author, "Test");
+        assert!(commits[0].timestamp > 0);
+        assert!(!commits[0].hash.is_empty());
+        assert_eq!(commits[0].files.len(), 1);
+        assert_eq!(commits[0].files[0].path, PathBuf::from("a.rs"));
     }
 }

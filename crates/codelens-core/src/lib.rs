@@ -42,7 +42,7 @@ pub use analyzer::stats::{
 };
 pub use config::Config;
 pub use error::{Error, Result};
-pub use git::{FileChurn, GitClient};
+pub use git::{CommitRecord, FileChange, FileChurn, GitClient};
 pub use insight::estimation::{
     CocomoBasicModel, CocomoIIModel, CostConfig, EstimationComparison, EstimationModel,
     EstimationReport, LocomoModel, ProjectType, PutnamModel,

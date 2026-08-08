@@ -133,12 +133,14 @@ fn test_hotspot_end_to_end() {
             commits: 45,
             lines_added: 800,
             lines_deleted: 300,
+            last_commit_ts: 1_700_000_200,
         },
         codelens_core::git::FileChurn {
             path: PathBuf::from("src/main.rs"),
             commits: 10,
             lines_added: 50,
             lines_deleted: 20,
+            last_commit_ts: 1_700_000_100,
         },
     ];
 

@@ -146,24 +146,28 @@ mod tests {
                 commits: 50,
                 lines_added: 500,
                 lines_deleted: 200,
+                last_commit_ts: 1_700_000_400,
             },
             FileChurn {
                 path: PathBuf::from("warm.rs"),
                 commits: 10,
                 lines_added: 100,
                 lines_deleted: 50,
+                last_commit_ts: 1_700_000_300,
             },
             FileChurn {
                 path: PathBuf::from("cold.rs"),
                 commits: 2,
                 lines_added: 10,
                 lines_deleted: 5,
+                last_commit_ts: 1_700_000_200,
             },
             FileChurn {
                 path: PathBuf::from("deleted.rs"),
                 commits: 5,
                 lines_added: 30,
                 lines_deleted: 30,
+                last_commit_ts: 1_700_000_100,
             },
         ]
     }
