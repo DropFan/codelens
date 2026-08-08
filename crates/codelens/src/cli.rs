@@ -73,6 +73,15 @@ pub enum Command {
         \"latest~N\" (Nth before latest), or date prefix like \"2025-01-01\"."
     )]
     Trend(TrendArgs),
+    /// Run as an MCP server over stdio (for AI coding agents).
+    #[cfg(feature = "mcp")]
+    #[command(
+        long_about = "Speak the Model Context Protocol over stdio so AI coding agents \
+        (Claude Code, Cursor, ...) can query repository statistics, health scores, \
+        hotspots, and change coupling. Register with e.g.:\n\
+        claude mcp add codelens -- codelens mcp"
+    )]
+    Mcp,
     /// Estimate development cost using pluggable models.
     #[command(
         long_about = "Estimate development cost, schedule, and team size. Built-in models:\n\

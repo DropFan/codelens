@@ -1,6 +1,8 @@
 //! Codelens CLI - High performance code analysis tool.
 
 mod cli;
+#[cfg(feature = "mcp")]
+mod mcp;
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -54,6 +56,8 @@ fn run() -> Result<ExitCode> {
                 run_coupling(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
             }
             cli::Command::Trend(args) => run_trend(args, &cli.advanced).map(|()| ExitCode::SUCCESS),
+            #[cfg(feature = "mcp")]
+            cli::Command::Mcp => mcp::run().map(|()| ExitCode::SUCCESS),
             cli::Command::Estimate(args) => {
                 run_estimate(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
             }
