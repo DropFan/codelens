@@ -30,6 +30,8 @@ pub struct FileAnalyzer {
     no_min_gen: bool,
     /// Linguist attributes from .gitattributes (overrides + exclusions).
     linguist: Option<Arc<crate::language::LinguistAttributes>>,
+    /// Sink for per-file line hashes (ULOC / duplication analysis).
+    dup_sink: Option<Arc<super::duplication::DuplicationSink>>,
 }
 
 /// Average bytes per line above which a file is considered minified
@@ -95,6 +97,7 @@ impl FileAnalyzer {
                 .then(|| Mutex::new(HashSet::new())),
             no_min_gen: config.filter.no_min_gen,
             linguist: None,
+            dup_sink: None,
         }
     }
 
@@ -102,6 +105,13 @@ impl FileAnalyzer {
     /// and vendored/generated exclusion.
     pub fn with_linguist(mut self, linguist: Arc<crate::language::LinguistAttributes>) -> Self {
         self.linguist = Some(linguist);
+        self
+    }
+
+    /// Attach a duplication sink; every analyzed file reports its line
+    /// hashes there for ULOC / duplication computation.
+    pub fn with_duplication_sink(mut self, sink: Arc<super::duplication::DuplicationSink>) -> Self {
+        self.dup_sink = Some(sink);
         self
     }
 
@@ -203,11 +213,17 @@ impl FileAnalyzer {
         let text = String::from_utf8_lossy(content);
         let complexity = self.complexity_analyzer.analyze(&text, &language);
 
+        // Contribute line hashes for the post-walk duplication pass.
+        if let Some(sink) = &self.dup_sink {
+            sink.record(path.to_path_buf(), super::duplication::line_hashes(content));
+        }
+
         Ok(Some(FileStats {
             path: path.to_path_buf(),
             language: language.name.clone(),
             lines,
             size,
+            duplicate_lines: 0,
             complexity,
         }))
     }

@@ -25,7 +25,7 @@ impl ScoringModel for DefaultModel {
         &[
             DimensionWeight {
                 dimension: HealthDimension::Complexity,
-                weight: 0.30,
+                weight: 0.25,
             },
             DimensionWeight {
                 dimension: HealthDimension::FuncSize,
@@ -33,7 +33,7 @@ impl ScoringModel for DefaultModel {
             },
             DimensionWeight {
                 dimension: HealthDimension::CommentRatio,
-                weight: 0.15,
+                weight: 0.10,
             },
             DimensionWeight {
                 dimension: HealthDimension::FileSize,
@@ -42,6 +42,10 @@ impl ScoringModel for DefaultModel {
             DimensionWeight {
                 dimension: HealthDimension::NestingDepth,
                 weight: 0.15,
+            },
+            DimensionWeight {
+                dimension: HealthDimension::Duplication,
+                weight: 0.10,
             },
         ]
     }
@@ -53,6 +57,7 @@ impl ScoringModel for DefaultModel {
             HealthDimension::CommentRatio => score_comment_ratio(metrics.comment_ratio),
             HealthDimension::FileSize => score_file_size(metrics.avg_file_lines),
             HealthDimension::NestingDepth => score_nesting(metrics.depth),
+            HealthDimension::Duplication => score_duplication(metrics.duplication_ratio),
         }
     }
 }
@@ -130,6 +135,24 @@ fn score_file_size(avg_lines: f64) -> f64 {
             (600.0, 60.0),
             (1000.0, 40.0),
             (2000.0, 20.0),
+        ],
+    )
+}
+
+/// Duplicated line instances / non-blank lines. Structural noise
+/// (brace-only lines, repeated imports) duplicates in every codebase, so
+/// the curve treats a moderate baseline as healthy and only punishes
+/// clearly copy-paste-heavy ratios.
+fn score_duplication(ratio: f64) -> f64 {
+    interpolate(
+        ratio,
+        &[
+            (0.00, 100.0),
+            (0.30, 100.0),
+            (0.40, 80.0),
+            (0.50, 60.0),
+            (0.60, 40.0),
+            (0.75, 20.0),
         ],
     )
 }
@@ -215,6 +238,7 @@ mod tests {
             depth: 2,
             avg_file_lines: 100.0,
             total_files: 10,
+            duplication_ratio: 0.0,
         };
         let score = model.total_score(&metrics);
         assert!(
@@ -233,6 +257,7 @@ mod tests {
             depth: 10,
             avg_file_lines: 1500.0,
             total_files: 5,
+            duplication_ratio: 0.0,
         };
         let score = model.total_score(&metrics);
         assert!(

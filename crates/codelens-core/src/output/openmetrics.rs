@@ -162,6 +162,7 @@ mod tests {
                 blank: 1,
             },
             size: 100,
+            duplicate_lines: 0,
             complexity: Default::default(),
         }];
         let result = AnalysisResult {

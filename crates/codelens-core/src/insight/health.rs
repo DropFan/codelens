@@ -266,6 +266,7 @@ mod tests {
                     blank: 5,
                 },
                 size: 1000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 3,
                     cyclomatic: 6,
@@ -284,6 +285,7 @@ mod tests {
                     blank: 90,
                 },
                 size: 10000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 2,
                     cyclomatic: 30,
@@ -302,6 +304,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 1500,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 5,
                     cyclomatic: 10,

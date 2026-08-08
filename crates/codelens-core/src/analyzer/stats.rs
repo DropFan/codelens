@@ -17,6 +17,11 @@ pub struct FileStats {
     pub lines: LineStats,
     /// File size in bytes.
     pub size: u64,
+    /// Non-blank lines whose content also appears elsewhere in the
+    /// analyzed tree (or repeats within this file). `serde(default)`
+    /// keeps snapshots from older versions loadable.
+    #[serde(default)]
+    pub duplicate_lines: usize,
     /// Complexity metrics.
     pub complexity: Complexity,
 }
@@ -213,6 +218,14 @@ pub struct Summary {
     /// Line statistics of those test files.
     #[serde(default)]
     pub test_lines: LineStats,
+    /// Unique lines of code across the tree (distinct non-blank line
+    /// contents, whitespace-trimmed) — scc's ULOC. Zero when duplication
+    /// collection was skipped.
+    #[serde(default)]
+    pub uloc: usize,
+    /// Total duplicated line instances (sum of per-file duplicate_lines).
+    #[serde(default)]
+    pub duplicate_lines: usize,
 }
 
 impl Summary {
@@ -235,6 +248,7 @@ impl Summary {
                 summary.test_files += 1;
                 summary.test_lines.add(&file.lines);
             }
+            summary.duplicate_lines += file.duplicate_lines;
 
             let lang_summary = by_language.entry(file.language.clone()).or_default();
             lang_summary.files += 1;
@@ -453,6 +467,7 @@ mod tests {
                 blank: 5,
             },
             size: 100,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 1,
                 cyclomatic: 2,
@@ -769,6 +784,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 2000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 5,
                     cyclomatic: 10,
@@ -787,6 +803,7 @@ mod tests {
                     blank: 5,
                 },
                 size: 1000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 3,
                     cyclomatic: 6,
@@ -805,6 +822,7 @@ mod tests {
                     blank: 5,
                 },
                 size: 500,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 2,
                     cyclomatic: 4,

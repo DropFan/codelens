@@ -311,6 +311,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 2000,
+                duplicate_lines: 0,
                 complexity: Default::default(),
             },
             FileStats {
@@ -323,6 +324,7 @@ mod tests {
                     blank: 5,
                 },
                 size: 1000,
+                duplicate_lines: 0,
                 complexity: Default::default(),
             },
         ];

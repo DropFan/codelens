@@ -345,6 +345,7 @@ mod tests {
                     blank: 0,
                 },
                 size: 1000,
+                duplicate_lines: 0,
                 complexity: Default::default(),
             })
             .collect();

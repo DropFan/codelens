@@ -14,6 +14,7 @@ pub enum HealthDimension {
     CommentRatio,
     FileSize,
     NestingDepth,
+    Duplication,
 }
 
 impl std::fmt::Display for HealthDimension {
@@ -24,6 +25,7 @@ impl std::fmt::Display for HealthDimension {
             Self::CommentRatio => write!(f, "Comment %"),
             Self::FileSize => write!(f, "File Size"),
             Self::NestingDepth => write!(f, "Nesting"),
+            Self::Duplication => write!(f, "Duplication"),
         }
     }
 }
@@ -43,6 +45,9 @@ pub struct RawMetrics {
     pub depth: usize,
     pub avg_file_lines: f64,
     pub total_files: usize,
+    /// Duplicated line instances / non-blank lines (0.0 when duplication
+    /// data is absent, e.g. snapshots from older versions).
+    pub duplication_ratio: f64,
 }
 
 impl RawMetrics {
@@ -57,6 +62,12 @@ impl RawMetrics {
         } else {
             0.0
         };
+        let non_blank = file.lines.total.saturating_sub(file.lines.blank);
+        let duplication_ratio = if non_blank > 0 {
+            file.duplicate_lines as f64 / non_blank as f64
+        } else {
+            0.0
+        };
         Self {
             avg_cyclomatic,
             avg_func_lines: file.complexity.avg_func_lines,
@@ -64,6 +75,7 @@ impl RawMetrics {
             depth: file.complexity.max_depth,
             avg_file_lines: file.lines.total as f64,
             total_files: 1,
+            duplication_ratio,
         }
     }
 
@@ -107,6 +119,15 @@ impl RawMetrics {
         };
         let avg_file_lines = total_lines as f64 / files.len() as f64;
 
+        let total_blank: usize = files.iter().map(|f| f.lines.blank).sum();
+        let total_dup: usize = files.iter().map(|f| f.duplicate_lines).sum();
+        let non_blank = total_lines.saturating_sub(total_blank);
+        let duplication_ratio = if non_blank > 0 {
+            total_dup as f64 / non_blank as f64
+        } else {
+            0.0
+        };
+
         Self {
             avg_cyclomatic,
             avg_func_lines,
@@ -114,6 +135,7 @@ impl RawMetrics {
             depth,
             avg_file_lines,
             total_files: files.len(),
+            duplication_ratio,
         }
     }
 
@@ -181,6 +203,7 @@ mod tests {
                 blank: 10,
             },
             size: 2000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 4,
                 cyclomatic: 12,
@@ -208,6 +231,7 @@ mod tests {
                 blank: 10,
             },
             size: 5000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 10,
                 cyclomatic: 20,
@@ -227,6 +251,7 @@ mod tests {
                 blank: 200,
             },
             size: 90_000,
+            duplicate_lines: 0,
             complexity: Complexity::default(),
         };
 
@@ -257,6 +282,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 2000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 4,
                     cyclomatic: 12,
@@ -275,6 +301,7 @@ mod tests {
                     blank: 5,
                 },
                 size: 1000,
+                duplicate_lines: 0,
                 complexity: Complexity {
                     functions: 2,
                     cyclomatic: 6,

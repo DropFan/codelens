@@ -89,6 +89,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 2000,
+                duplicate_lines: 0,
                 complexity: Default::default(),
             }],
             summary: Summary::from_file_stats(&[FileStats {
@@ -101,6 +102,7 @@ mod tests {
                     blank: 10,
                 },
                 size: 2000,
+                duplicate_lines: 0,
                 complexity: Default::default(),
             }]),
             elapsed: Duration::from_millis(100),

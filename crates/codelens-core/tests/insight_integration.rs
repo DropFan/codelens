@@ -21,6 +21,7 @@ fn make_realistic_result() -> AnalysisResult {
                 blank: 15,
             },
             size: 3000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 5,
                 cyclomatic: 12,
@@ -39,6 +40,7 @@ fn make_realistic_result() -> AnalysisResult {
                 blank: 40,
             },
             size: 8000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 8,
                 cyclomatic: 35,
@@ -57,6 +59,7 @@ fn make_realistic_result() -> AnalysisResult {
                 blank: 60,
             },
             size: 15000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 12,
                 cyclomatic: 60,
@@ -75,6 +78,7 @@ fn make_realistic_result() -> AnalysisResult {
                 blank: 10,
             },
             size: 2000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 6,
                 cyclomatic: 8,
@@ -93,6 +97,7 @@ fn make_realistic_result() -> AnalysisResult {
                 blank: 30,
             },
             size: 4000,
+            duplicate_lines: 0,
             complexity: Complexity {
                 functions: 10,
                 cyclomatic: 15,
@@ -119,7 +124,7 @@ fn test_health_end_to_end() {
     let report = health::score(&result, &model, 10);
 
     assert!(report.score > 0.0 && report.score <= 100.0);
-    assert_eq!(report.dimensions.len(), 5);
+    assert_eq!(report.dimensions.len(), 6);
     assert!(!report.worst_files.is_empty());
     assert!(!report.by_directory.is_empty());
     // Worst file should be expr.rs (highest complexity, largest)
@@ -174,6 +179,7 @@ fn test_trend_save_and_diff() {
             blank: 20,
         },
         size: 4000,
+        duplicate_lines: 0,
         complexity: Complexity {
             functions: 8,
             cyclomatic: 16,

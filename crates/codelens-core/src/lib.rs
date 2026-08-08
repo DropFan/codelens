@@ -71,7 +71,9 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         registry.map_extension(ext, lang)?;
     }
     let registry = Arc::new(registry);
-    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config);
+    let dup_sink = Arc::new(analyzer::duplication::DuplicationSink::default());
+    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config)
+        .with_duplication_sink(Arc::clone(&dup_sink));
     if !config.filter.no_linguist {
         // Root .gitattributes of the first analyzed tree; matches GitHub's
         // counting for the common single-root case.
@@ -119,8 +121,18 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
         )?;
     }
 
+    // Duplication post-pass: with all line hashes gathered, each file
+    // learns its duplicated-line count and the project gets its ULOC.
+    let (uloc, mut per_file_dup) = dup_sink.finish();
+    for stats in &mut all_stats {
+        if let Some(dup) = per_file_dup.remove(&stats.path) {
+            stats.duplicate_lines = dup;
+        }
+    }
+
     // Build summary, ordered by the configured sort key
     let mut summary = Summary::from_file_stats(&all_stats);
+    summary.uloc = uloc;
     summary.sort_languages(config.output.sort_by);
     let elapsed = start.elapsed();
 

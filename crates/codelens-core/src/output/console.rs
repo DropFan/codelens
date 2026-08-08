@@ -222,6 +222,22 @@ impl ConsoleOutput {
                 ]);
             }
         }
+        if summary.uloc > 0 {
+            let non_blank = summary.lines.total.saturating_sub(summary.lines.blank);
+            let dryness = if non_blank > 0 {
+                summary.uloc as f64 / non_blank as f64 * 100.0
+            } else {
+                100.0
+            };
+            table.add_row(vec![
+                Cell::new("ULOC / DRYness"),
+                Cell::new(format!(
+                    "{} / {:.0}%",
+                    Self::format_number(summary.uloc),
+                    dryness
+                )),
+            ]);
+        }
         if options.show_tokens {
             table.add_row(vec![
                 Cell::new("LLM Tokens (est.)"),
@@ -1055,6 +1071,7 @@ mod tests {
                 blank: 1,
             },
             size: 100,
+            duplicate_lines: 0,
             complexity: Default::default(),
         }];
         AnalysisResult {
