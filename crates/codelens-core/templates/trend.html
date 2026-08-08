@@ -63,6 +63,15 @@
             {% endfor %}
         </section>
 
+        {% if !history.is_empty() %}
+        <section class="charts-section" style="grid-template-columns: 1fr;">
+            <div class="chart-container">
+                <h3>History ({{ history.len() }} snapshots)</h3>
+                <canvas id="historyChart"></canvas>
+            </div>
+        </section>
+        {% endif %}
+
         <section class="charts-section">
             <div class="chart-container">
                 <h3>Before vs After</h3>
@@ -102,6 +111,34 @@
     </div>
 
     <script>
+        {% if !history.is_empty() %}
+        const history = [
+            {% for p in history %}
+            { date: "{{ p.date }}", label: "{{ p.label }}", code: {{ p.code }}, cyclomatic: {{ p.cyclomatic }}, files: {{ p.files }} },
+            {% endfor %}
+        ];
+        new Chart(document.getElementById('historyChart'), {
+            type: 'line',
+            data: {
+                labels: history.map(p => p.label ? `${p.date} (${p.label})` : p.date),
+                datasets: [
+                    { label: 'Code Lines', data: history.map(p => p.code), borderColor: '#58a6ff', backgroundColor: '#58a6ff33', tension: 0.2, yAxisID: 'y' },
+                    { label: 'Complexity', data: history.map(p => p.cyclomatic), borderColor: '#d29922', backgroundColor: '#d2992233', tension: 0.2, yAxisID: 'y1' },
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y: { position: 'left', ticks: { color: '#58a6ff' }, grid: { color: '#21262d' } },
+                    y1: { position: 'right', ticks: { color: '#d29922' }, grid: { drawOnChartArea: false } },
+                    x: { ticks: { color: '#8b949e', maxRotation: 45 }, grid: { display: false } }
+                },
+                plugins: { legend: { labels: { color: '#f0f6fc' } } }
+            }
+        });
+        {% endif %}
+
         const metrics = [
             {% for m in metrics %}
             { label: "{{ m.label }}", from: {{ m.from_value }}, to: {{ m.to_value }} },

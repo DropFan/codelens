@@ -121,6 +121,14 @@ struct HtmlLanguageTrend {
     code_delta_display: String,
 }
 
+struct HtmlHistoryPoint {
+    date: String,
+    label: String,
+    code: usize,
+    cyclomatic: usize,
+    files: usize,
+}
+
 #[derive(Template)]
 #[template(path = "trend.html")]
 struct TrendHtmlReport {
@@ -130,6 +138,7 @@ struct TrendHtmlReport {
     to_label: String,
     metrics: Vec<HtmlTrendMetric>,
     by_language: Vec<HtmlLanguageTrend>,
+    history: Vec<HtmlHistoryPoint>,
 }
 
 // ── Estimation ──────────────────────────────────────────
@@ -498,6 +507,23 @@ impl HtmlOutput {
             })
             .collect();
 
+        // The history chart needs at least two points to be a line.
+        let history: Vec<HtmlHistoryPoint> = if report.history.len() >= 2 {
+            report
+                .history
+                .iter()
+                .map(|p| HtmlHistoryPoint {
+                    date: p.timestamp.format("%Y-%m-%d").to_string(),
+                    label: p.label.clone().unwrap_or_default(),
+                    code: p.code,
+                    cyclomatic: p.cyclomatic,
+                    files: p.files,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         let html = TrendHtmlReport {
             from_date: report.from.timestamp.format("%Y-%m-%d").to_string(),
             from_label: report.from.label.as_deref().unwrap_or("").to_string(),
@@ -505,6 +531,7 @@ impl HtmlOutput {
             to_label: report.to.label.as_deref().unwrap_or("").to_string(),
             metrics,
             by_language,
+            history,
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())

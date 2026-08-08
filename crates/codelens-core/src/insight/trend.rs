@@ -70,6 +70,39 @@ pub struct TrendReport {
     pub to: SnapshotMeta,
     pub delta: TrendDelta,
     pub by_language: Vec<LanguageTrend>,
+    /// Full snapshot history (oldest first) for charting; empty when not
+    /// loaded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<HistoryPoint>,
+}
+
+/// One snapshot's headline metrics, for history charts.
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryPoint {
+    pub timestamp: DateTime<Utc>,
+    pub label: Option<String>,
+    pub files: usize,
+    pub code: usize,
+    pub cyclomatic: usize,
+}
+
+/// Load every snapshot's headline metrics, oldest first.
+pub fn history(project_root: &Path) -> Result<Vec<HistoryPoint>> {
+    let metas = list_snapshots(project_root)?;
+    let mut points = Vec::with_capacity(metas.len());
+    for meta in metas {
+        let Ok(snapshot) = load_snapshot(&meta.file_path) else {
+            continue;
+        };
+        points.push(HistoryPoint {
+            timestamp: snapshot.timestamp,
+            label: snapshot.label,
+            files: snapshot.result.summary.total_files,
+            code: snapshot.result.summary.lines.code,
+            cyclomatic: snapshot.result.summary.complexity.cyclomatic,
+        });
+    }
+    Ok(points)
 }
 
 fn snapshots_dir(project_root: &Path) -> PathBuf {
@@ -289,6 +322,7 @@ pub fn diff(project_root: &Path, from_ref: &str, to_ref: &str) -> Result<TrendRe
         },
         delta,
         by_language,
+        history: Vec::new(),
     })
 }
 

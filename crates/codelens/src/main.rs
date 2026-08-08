@@ -650,7 +650,10 @@ fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> Result<()> 
         ("latest~1", "latest")
     };
 
-    let report = trend::diff(&project_root, from_ref, to_ref)?;
+    let mut report = trend::diff(&project_root, from_ref, to_ref)?;
+    // Full history feeds the HTML chart and JSON consumers; losing it
+    // (e.g. one unreadable snapshot) never blocks the comparison.
+    report.history = trend::history(&project_root).unwrap_or_default();
     let output_config = trend_output_config(args);
     write_report(Report::Trend(report), &output_config)
 }
