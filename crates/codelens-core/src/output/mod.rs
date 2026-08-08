@@ -8,6 +8,7 @@ mod html;
 mod json;
 mod markdown;
 mod openmetrics;
+mod sarif;
 
 pub use badge::BadgeOutput;
 pub use console::ConsoleOutput;
@@ -17,6 +18,7 @@ pub use html::HtmlOutput;
 pub use json::JsonOutput;
 pub use markdown::MarkdownOutput;
 pub use openmetrics::OpenMetricsOutput;
+pub use sarif::SarifOutput;
 
 use crate::config::OutputFormatType;
 
@@ -30,5 +32,6 @@ pub fn create_output(format: OutputFormatType) -> Box<dyn OutputFormat> {
         OutputFormatType::Html => Box::new(HtmlOutput::new()),
         OutputFormatType::OpenMetrics => Box::new(OpenMetricsOutput::new()),
         OutputFormatType::Badge => Box::new(BadgeOutput::new()),
+        OutputFormatType::Sarif => Box::new(SarifOutput::new()),
     }
 }

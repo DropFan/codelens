@@ -122,6 +122,8 @@ pub enum OutputFormatType {
     OpenMetrics,
     /// shields.io endpoint badge JSON.
     Badge,
+    /// SARIF 2.1.0 (GitHub code scanning / reviewdog).
+    Sarif,
 }
 
 /// Sort order for results.

@@ -438,6 +438,8 @@ pub enum OutputFormatArg {
     Openmetrics,
     /// shields.io endpoint badge JSON.
     Badge,
+    /// SARIF 2.1.0 for GitHub code scanning / reviewdog.
+    Sarif,
 }
 
 /// Sort order argument.
