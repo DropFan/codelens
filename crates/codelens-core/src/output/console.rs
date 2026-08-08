@@ -191,6 +191,27 @@ impl ConsoleOutput {
             Cell::new("Functions"),
             Cell::new(Self::format_number(summary.complexity.functions)),
         ]);
+        if summary.test_files > 0 {
+            let prod_code = summary.lines.code.saturating_sub(summary.test_lines.code);
+            table.add_row(vec![
+                Cell::new("Test Files"),
+                Cell::new(Self::format_number(summary.test_files)),
+            ]);
+            table.add_row(vec![
+                Cell::new("Test Code Lines"),
+                Cell::new(Self::format_number(summary.test_lines.code)),
+            ]);
+            if prod_code > 0 {
+                table.add_row(vec![
+                    Cell::new("Test/Code Ratio"),
+                    Cell::new(format!(
+                        "{:.2}",
+                        summary.test_lines.code as f64 / prod_code as f64
+                    ))
+                    .fg(Color::Cyan),
+                ]);
+            }
+        }
         if options.show_tokens {
             table.add_row(vec![
                 Cell::new("LLM Tokens (est.)"),

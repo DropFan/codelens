@@ -81,6 +81,18 @@ impl MarkdownOutput {
         writeln!(writer, "| Blank Lines | {} |", summary.lines.blank)?;
         writeln!(writer, "| Total Lines | {} |", summary.lines.total)?;
         writeln!(writer, "| Languages | {} |", summary.by_language.len())?;
+        if summary.test_files > 0 {
+            writeln!(writer, "| Test Files | {} |", summary.test_files)?;
+            writeln!(writer, "| Test Code Lines | {} |", summary.test_lines.code)?;
+            let prod_code = summary.lines.code.saturating_sub(summary.test_lines.code);
+            if prod_code > 0 {
+                writeln!(
+                    writer,
+                    "| Test/Code Ratio | {:.2} |",
+                    summary.test_lines.code as f64 / prod_code as f64
+                )?;
+            }
+        }
         if options.show_tokens {
             writeln!(
                 writer,

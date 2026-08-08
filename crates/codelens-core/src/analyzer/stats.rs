@@ -201,6 +201,12 @@ pub struct Summary {
     /// `serde(default)` keeps snapshots from older versions loadable.
     #[serde(default)]
     pub tokens_est: u64,
+    /// Files matching test-code conventions (see `analyzer::test_code`).
+    #[serde(default)]
+    pub test_files: usize,
+    /// Line statistics of those test files.
+    #[serde(default)]
+    pub test_lines: LineStats,
 }
 
 impl Summary {
@@ -218,6 +224,11 @@ impl Summary {
 
             let file_tokens = super::tokens::estimate_tokens(&file.language, file.size);
             summary.tokens_est += file_tokens;
+
+            if super::test_code::is_test_path(&file.path) {
+                summary.test_files += 1;
+                summary.test_lines.add(&file.lines);
+            }
 
             let lang_summary = by_language.entry(file.language.clone()).or_default();
             lang_summary.files += 1;
@@ -474,6 +485,20 @@ mod tests {
     #[test]
     fn test_aggregate_by_dir_empty() {
         assert!(aggregate_by_dir(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn test_summary_separates_test_code() {
+        let files = vec![
+            file_at("src/a.rs", 100),
+            file_at("tests/integration.rs", 40),
+            file_at("src/parser_test.go", 10),
+        ];
+        let summary = Summary::from_file_stats(&files);
+        assert_eq!(summary.test_files, 2);
+        assert_eq!(summary.test_lines.code, 50);
+        // Total code still counts everything.
+        assert_eq!(summary.lines.code, 150);
     }
 
     #[test]

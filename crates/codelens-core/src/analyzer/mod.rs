@@ -4,6 +4,7 @@ mod complexity;
 pub mod counter;
 mod file;
 pub mod stats;
+pub mod test_code;
 pub mod tokens;
 pub mod trie;
 
