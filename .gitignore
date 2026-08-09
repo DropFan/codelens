@@ -37,3 +37,10 @@ criterion/
 # Internal design drafts and plans (kept local, not tracked)
 docs/design/
 docs/plans/
+
+# Local scratch files (old codelens HTML reports, saved chats)
+/111.html
+/222.html
+/333.html
+/temp111.html
+/chats/
