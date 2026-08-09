@@ -8,6 +8,9 @@
 
 # 只允许在 rust 分支发版
 allow-branch = ["rust"]
+# crates.io 发布由 CI 的 publish-crates job 负责（本地无发布凭证），
+# cargo release 只做版本 bump、文件替换、提交、打 tag、推送
+publish = false
 # workspace 所有成员合并为一次发布提交
 consolidate-commits = true
 # 默认不发布任何包；各包在自己的 release.toml 里显式开启，
