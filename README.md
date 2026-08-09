@@ -93,6 +93,12 @@ grade: legacy debt never blocks a PR, only the changes do ("clean as
 you code"). The delta ("B 87.9 → C 77.2") renders in console, markdown
 (great for PR comments), and JSON.
 
+On very large codebases, `--no-dup-scan` skips line-duplication
+collection to save memory; the health score then omits the duplication
+dimension (it is not scored as clean — the remaining weights are
+renormalized), and machine-readable output reports the scoring model as
+`default-no-dup` instead of `default`.
+
 ### Hotspot Detection
 
 Find the riskiest files by combining git change frequency (churn) with code complexity — files that change often AND are complex are the most likely sources of bugs.
@@ -275,6 +281,12 @@ depth = 10
 
 # Show git info
 git_info = true
+
+# Skip line-duplication analysis (health score omits the duplication dimension)
+no_dup_scan = true
+
+# Custom language definitions (relative paths resolve against this file's directory)
+languages_file = "my-langs.toml"
 ```
 
 ## Custom Languages

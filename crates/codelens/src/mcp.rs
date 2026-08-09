@@ -3,7 +3,10 @@
 //! `codelens mcp` speaks the Model Context Protocol so coding agents
 //! (Claude Code, Cursor, ...) can query repository statistics, health
 //! scores, hotspots, and change coupling before editing code. Tools
-//! return compact JSON strings mirroring the `-f json` CLI output.
+//! return compact JSON strings mirroring the shape of the `-f json` CLI
+//! output. Known divergence: `change_coupling` here pairs ALL files in
+//! history (no tree restriction, test files included), while the CLI
+//! default excludes test files.
 
 use std::path::PathBuf;
 
@@ -53,6 +56,7 @@ pub struct GitWindowArgs {
     #[serde(default)]
     pub path: Option<String>,
     /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
+    /// Only honored by hotspots and change_coupling; code_health ignores it.
     #[serde(default)]
     pub since: Option<String>,
     /// Maximum entries to return; defaults to 10.

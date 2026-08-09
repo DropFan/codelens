@@ -16,7 +16,7 @@ const STYLES: Styles = Styles::styled()
 #[command(
     name = "codelens",
     version,
-    about = "High performance code analysis tool — stats, health scores, hotspots, trends, and cost estimation\n\n\
+    about = "High performance code analysis tool — stats, health scores, hotspots, coupling, diffs, trends, and cost estimation\n\n\
         Author: Tiger <DropFan@Gmail.com>\n\
         GitHub: https://github.com/DropFan/codelens",
     styles = STYLES,
@@ -62,7 +62,8 @@ pub enum Command {
         commit. Strong coupling between files that the module structure does not connect \
         reveals hidden dependencies and refactoring targets. Requires a git repository.\n\n\
         Noise controls: --min-shared (minimum shared commits), --min-coupling (minimum \
-        coupling percentage), --max-changeset (bulk commits above this size are ignored)."
+        coupling percentage), --max-changeset (bulk commits above this size are ignored). \
+        Test files are excluded by default; --include-tests restores them."
     )]
     Coupling(CouplingArgs),
     /// Compare two git refs: health delta, complexity delta, regressions.
@@ -167,6 +168,7 @@ pub struct CouplingArgs {
     pub since: String,
 
     /// Only show files coupled to this file (repo-relative path).
+    /// Pointing at a test file implies --include-tests.
     #[arg(long = "for", value_name = "FILE")]
     pub focus: Option<PathBuf>,
 
@@ -196,7 +198,8 @@ pub struct CouplingArgs {
 
 #[derive(Args, Debug)]
 pub struct DiffArgs {
-    /// Base git ref, or "FROM..TO" combined form.
+    /// Base git ref, or "FROM..TO" combined form ("FROM...TO" compares
+    /// from the merge base).
     pub from: String,
 
     /// Target git ref (defaults to the working tree).
@@ -365,7 +368,8 @@ pub struct FilterArgs {
     #[arg(short, long)]
     pub depth: Option<usize>,
 
-    /// Count extensions as another language, e.g. "jsp:html,tpl:php".
+    /// Count extensions as another language, e.g. "jsp:html,tpl:php"
+    /// (MATLAB repos: "m:matlab", since .m defaults to Objective-C).
     #[arg(long, value_name = "EXT:LANG,...")]
     pub count_as: Option<String>,
 
@@ -399,9 +403,8 @@ pub struct FilterArgs {
 #[derive(Args, Debug)]
 pub struct OutputArgs {
     /// Output format [default: console].
-    ///
-    /// Left as `Option` so config-file values are only overridden when the
-    /// user explicitly passes the flag.
+    // Left as `Option` so config-file values are only overridden when the
+    // user explicitly passes the flag.
     #[arg(short, long, value_enum)]
     pub format: Option<OutputFormatArg>,
 
@@ -472,8 +475,9 @@ pub struct AdvancedArgs {
     #[arg(long, global = true)]
     pub no_config: bool,
 
-    /// Load custom language definitions from a TOML file, merged on top
-    /// of the built-in languages (verify with --list-languages).
+    /// Load custom language definitions from a TOML file, added on top
+    /// of the built-in languages; a definition with the same id replaces
+    /// the built-in entirely (verify with --list-languages).
     #[arg(long, global = true, value_name = "PATH")]
     pub languages_file: Option<PathBuf>,
 
@@ -562,6 +566,8 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens --top 20 --sort code\x1b[0m   \x1b[2m# Show top 20 by code lines\x1b[0m
   \x1b[1;36mcodelens --git-info\x1b[0m             \x1b[2m# Include git information\x1b[0m
   \x1b[1;36mcodelens --list-languages\x1b[0m       \x1b[2m# List supported languages\x1b[0m
+  \x1b[1;36mcodelens --no-dup-scan\x1b[0m          \x1b[2m# Skip duplication scan (saves memory)\x1b[0m
+  \x1b[1;36mcodelens --languages-file my.toml\x1b[0m  \x1b[2m# Custom language definitions\x1b[0m
 
 \x1b[1;32mHealth\x1b[0m \x1b[2m(code health score):\x1b[0m
   \x1b[1;36mcodelens health .\x1b[0m               \x1b[2m# Health report for current directory\x1b[0m
@@ -573,6 +579,16 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens hotspot . --since 30d\x1b[0m  \x1b[2m# Hotspots in last 30 days\x1b[0m
   \x1b[1;36mcodelens hotspot . --since 6m\x1b[0m   \x1b[2m# Hotspots in last 6 months\x1b[0m
   \x1b[1;36mcodelens hotspot . --top 5\x1b[0m      \x1b[2m# Show top 5 hotspots\x1b[0m
+
+\x1b[1;32mCoupling\x1b[0m \x1b[2m(files changing together):\x1b[0m
+  \x1b[1;36mcodelens coupling .\x1b[0m             \x1b[2m# Coupled pairs, tests excluded by default\x1b[0m
+  \x1b[1;36mcodelens coupling . --include-tests\x1b[0m  \x1b[2m# Include test files\x1b[0m
+  \x1b[1;36mcodelens coupling . --for src/api.rs\x1b[0m  \x1b[2m# Files coupled to one file\x1b[0m
+
+\x1b[1;32mDiff\x1b[0m \x1b[2m(compare two git refs):\x1b[0m
+  \x1b[1;36mcodelens diff main\x1b[0m              \x1b[2m# main vs working tree\x1b[0m
+  \x1b[1;36mcodelens diff v1.0..v2.0\x1b[0m        \x1b[2m# Two refs\x1b[0m
+  \x1b[1;36mcodelens diff main --fail-on-regression\x1b[0m  \x1b[2m# Gate CI on health regressions\x1b[0m
 
 \x1b[1;32mTrend\x1b[0m \x1b[2m(snapshot comparison):\x1b[0m
   \x1b[1;36mcodelens trend --save\x1b[0m           \x1b[2m# Save a snapshot\x1b[0m
