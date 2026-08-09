@@ -210,7 +210,7 @@ jobs:
         run: |
           cat > homebrew-tap/Formula/codelens.rb << 'FORMULA'
           class Codelens < Formula
-            desc "High performance code analysis tool — stats, health scores, hotspots, and trends"
+            desc "Code stats, health scores, hotspots, coupling, diffs, and cost estimation"
             homepage "https://github.com/DropFan/codelens"
             version "VERSION_PLACEHOLDER"
             license "MIT"

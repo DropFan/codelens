@@ -1,6 +1,6 @@
 [package]
 name = "codelens-core"
-description = "Core library for codelens - high performance code analysis tool"
+description = "Core analysis library for codelens — counting, health scoring, hotspots, change coupling, diffs, and cost estimation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

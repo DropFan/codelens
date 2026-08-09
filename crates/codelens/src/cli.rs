@@ -16,7 +16,7 @@ const STYLES: Styles = Styles::styled()
 #[command(
     name = "codelens",
     version,
-    about = "High performance code analysis tool — stats, health scores, hotspots, coupling, diffs, trends, and cost estimation\n\n\
+    about = "High performance code analysis tool — stats, health scores, hotspots, change coupling, diffs, trends, cost estimation, and CI/AI quality gates\n\n\
         Author: Tiger <DropFan@Gmail.com>\n\
         GitHub: https://github.com/DropFan/codelens",
     styles = STYLES,

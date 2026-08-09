@@ -1,6 +1,6 @@
 # Codelens
 
-High performance code analysis tool written in Rust — stats, health scores, hotspots, change coupling, trends, cost estimation, and CI/AI quality gates.
+High performance code analysis tool written in Rust — stats, health scores, hotspots, change coupling, diffs, trends, cost estimation, and CI/AI quality gates.
 
 ## Features
 
