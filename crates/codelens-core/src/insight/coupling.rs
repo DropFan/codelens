@@ -32,8 +32,13 @@ pub struct CouplingReport {
     pub since: String,
     pub total_commits: usize,
     /// Commits excluded from pairing because they touched more files than
-    /// `max_changeset` (bulk renames, formatting sweeps).
+    /// `max_changeset` (bulk renames, formatting sweeps). Counted on the
+    /// commit's own file count, before any universe filtering.
     pub skipped_large_commits: usize,
+    /// Files the caller dropped from the universe because they look like
+    /// test files (0 with `--include-tests`, or when the caller does no
+    /// test filtering).
+    pub excluded_test_files: usize,
     /// Set when the report is focused on a single file (--for).
     pub focus: Option<PathBuf>,
 }
@@ -70,29 +75,35 @@ impl Default for CouplingOptions {
 /// files present in the current tree after filters); pass None to consider
 /// every path in history. Per-file commit counts include every commit,
 /// while pairs are only mined from commits at or under `max_changeset`
-/// files, matching code-maat's behavior.
+/// files, matching code-maat's behavior. The `max_changeset` check uses
+/// the commit's own (deduplicated) file count, taken before universe
+/// filtering: bulk detection measures the nature of the commit itself, so
+/// dropping files from the universe (deleted files, excluded test files)
+/// must never turn a bulk commit into a small one.
 pub fn analyze(
     commits: &[CommitRecord],
     universe: Option<&BTreeSet<PathBuf>>,
     since: &str,
     opts: &CouplingOptions,
 ) -> CouplingReport {
-    let in_universe = |path: &PathBuf| -> bool { universe.is_none_or(|set| set.contains(path)) };
+    let in_universe = |path: &Path| -> bool { universe.is_none_or(|set| set.contains(path)) };
 
-    // Per-commit unique file sets (rename normalization can duplicate paths).
-    let mut commit_files: Vec<BTreeSet<PathBuf>> = Vec::with_capacity(commits.len());
+    // Per-commit unique file sets (rename normalization can duplicate
+    // paths), paired with the commit's raw pre-filter file count.
+    let mut commit_files: Vec<(usize, BTreeSet<PathBuf>)> = Vec::with_capacity(commits.len());
     for commit in commits {
-        let files: BTreeSet<PathBuf> = commit
-            .files
-            .iter()
-            .map(|c| c.path.clone())
-            .filter(in_universe)
+        let raw: BTreeSet<&Path> = commit.files.iter().map(|c| c.path.as_path()).collect();
+        let raw_len = raw.len();
+        let files: BTreeSet<PathBuf> = raw
+            .into_iter()
+            .filter(|p| in_universe(p))
+            .map(Path::to_path_buf)
             .collect();
-        commit_files.push(files);
+        commit_files.push((raw_len, files));
     }
 
     let mut per_file: HashMap<&Path, usize> = HashMap::new();
-    for files in &commit_files {
+    for (_, files) in &commit_files {
         for f in files {
             *per_file.entry(f.as_path()).or_insert(0) += 1;
         }
@@ -100,8 +111,8 @@ pub fn analyze(
 
     let mut skipped_large = 0usize;
     let mut pair_counts: HashMap<(&Path, &Path), usize> = HashMap::new();
-    for files in &commit_files {
-        if files.len() > opts.max_changeset {
+    for (raw_len, files) in &commit_files {
+        if *raw_len > opts.max_changeset {
             skipped_large += 1;
             continue;
         }
@@ -162,6 +173,8 @@ pub fn analyze(
         since: since.to_string(),
         total_commits: commits.len(),
         skipped_large_commits: skipped_large,
+        // Universe filtering happens at the caller; it fills this in.
+        excluded_test_files: 0,
         focus: opts.focus.clone(),
     }
 }
@@ -239,6 +252,28 @@ mod tests {
             .map(|i| commit(&format!("c{i}"), i, &path_refs))
             .collect();
         let report = analyze(&commits, None, "90d", &CouplingOptions::default());
+        assert!(report.pairs.is_empty());
+        assert_eq!(report.skipped_large_commits, 6);
+    }
+
+    #[test]
+    fn test_bulk_detection_uses_raw_commit_size() {
+        // 40-file commits stay bulk even when only 2 files survive the
+        // universe filter: bulk detection measures the commit itself.
+        let paths: Vec<String> = (0..40).map(|i| format!("f{i}.rs")).collect();
+        let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let commits: Vec<CommitRecord> = (0..6)
+            .map(|i| commit(&format!("c{i}"), i, &path_refs))
+            .collect();
+        let universe: BTreeSet<PathBuf> = [PathBuf::from("f0.rs"), PathBuf::from("f1.rs")]
+            .into_iter()
+            .collect();
+        let report = analyze(
+            &commits,
+            Some(&universe),
+            "90d",
+            &CouplingOptions::default(),
+        );
         assert!(report.pairs.is_empty());
         assert_eq!(report.skipped_large_commits, 6);
     }

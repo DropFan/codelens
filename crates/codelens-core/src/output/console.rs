@@ -761,6 +761,13 @@ impl ConsoleOutput {
                 report.skipped_large_commits
             )?;
         }
+        if report.excluded_test_files > 0 {
+            writeln!(
+                writer,
+                "  {} test file(s) excluded (--include-tests to include)",
+                report.excluded_test_files
+            )?;
+        }
         writeln!(writer)?;
 
         if report.pairs.is_empty() {

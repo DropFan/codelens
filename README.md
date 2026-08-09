@@ -135,11 +135,18 @@ Find file pairs that keep changing in the same commits — hidden dependencies t
 codelens coupling .                   # Last 90 days, noise-filtered
 codelens coupling . --for src/api.rs  # What changes together with this file
 codelens coupling . --min-shared 3 --min-coupling 20  # Lower thresholds
+codelens coupling . --include-tests   # Keep test files in the pairing
 ```
 
 Bulk commits (more than `--max-changeset` files, default 30) are
 excluded from pairing and reported, so formatting sweeps don't fake
 coupling.
+
+Test files (`foo_test.go`, `test_*.py`, `*.test.ts`, `tests/`, ...) are
+excluded by default: a test changing together with the code it tests is
+expected behavior, not a hidden dependency, and those pairs would drown
+the real signal. Use `--include-tests` to keep them; `--for` pointed at
+a test file implies it.
 
 ### Trend Tracking
 

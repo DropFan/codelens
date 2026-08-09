@@ -182,6 +182,11 @@ pub struct CouplingArgs {
     #[arg(long, default_value_t = 30, value_name = "FILES")]
     pub max_changeset: usize,
 
+    /// Include test files (excluded by default: a test changing with the
+    /// code it tests is expected behavior, not a hidden dependency).
+    #[arg(long)]
+    pub include_tests: bool,
+
     #[command(flatten)]
     pub filter: FilterArgs,
 

@@ -473,6 +473,14 @@ impl MarkdownOutput {
                 report.skipped_large_commits
             )?;
         }
+        if report.excluded_test_files > 0 {
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "_{} test file(s) excluded (`--include-tests` to include)._",
+                report.excluded_test_files
+            )?;
+        }
         writeln!(writer)?;
 
         if report.pairs.is_empty() {

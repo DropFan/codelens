@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entirely, and invalid regexes are rejected at load time
 
 ### Changed
+- `codelens coupling` now excludes test files by default (previously
+  they participated in pairing, so expected test↔impl pairs like
+  `foo.go` / `foo_test.go` drowned the hidden-dependency signal);
+  `--include-tests` restores the old behavior, and `--for` pointed at
+  a test file implies it. Bulk-commit detection (`--max-changeset`)
+  now uses the commit's own file count, taken before tree/test
+  filtering, so a bulk commit can no longer slip under the threshold
+  when part of it is filtered away. Test detection now shares one
+  conservative rule set with the summary's test-code stats, which
+  therefore flag slightly fewer files (e.g. `test_helper.rb` and
+  `NewsTest.js` no longer count as tests)
 - Old trend snapshots lack duplication data and default to a perfect
   duplication score; regenerate baselines for meaningful comparisons
 - `.m` files are now always counted as Objective-C (matching scc's
