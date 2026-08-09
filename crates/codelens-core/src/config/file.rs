@@ -304,16 +304,21 @@ mod tests {
     fn test_languages_file_absolute_path_untouched() {
         let dir = tempfile::TempDir::new().unwrap();
         let config_path = dir.path().join(".codelens.toml");
-        std::fs::write(&config_path, r#"languages_file = "/abs/langs.toml""#).unwrap();
+        // An absolute path must survive as-is (platform-specific: "/abs/..."
+        // is NOT absolute on Windows, so build one from the tempdir).
+        // TOML literal string (single quotes) keeps Windows backslashes intact.
+        let abs_path = dir.path().join("langs.toml");
+        std::fs::write(
+            &config_path,
+            format!("languages_file = '{}'", abs_path.display()),
+        )
+        .unwrap();
 
         let partial = load_config_file(&config_path).unwrap();
         let mut config = Config::default();
         partial.apply_to(&mut config);
 
-        assert_eq!(
-            config.languages_file,
-            Some(std::path::PathBuf::from("/abs/langs.toml"))
-        );
+        assert_eq!(config.languages_file, Some(abs_path));
     }
 
     #[test]
