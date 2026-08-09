@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Agent Skill (`skills/codelens/SKILL.md`): teaches AI coding agents the
+  codelens workflows — repo sizing, pre-change risk assessment, refactor
+  verification, CI gates — plus interpretation guidance; complements the
+  MCP server (see docs/ai-integration.md)
+
 ## [0.1.7] - 2026-08-09
 
 ### Added

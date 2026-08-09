@@ -16,7 +16,7 @@ High performance code analysis tool written in Rust — stats, health scores, ho
 - **Trend Tracking**: Save snapshots, compare evolution, chart the full history
 - **Cost Estimation**: Multi-model development cost estimation (COCOMO Basic/II, Putnam, LOCOMO)
 - **LLM Token Estimation**: How many tokens a repo is, and whether it fits a model's context window
-- **AI Agent Integration**: Built-in MCP server (`codelens mcp`) for Claude Code, Cursor, and friends
+- **AI Agent Integration**: Built-in MCP server (`codelens mcp`) plus an [Agent Skill](skills/codelens/SKILL.md) teaching agents the analysis workflows — see [docs/ai-integration.md](docs/ai-integration.md)
 - **Extensible**: Add custom languages via TOML configuration
 
 ## Installation

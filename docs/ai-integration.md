@@ -1,6 +1,6 @@
 # 在 AI 编程工具里使用 codelens
 
-让 AI 编程代理（Claude Code、Cursor 等）在动手改代码之前，先了解代码库的结构、健康度和风险。两种接入方式：
+让 AI 编程代理（Claude Code、Cursor 等）在动手改代码之前，先了解代码库的结构、健康度和风险。三种接入方式：
 
 ## 方式一：MCP 服务器（推荐）
 
@@ -32,7 +32,25 @@ claude mcp add codelens -- codelens mcp
 
 MCP 属于默认开启的 cargo feature；如需更小的二进制，可用 `cargo build --no-default-features` 去掉。
 
-## 方式二：直接跑 CLI（零配置）
+## 方式二：Agent Skill（教会代理工作流）
+
+MCP 和裸 CLI 只告诉代理"有哪些工具"，不教"什么时候用、怎么组合、结果怎么读"。
+仓库自带一个 Agent Skill（[`skills/codelens/SKILL.md`](../skills/codelens/SKILL.md)），
+固化了四个工作流：陌生仓库摸底、改文件前的风险评估（定向耦合 + 函数级热点）、
+重构前后留证据对比、CI 质量门禁，外加解读指南（等级含义、常见误导统计、噪音识别）。
+
+安装（Claude Code）：
+
+```bash
+mkdir -p ~/.claude/skills/codelens
+curl -fsSL https://raw.githubusercontent.com/DropFan/codelens/rust/skills/codelens/SKILL.md \
+  -o ~/.claude/skills/codelens/SKILL.md
+```
+
+也可以放进单个项目的 `.claude/skills/codelens/` 只对该项目生效。skill 与 MCP
+互补：装了 MCP 时 skill 会引导代理优先用 MCP 工具做只读查询。
+
+## 方式三：直接跑 CLI（零配置）
 
 有 Bash 能力的代理不需要 MCP，直接执行命令并读 JSON：
 
