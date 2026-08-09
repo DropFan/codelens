@@ -215,7 +215,7 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 ```yaml
 repos:
   - repo: https://github.com/DropFan/codelens
-    rev: v0.1.6-rust
+    rev: v0.1.7-rust
     hooks:
       - id: codelens-health
         args: ['--fail-under', 'C']

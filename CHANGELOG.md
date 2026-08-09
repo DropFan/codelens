@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-09
+
 ### Added
 - `codelens diff <FROM> [<TO>]` (or `FROM..TO`) — compare two git refs
   (TO defaults to the working tree) with health-score movement,
