@@ -1,8 +1,7 @@
 name: 'Codelens Health Gate'
 description: >-
-  Code statistics, health score, and CI quality gate: fail a PR when code
-  health drops below a threshold or regresses against a baseline, with a
-  sticky PR comment and step-summary report.
+  Code health gate for CI: fail a PR when the health score drops below a
+  threshold or regresses, with a sticky PR comment.
 author: 'Tiger <DropFan@Gmail.com>'
 branding:
   icon: 'activity'
