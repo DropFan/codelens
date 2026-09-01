@@ -88,8 +88,7 @@ impl PatternFilter {
     /// Walkers commonly yield absolute paths, while CLI patterns are normally
     /// project-relative (`node_modules`, `src/**`, `*.test.js`).
     fn matches_glob(globs: &GlobSet, path: &Path) -> bool {
-        globs.is_match(path)
-            || Self::path_suffixes(path).any(|candidate| globs.is_match(candidate))
+        globs.is_match(path) || Self::path_suffixes(path).any(|candidate| globs.is_match(candidate))
     }
 
     fn path_suffixes(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {

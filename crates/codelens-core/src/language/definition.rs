@@ -122,12 +122,8 @@ pub(crate) fn keywords_pattern(keywords: &[String]) -> Option<String> {
         .map(String::as_str)
         .filter(|keyword| !keyword.is_empty())
         .collect();
-    keywords.sort_unstable_by(|left, right| {
-        right
-            .len()
-            .cmp(&left.len())
-            .then_with(|| left.cmp(right))
-    });
+    keywords
+        .sort_unstable_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     keywords.dedup();
     if keywords.is_empty() {
         return None;
@@ -239,11 +235,7 @@ mod tests {
 
     #[test]
     fn test_complexity_keywords_match_symbols_and_identifier_boundaries() {
-        let keywords = vec![
-            "?".to_string(),
-            "??".to_string(),
-            "if".to_string(),
-        ];
+        let keywords = vec!["?".to_string(), "??".to_string(), "if".to_string()];
         let pattern = keywords_pattern(&keywords).unwrap();
         let regex = Regex::new(&pattern).unwrap();
         let matches: Vec<_> = regex
