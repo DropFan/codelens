@@ -1,6 +1,6 @@
 //! Pattern-based filtering using glob and regex.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
@@ -78,28 +78,58 @@ impl PatternFilter {
     fn matches_any_regex(path: &Path, regexes: &[Regex]) -> bool {
         let path_str = path.to_string_lossy();
         regexes.iter().any(|re| re.is_match(&path_str))
+            || Self::path_suffixes(path).any(|candidate| {
+                let path_str = candidate.to_string_lossy();
+                regexes.iter().any(|re| re.is_match(&path_str))
+            })
+    }
+
+    /// Match both the walker-provided path and every component-aligned suffix.
+    /// Walkers commonly yield absolute paths, while CLI patterns are normally
+    /// project-relative (`node_modules`, `src/**`, `*.test.js`).
+    fn matches_glob(globs: &GlobSet, path: &Path) -> bool {
+        globs.is_match(path)
+            || Self::path_suffixes(path).any(|candidate| globs.is_match(candidate))
+    }
+
+    fn path_suffixes(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+        let components: Vec<_> = path
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(part) => Some(part),
+                _ => None,
+            })
+            .collect();
+
+        (0..components.len()).map(move |start| components[start..].iter().collect())
     }
 }
 
 impl Filter for PatternFilter {
     fn should_include(&self, path: &Path, is_dir: bool) -> bool {
         // Check include patterns first (they take precedence)
-        if let Some(ref include) = self.include_globs {
-            if include.is_match(path) {
-                return true;
-            }
+        let matches_include_glob = self
+            .include_globs
+            .as_ref()
+            .is_some_and(|include| Self::matches_glob(include, path));
+        let matches_include_regex = !is_dir
+            && !self.include_file_regex.is_empty()
+            && Self::matches_any_regex(path, &self.include_file_regex);
+        if matches_include_glob || matches_include_regex {
+            return true;
         }
 
-        if !is_dir
-            && !self.include_file_regex.is_empty()
-            && Self::matches_any_regex(path, &self.include_file_regex)
-        {
+        // Directories must remain traversable while an include allowlist is
+        // active; descendants, rather than the directory name, may match it.
+        // Non-matching files are rejected below.
+        let has_includes = self.include_globs.is_some() || !self.include_file_regex.is_empty();
+        if is_dir && has_includes {
             return true;
         }
 
         // Check exclude patterns
         if let Some(ref exclude) = self.exclude_globs {
-            if exclude.is_match(path) {
+            if Self::matches_glob(exclude, path) {
                 return false;
             }
         }
@@ -112,7 +142,7 @@ impl Filter for PatternFilter {
             return false;
         }
 
-        true
+        !has_includes
     }
 }
 
@@ -131,6 +161,33 @@ mod tests {
 
         assert!(!filter.should_include(Path::new("app.test.js"), false));
         assert!(filter.should_include(Path::new("app.js"), false));
+    }
+
+    #[test]
+    fn test_bare_exclude_glob_matches_nested_directory() {
+        let config = FilterConfig {
+            excludes: vec!["node_modules".to_string()],
+            ..Default::default()
+        };
+
+        let filter = PatternFilter::new(&config).unwrap();
+
+        assert!(!filter.should_include(Path::new("/tmp/project/node_modules"), true));
+        assert!(filter.should_include(Path::new("/tmp/project/src"), true));
+    }
+
+    #[test]
+    fn test_include_file_regex_is_allowlist() {
+        let config = FilterConfig {
+            include_files: vec![r"main\.rs$".to_string()],
+            ..Default::default()
+        };
+
+        let filter = PatternFilter::new(&config).unwrap();
+
+        assert!(filter.should_include(Path::new("/tmp/project"), true));
+        assert!(filter.should_include(Path::new("/tmp/project/src/main.rs"), false));
+        assert!(!filter.should_include(Path::new("/tmp/project/src/lib.rs"), false));
     }
 
     #[test]
