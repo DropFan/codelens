@@ -15,6 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verification, CI gates — plus interpretation guidance; complements the
   MCP server (see docs/ai-integration.md)
 
+### Changed
+- Project and package descriptions now consistently cover change coupling,
+  diffs, cost estimation, and CI/AI quality gates
+
+### Fixed
+- `health` and `diff` quality gates now fail closed when analysis is
+  incomplete or matches no files; `diff` validates both comparison sides
+- Project-relative include/exclude globs and regexes now match paths supplied
+  by absolute-path walkers; include rules act as allowlists without pruning
+  directories that may contain matching descendants
+- Complexity analysis ignores control-flow keywords and braces in comments
+  and strings, detects function boundaries more accurately, and averages
+  function length over actual functions; function hotspots use the same
+  corrected complexity calculation
+- Trend snapshots use high-resolution, collision-safe filenames and can no
+  longer overwrite each other when saved within the same second
+- Configuration files reject unknown keys, unsupported output/sort values,
+  and malformed `count_as` mappings instead of silently falling back
+- Release tags now run the complete verification suite before publishing;
+  GitHub releases wait for successful, idempotent crates.io publication
+- GitHub Action metadata now stays within the Marketplace description limit
+
 ## [0.1.7] - 2026-08-09
 
 ### Added
