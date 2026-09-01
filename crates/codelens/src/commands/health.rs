@@ -30,6 +30,16 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
+    // A health score computed from an incomplete tree is not a valid gate
+    // result. Fail before scoring or writing a misleading partial report.
+    if result.error_files > 0 {
+        eprintln!(
+            "{}: analysis skipped {} file(s) because they could not be read or analyzed",
+            "gate failed".red().bold(),
+            result.error_files,
+        );
+        return Ok(ExitCode::FAILURE);
+    }
     let top_n = config.output.top_n.unwrap_or(10);
 
     let regression = if let Some(baseline_ref) = &args.baseline {
@@ -153,6 +163,42 @@ fn parse_fail_under(input: &str) -> Result<f64> {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_file_fails_health_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("blocked.rs");
+        std::fs::write(&source, "fn blocked() {}\n").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root can still read mode-000 files. Normal CI and developer users
+        // exercise the real unreadable-file path; skip only in that special
+        // environment while still restoring permissions for cleanup.
+        if std::fs::File::open(&source).is_ok() {
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+        let code = run_health(args, &cli.advanced).unwrap();
+
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    }
 
     #[test]
     fn fail_under_gate_follows_current_measurement_not_baseline() {
