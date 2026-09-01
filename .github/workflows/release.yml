@@ -12,8 +12,64 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    name: Verify Release Source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate tag version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="${VERSION%-rust}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::invalid release tag version: $VERSION"
+            exit 1
+          fi
+          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          if [[ "$VERSION" != "$CARGO_VERSION" ]]; then
+            echo "::error::tag version $VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check code
+        run: cargo check --workspace --all-targets --all-features --locked
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-features --locked
+
+      - name: Documentation
+        run: cargo doc --workspace --no-deps --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Check MSRV
+        run: cargo +1.88 check --workspace --all-targets --locked
+
+      - name: Security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   create-release:
     name: Create Release
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -26,7 +82,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           VERSION=${VERSION%-rust}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         id: create_release
@@ -133,7 +189,7 @@ jobs:
     # Intentionally no prerelease filter: alpha/beta/rc drafts must be
     # published as well. If any build fails, this job is skipped and the
     # release stays in draft.
-    needs: [create-release, build]
+    needs: [create-release, build, publish-crates]
     runs-on: ubuntu-latest
     steps:
       - name: Publish draft release
@@ -150,19 +206,34 @@ jobs:
     name: Publish to crates.io
     needs: [create-release, build]
     runs-on: ubuntu-latest
-    continue-on-error: true  # Allow failure if already published
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Publish codelens-core
-        run: cargo publish -p codelens-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if curl -fsSL "https://crates.io/api/v1/crates/codelens-core/${VERSION}" >/dev/null; then
+            echo "codelens-core ${VERSION} is already published; skipping"
+          else
+            cargo publish --locked -p codelens-core --token "$CARGO_REGISTRY_TOKEN"
+          fi
 
       - name: Wait for crates.io index
         run: sleep 30
 
       - name: Publish codelens
-        run: cargo publish -p codelens --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if curl -fsSL "https://crates.io/api/v1/crates/codelens/${VERSION}" >/dev/null; then
+            echo "codelens ${VERSION} is already published; skipping"
+          else
+            cargo publish --locked -p codelens --token "$CARGO_REGISTRY_TOKEN"
+          fi
 
   homebrew:
     name: Update Homebrew Formula
