@@ -53,6 +53,12 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     };
     drop_submodule_files(&mut to_result, &submodules);
 
+    if !analysis_is_valid(&from_ref, &from_result)
+        || !analysis_is_valid(&to_label, &to_result)
+    {
+        return Ok(ExitCode::FAILURE);
+    }
+
     // Both sides were analyzed with the same config, so the duplication
     // dimension is either measured on both or excluded on both.
     let model = scoring_model_for(!config.no_dup_scan);
@@ -69,6 +75,27 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
         return Ok(ExitCode::FAILURE);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// A diff is only meaningful when both inputs were analyzed completely and
+/// contain at least one matching file.
+fn analysis_is_valid(label: &str, result: &codelens_core::AnalysisResult) -> bool {
+    if result.error_files > 0 {
+        eprintln!(
+            "{}: analysis of '{label}' skipped {} file(s) because they could not be read or analyzed",
+            "gate failed".red().bold(),
+            result.error_files,
+        );
+        return false;
+    }
+    if result.summary.total_files == 0 {
+        eprintln!(
+            "{}: analysis of '{label}' found no files matching the requested filters",
+            "gate failed".red().bold(),
+        );
+        return false;
+    }
+    true
 }
 
 /// How the FROM/TO CLI arguments resolve into refs, before any git lookup.
@@ -110,6 +137,24 @@ fn parse_ref_args(from: &str, to: Option<&str>) -> Result<RefSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn analysis_result(total_files: usize, error_files: usize) -> codelens_core::AnalysisResult {
+        let files = (0..total_files)
+            .map(|index| codelens_core::FileStats {
+                path: PathBuf::from(format!("file-{index}.rs")),
+                language: "Rust".to_string(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        codelens_core::AnalysisResult {
+            summary: codelens_core::Summary::from_file_stats(&files),
+            files,
+            elapsed: std::time::Duration::ZERO,
+            scanned_files: total_files,
+            skipped_files: 0,
+            error_files,
+        }
+    }
 
     #[test]
     fn range_from_plus_positional_to_is_an_error() {
@@ -157,5 +202,18 @@ mod tests {
                 to: Some("v2.0".into()),
             }
         );
+    }
+
+    #[test]
+    fn diff_rejects_empty_or_incomplete_analysis_on_either_side() {
+        let valid = analysis_result(1, 0);
+        let empty = analysis_result(0, 0);
+        let incomplete = analysis_result(1, 1);
+
+        assert!(analysis_is_valid("from", &valid));
+        assert!(!analysis_is_valid("from", &empty));
+        assert!(!analysis_is_valid("to", &empty));
+        assert!(!analysis_is_valid("from", &incomplete));
+        assert!(!analysis_is_valid("to", &incomplete));
     }
 }

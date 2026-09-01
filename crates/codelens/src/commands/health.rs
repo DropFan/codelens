@@ -40,6 +40,13 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
         );
         return Ok(ExitCode::FAILURE);
     }
+    if result.summary.total_files == 0 {
+        eprintln!(
+            "{}: analysis found no files matching the requested paths and filters",
+            "gate failed".red().bold(),
+        );
+        return Ok(ExitCode::FAILURE);
+    }
     let top_n = config.output.top_n.unwrap_or(10);
 
     let regression = if let Some(baseline_ref) = &args.baseline {
@@ -197,6 +204,28 @@ mod tests {
         let code = run_health(args, &cli.advanced).unwrap();
 
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    }
+
+    #[test]
+    fn empty_analysis_fails_health_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--fail-under",
+            "A",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+
+        let code = run_health(args, &cli.advanced).unwrap();
+
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
     }
 
