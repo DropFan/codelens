@@ -107,16 +107,52 @@ impl Language {
     }
 }
 
-/// Build the alternation pattern matching all complexity keywords:
-/// `\b(if|else|...)\b`. Shared by the lazy compilation above and the
-/// load-time validation of user language files so both compile exactly
-/// the same regex.
+/// Build an alternation pattern matching all complexity keywords.
+/// Identifier-like edges receive word boundaries, while symbolic operators
+/// such as `?`, `&&`, `||`, and `-and` are matched literally. Longer tokens
+/// come first so `??` is one decision rather than two `?` matches.
+/// Shared by lazy compilation and custom-language validation.
 pub(crate) fn keywords_pattern(keywords: &[String]) -> Option<String> {
     if keywords.is_empty() {
         return None;
     }
-    let alts: Vec<String> = keywords.iter().map(|k| regex::escape(k)).collect();
-    Some(format!(r"\b({})\b", alts.join("|")))
+
+    let mut keywords: Vec<&str> = keywords
+        .iter()
+        .map(String::as_str)
+        .filter(|keyword| !keyword.is_empty())
+        .collect();
+    keywords.sort_unstable_by(|left, right| {
+        right
+            .len()
+            .cmp(&left.len())
+            .then_with(|| left.cmp(right))
+    });
+    keywords.dedup();
+    if keywords.is_empty() {
+        return None;
+    }
+
+    let alts: Vec<String> = keywords
+        .into_iter()
+        .map(|keyword| {
+            let starts_with_word = keyword
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            let ends_with_word = keyword
+                .chars()
+                .last()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            format!(
+                "{}{}{}",
+                if starts_with_word { r"\b" } else { "" },
+                regex::escape(keyword),
+                if ends_with_word { r"\b" } else { "" },
+            )
+        })
+        .collect();
+    Some(format!(r"(?:{})", alts.join("|")))
 }
 
 impl Default for Language {
@@ -199,5 +235,22 @@ mod tests {
             vec![("/*".to_string(), "*/".to_string())]
         );
         assert!(lang.nested_comments);
+    }
+
+    #[test]
+    fn test_complexity_keywords_match_symbols_and_identifier_boundaries() {
+        let keywords = vec![
+            "?".to_string(),
+            "??".to_string(),
+            "if".to_string(),
+        ];
+        let pattern = keywords_pattern(&keywords).unwrap();
+        let regex = Regex::new(&pattern).unwrap();
+        let matches: Vec<_> = regex
+            .find_iter("gift if left ?? right ? value")
+            .map(|m| m.as_str())
+            .collect();
+
+        assert_eq!(matches, vec!["if", "??", "?"]);
     }
 }

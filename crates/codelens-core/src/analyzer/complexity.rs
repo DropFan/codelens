@@ -1,16 +1,16 @@
 //! Code complexity analysis.
 
 use crate::language::Language;
+use regex::Regex;
 
 use super::stats::Complexity;
+use super::trie::{should_process, TokenType};
 
 /// A function's location within a file, by line numbers.
 ///
-/// Spans are heuristic: a function extends from its signature match to
-/// the line before the next match (the last one runs to end of file).
-/// Trailing items between functions get attributed to the preceding
-/// function — good enough for change attribution, not for tooling that
-/// needs exact boundaries.
+/// Brace-delimited functions end at their matching closing brace. Languages
+/// without brace-delimited bodies fall back to the line before the next
+/// function match (the last one runs to end of file).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FunctionSpan {
     pub name: String,
@@ -43,16 +43,23 @@ impl ComplexityAnalyzer {
             return complexity;
         }
 
-        // Count functions
-        if let Some(ref re) = patterns.function_re {
-            complexity.functions = re.find_iter(content).count();
-        }
+        // Regexes and bracket scans must only see source code. Keeping byte
+        // positions and newlines intact lets offsets and line numbers still
+        // refer to the original file.
+        let code = mask_non_code(content, lang);
+
+        let function_spans = patterns
+            .function_re
+            .as_ref()
+            .map(|re| function_spans_in(&code, re, lang))
+            .unwrap_or_default();
+        complexity.functions = function_spans.len();
 
         // Count complexity keywords (single alternation regex, one pass)
         let keyword_offsets: Vec<usize> = patterns
             .keywords_re
             .as_ref()
-            .map(|re| re.find_iter(content).map(|m| m.start()).collect())
+            .map(|re| re.find_iter(&code).map(|m| m.start()).collect())
             .unwrap_or_default();
         complexity.cyclomatic = keyword_offsets.len();
 
@@ -61,15 +68,16 @@ impl ComplexityAnalyzer {
 
         // One bracket scan yields both the max nesting depth and the
         // nesting-weighted (cognitive) keyword cost.
-        let (max_depth, cognitive) =
-            self.scan_depth(content, &lang.line_comments, &keyword_offsets);
+        let (max_depth, cognitive) = self.scan_depth(&code, &keyword_offsets);
         complexity.max_depth = max_depth;
         complexity.cognitive = cognitive;
 
-        // Calculate average lines per function
-        if complexity.functions > 0 {
-            let total_lines = content.lines().count();
-            complexity.avg_func_lines = total_lines as f64 / complexity.functions as f64;
+        if !function_spans.is_empty() {
+            let function_lines: usize = function_spans
+                .iter()
+                .map(|span| span.end_line - span.start_line + 1)
+                .sum();
+            complexity.avg_func_lines = function_lines as f64 / function_spans.len() as f64;
         }
 
         complexity
@@ -82,66 +90,19 @@ impl ComplexityAnalyzer {
         let Some(re) = &patterns.function_re else {
             return Vec::new();
         };
-
-        let matches: Vec<(usize, String)> = re
-            .find_iter(content)
-            .map(|m| {
-                // Patterns like `(?m)^\s*fn ...` swallow preceding blank
-                // lines into the match; anchor the span at the signature
-                // itself, not at the leading whitespace.
-                let lead_ws = m.as_str().len() - m.as_str().trim_start().len();
-                (m.start() + lead_ws, trailing_identifier(m.as_str()))
-            })
-            .collect();
-        if matches.is_empty() {
-            return Vec::new();
-        }
-
-        // Byte offset of each line start, for offset → line translation.
-        let mut line_starts = vec![0usize];
-        for (i, b) in content.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(i + 1);
-            }
-        }
-        let line_of = |offset: usize| line_starts.partition_point(|&s| s <= offset);
-        let total_lines = content.lines().count().max(1);
-
-        matches
-            .iter()
-            .enumerate()
-            .map(|(i, (offset, name))| {
-                let start_line = line_of(*offset);
-                let end_line = if i + 1 < matches.len() {
-                    line_of(matches[i + 1].0).saturating_sub(1).max(start_line)
-                } else {
-                    total_lines
-                };
-                FunctionSpan {
-                    name: name.clone(),
-                    start_line,
-                    end_line,
-                }
-            })
-            .collect()
+        let code = mask_non_code(content, lang);
+        function_spans_in(&code, re, lang)
     }
 
     /// One pass over the content computing (max nesting depth, cognitive
-    /// complexity). Depth comes from bracket pairs, ignoring brackets
-    /// inside string literals, char literals, and line comments —
-    /// otherwise text like ANSI codes (`\x1b[1;32m`) in string constants
-    /// inflates the depth without bound.
+    /// complexity). Depth comes from bracket pairs. The caller supplies
+    /// source with comments and strings already masked.
     ///
     /// Cognitive complexity: each control-flow keyword (already located
     /// by the caller, offsets ascending) costs its bracket depth at that
     /// point (min 1), so `if` nested three levels deep costs more than
     /// `if` at the top of a function.
-    fn scan_depth(
-        &self,
-        content: &str,
-        line_comments: &[String],
-        keyword_offsets: &[usize],
-    ) -> (usize, usize) {
+    fn scan_depth(&self, content: &str, keyword_offsets: &[usize]) -> (usize, usize) {
         let bytes = content.as_bytes();
         let mut max_depth: usize = 0;
         let mut current_depth: usize = 0;
@@ -150,46 +111,13 @@ impl ComplexityAnalyzer {
         let mut i = 0;
 
         while i < bytes.len() {
-            // Charge keywords we've reached (or jumped past when skipping
-            // strings/comments) at the current depth.
+            // Charge keywords reached at the current bracket depth.
             while next_kw < keyword_offsets.len() && keyword_offsets[next_kw] <= i {
                 cognitive += current_depth.max(1);
                 next_kw += 1;
             }
 
-            // Line comment: skip to end of line
-            if line_comments
-                .iter()
-                .any(|c| bytes[i..].starts_with(c.as_bytes()))
-            {
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
-                continue;
-            }
-
             match bytes[i] {
-                // Double-quoted string: skip to the closing quote, honoring
-                // backslash escapes. Scans across newlines so multi-line
-                // string constants don't leak their brackets into the count.
-                b'"' => {
-                    i += 1;
-                    while i < bytes.len() && bytes[i] != b'"' {
-                        if bytes[i] == b'\\' {
-                            i += 1;
-                        }
-                        i += 1;
-                    }
-                }
-                // Char literal 'X' or '\X' — bounded lookahead so Rust
-                // lifetimes ('a) are NOT treated as strings
-                b'\'' => {
-                    if i + 3 < bytes.len() && bytes[i + 1] == b'\\' && bytes[i + 3] == b'\'' {
-                        i += 3;
-                    } else if i + 2 < bytes.len() && bytes[i + 2] == b'\'' {
-                        i += 2;
-                    }
-                }
                 b'{' | b'(' | b'[' => {
                     current_depth += 1;
                     max_depth = max_depth.max(current_depth);
@@ -201,8 +129,8 @@ impl ComplexityAnalyzer {
             }
             i += 1;
         }
-        // Keywords sitting past the final byte position (e.g. inside a
-        // trailing string) still need charging.
+        // Retain a defensive tail pass if a future matcher reports an offset
+        // at the end of the source.
         while next_kw < keyword_offsets.len() {
             cognitive += current_depth.max(1);
             next_kw += 1;
@@ -210,6 +138,249 @@ impl ComplexityAnalyzer {
 
         (max_depth, cognitive)
     }
+}
+
+fn function_spans_in(content: &str, re: &Regex, lang: &Language) -> Vec<FunctionSpan> {
+    let matches: Vec<(usize, usize, String)> = re
+        .find_iter(content)
+        .map(|m| {
+            // Patterns like `(?m)^\s*fn ...` swallow preceding blank lines;
+            // anchor the span at the signature rather than that whitespace.
+            let lead_ws = m.as_str().len() - m.as_str().trim_start().len();
+            (
+                m.start() + lead_ws,
+                m.end(),
+                trailing_identifier(m.as_str()),
+            )
+        })
+        .collect();
+    if matches.is_empty() {
+        return Vec::new();
+    }
+
+    let mut line_starts = vec![0usize];
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            line_starts.push(i + 1);
+        }
+    }
+    let line_of = |offset: usize| line_starts.partition_point(|&start| start <= offset);
+    let total_lines = content.lines().count().max(1);
+
+    matches
+        .iter()
+        .enumerate()
+        .map(|(i, (start_offset, match_end, name))| {
+            let start_line = line_of(*start_offset);
+            let next_start = matches
+                .get(i + 1)
+                .map(|next| next.0)
+                .unwrap_or(content.len());
+            let fallback_end = line_of(next_start)
+                .saturating_sub(1)
+                .max(start_line)
+                .min(total_lines);
+            let end_line = brace_body_end(
+                content.as_bytes(),
+                *start_offset,
+                *match_end,
+                next_start,
+                uses_curly_function_bodies(&lang.name),
+            )
+            .map(line_of)
+            .unwrap_or(fallback_end);
+            FunctionSpan {
+                name: name.clone(),
+                start_line,
+                end_line,
+            }
+        })
+        .collect()
+}
+
+fn uses_curly_function_bodies(language: &str) -> bool {
+    matches!(
+        language,
+        "Rust"
+            | "C"
+            | "C++"
+            | "Zig"
+            | "Go"
+            | "Java"
+            | "Kotlin"
+            | "Groovy"
+            | "C#"
+            | "PHP"
+            | "Bash"
+            | "Zsh"
+            | "Fish"
+            | "PowerShell"
+            | "JavaScript"
+            | "TypeScript"
+            | "Swift"
+            | "Objective-C"
+            | "Dart"
+            | "R"
+            | "Solidity"
+    )
+}
+
+/// Return the byte offset of a brace-delimited function's closing brace, or
+/// of a declaration's semicolon. For unknown/custom languages, only accept an
+/// opening brace on the signature line to avoid mistaking a body expression
+/// (for example, a Python dictionary) for the function body.
+fn brace_body_end(
+    content: &[u8],
+    match_start: usize,
+    match_end: usize,
+    search_end: usize,
+    allow_multiline_signature: bool,
+) -> Option<usize> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut i = match_start;
+
+    while i < search_end {
+        match content[i] {
+            b'\n' if !allow_multiline_signature && i >= match_end => return None,
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'{' if paren_depth == 0 && bracket_depth == 0 => {
+                return matching_brace_end(content, i);
+            }
+            b';' if i >= match_end && paren_depth == 0 && bracket_depth == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn matching_brace_end(content: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, byte) in content[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Replace comment and string bytes with spaces while preserving byte offsets
+/// and line endings. The language token trie keeps this scanner aligned with
+/// the line counter's delimiter rules without requiring a full parser.
+fn mask_non_code(content: &str, lang: &Language) -> String {
+    let source = content.as_bytes();
+    let mut masked = source.to_vec();
+    let (trie, process_mask) = lang.tokens();
+    let mut i = 0;
+    let mut at_line_start = true;
+
+    while i < source.len() {
+        if source[i] == b'\n' {
+            at_line_start = true;
+            i += 1;
+            continue;
+        }
+
+        let token_at_line_start = at_line_start;
+        at_line_start = false;
+        if !should_process(source[i], *process_mask) {
+            i += 1;
+            continue;
+        }
+        let Some(token) = trie
+            .match_at(source, i)
+            .filter(|token| !token.line_start_only || token_at_line_start)
+        else {
+            i += 1;
+            continue;
+        };
+
+        let start = i;
+        match token.token_type {
+            TokenType::LineComment => {
+                while i < source.len() && source[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            TokenType::BlockCommentStart => {
+                let open = source[start..start + token.advance].to_vec();
+                let close = token.close.unwrap_or_default();
+                i += token.advance;
+                let mut nested_depth = 0usize;
+                let mut comment_line_start = false;
+
+                while i < source.len() {
+                    if source[i] == b'\n' {
+                        comment_line_start = true;
+                        i += 1;
+                        continue;
+                    }
+                    let anchored = !token.line_start_only || comment_line_start;
+                    comment_line_start = false;
+                    if anchored && bytes_match_at(source, i, &close) {
+                        i += close.len();
+                        if nested_depth == 0 {
+                            break;
+                        }
+                        nested_depth -= 1;
+                        continue;
+                    }
+                    if token.nested && anchored && bytes_match_at(source, i, &open) {
+                        nested_depth += 1;
+                        i += open.len();
+                        continue;
+                    }
+                    i += 1;
+                }
+            }
+            TokenType::StringDelimiter | TokenType::DocStringDelimiter => {
+                let close = token.close.unwrap_or_default();
+                i += token.advance;
+                while i < source.len() {
+                    if source[i] == b'\n' && !token.multiline {
+                        break;
+                    }
+                    if token.escape == Some(source[i]) {
+                        i = (i + 2).min(source.len());
+                        continue;
+                    }
+                    if bytes_match_at(source, i, &close) {
+                        i += close.len();
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+        }
+        mask_range(&mut masked, start, i);
+    }
+
+    String::from_utf8(masked).expect("masking valid UTF-8 must preserve UTF-8")
+}
+
+fn mask_range(content: &mut [u8], start: usize, end: usize) {
+    for byte in &mut content[start..end] {
+        if *byte != b'\n' {
+            *byte = b' ';
+        }
+    }
+}
+
+fn bytes_match_at(content: &[u8], pos: usize, pattern: &[u8]) -> bool {
+    !pattern.is_empty()
+        && pos + pattern.len() <= content.len()
+        && &content[pos..pos + pattern.len()] == pattern
 }
 
 impl Default for ComplexityAnalyzer {
@@ -246,6 +417,9 @@ mod tests {
                 "for".to_string(),
                 "while".to_string(),
                 "match".to_string(),
+                "?".to_string(),
+                "&&".to_string(),
+                "||".to_string(),
             ],
             nested_comments: true,
             ..Default::default()
@@ -293,6 +467,47 @@ fn main() {
         let complexity = analyzer.analyze(content, &lang);
         // 1 function + 2 if + 1 for + 1 else + 1 while = 6
         assert_eq!(complexity.cyclomatic, 6);
+    }
+
+    #[test]
+    fn test_complexity_ignores_comments_strings_and_fake_functions() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = r#"
+fn real() {
+    let text = "if for match fn fake() { [[[(";
+    // while else fn commented_out() { ((
+    /* if /* match && */ || fn also_fake() { [[ */
+}
+"#;
+
+        let complexity = analyzer.analyze(content, &lang);
+        assert_eq!(complexity.functions, 1);
+        assert_eq!(complexity.cyclomatic, 1);
+        assert_eq!(complexity.cognitive, 0);
+        assert_eq!(complexity.max_depth, 1);
+    }
+
+    #[test]
+    fn test_complexity_counts_symbolic_operators_once() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = "fn f() { if a && b || c { value()?; } }\n";
+
+        let complexity = analyzer.analyze(content, &lang);
+        // 1 function + if + && + || + ?
+        assert_eq!(complexity.cyclomatic, 5);
+    }
+
+    #[test]
+    fn test_average_function_length_excludes_file_preamble() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = "// module documentation\nuse std::fmt;\n\nfn only() {}\n";
+
+        let complexity = analyzer.analyze(content, &lang);
+        assert_eq!(complexity.functions, 1);
+        assert_eq!(complexity.avg_func_lines, 1.0);
     }
 
     #[test]
@@ -403,10 +618,22 @@ pub fn second() {
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].name, "first");
         assert_eq!(spans[0].start_line, 1);
-        assert_eq!(spans[0].end_line, 4, "first span ends before second's line");
+        assert_eq!(spans[0].end_line, 3, "first span ends at its closing brace");
         assert_eq!(spans[1].name, "second");
         assert_eq!(spans[1].start_line, 5);
         assert_eq!(spans[1].end_line, 7, "last span runs to end of file");
+    }
+
+    #[test]
+    fn test_function_spans_stop_at_declaration_semicolon() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = "fn declared();\nfn implemented() {\n    work();\n}\n";
+
+        let spans = analyzer.function_spans(content, &lang);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].end_line, 1);
+        assert_eq!(spans[1].end_line, 4);
     }
 
     #[test]

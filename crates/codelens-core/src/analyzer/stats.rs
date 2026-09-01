@@ -94,7 +94,13 @@ pub struct Complexity {
 impl Complexity {
     /// Add another Complexity to this one.
     pub fn add(&mut self, other: &Complexity) {
-        self.functions += other.functions;
+        let combined_functions = self.functions + other.functions;
+        if combined_functions > 0 {
+            let combined_function_lines = self.avg_func_lines * self.functions as f64
+                + other.avg_func_lines * other.functions as f64;
+            self.avg_func_lines = combined_function_lines / combined_functions as f64;
+        }
+        self.functions = combined_functions;
         self.cyclomatic += other.cyclomatic;
         self.cognitive += other.cognitive;
         self.max_depth = self.max_depth.max(other.max_depth);
@@ -286,12 +292,6 @@ impl Summary {
         let mut sorted: Vec<_> = by_language.into_iter().collect();
         sorted.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.lines.code));
         summary.by_language = sorted.into_iter().collect();
-
-        // Calculate average function lines
-        if summary.complexity.functions > 0 {
-            summary.complexity.avg_func_lines =
-                summary.lines.code as f64 / summary.complexity.functions as f64;
-        }
 
         summary
     }
@@ -772,14 +772,14 @@ mod tests {
             cyclomatic: 20,
             cognitive: 0,
             max_depth: 5,
-            avg_func_lines: 0.0,
+            avg_func_lines: 20.0,
         };
         let c2 = Complexity {
             functions: 5,
             cyclomatic: 10,
             cognitive: 0,
             max_depth: 8,
-            avg_func_lines: 0.0,
+            avg_func_lines: 10.0,
         };
 
         c1.add(&c2);
@@ -787,6 +787,7 @@ mod tests {
         assert_eq!(c1.functions, 15);
         assert_eq!(c1.cyclomatic, 30);
         assert_eq!(c1.max_depth, 8); // max of 5 and 8
+        assert!((c1.avg_func_lines - 16.666_666).abs() < 0.000_001);
     }
 
     #[test]
@@ -877,6 +878,7 @@ mod tests {
         assert_eq!(summary.total_size, 3500);
         assert_eq!(summary.by_language.len(), 2);
         assert_eq!(summary.complexity.functions, 10);
+        assert!((summary.complexity.avg_func_lines - 13.99).abs() < 0.001);
 
         // Rust should be first (more code lines)
         let first_lang = summary.by_language.keys().next().unwrap();
@@ -885,6 +887,7 @@ mod tests {
         let rust_stats = summary.by_language.get("Rust").unwrap();
         assert_eq!(rust_stats.files, 2);
         assert_eq!(rust_stats.lines.code, 120);
+        assert!((rust_stats.complexity.avg_func_lines - 14.9875).abs() < 0.001);
     }
 
     #[test]

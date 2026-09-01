@@ -102,16 +102,16 @@ impl RawMetrics {
             0.0
         };
 
-        // Average function length considers only files that HAVE functions:
-        // documents (Markdown/HTML/TOML) contribute code lines but never
-        // functions, and would otherwise inflate the average.
-        let func_file_code: usize = files
+        // Weight the per-file function-span averages by function count.
+        // File-level code totals include imports, types, and other top-level
+        // content and therefore are not a function-length measurement.
+        let total_function_lines: f64 = files
             .iter()
             .filter(|f| f.complexity.functions > 0)
-            .map(|f| f.lines.code)
+            .map(|f| f.complexity.avg_func_lines * f.complexity.functions as f64)
             .sum();
         let avg_func_lines = if total_functions > 0 {
-            func_file_code as f64 / total_functions as f64
+            total_function_lines / total_functions as f64
         } else {
             0.0
         };
@@ -311,7 +311,7 @@ mod tests {
                     cyclomatic: 6,
                     cognitive: 0,
                     max_depth: 5,
-                    avg_func_lines: 20.0,
+                    avg_func_lines: 5.0,
                 },
             },
         ];
@@ -320,6 +320,7 @@ mod tests {
         assert!((metrics.avg_cyclomatic - 3.0).abs() < 0.01);
         // P90 of [3, 5] = 5 (only 2 elements, P90 picks the higher)
         assert_eq!(metrics.depth, 5);
+        assert!((metrics.avg_func_lines - 15.0).abs() < 0.01);
         assert!((metrics.avg_file_lines - 75.0).abs() < 0.01);
     }
 
