@@ -13,7 +13,7 @@ use super::{Config, OutputFormatType, SortBy};
 /// Every field is `Option`: `None` means "not specified in the file", so the
 /// value can fall back to CLI arguments or built-in defaults during merging.
 #[derive(Debug, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PartialConfig {
     /// Exclude patterns.
     pub excludes: Option<String>,
@@ -159,6 +159,7 @@ pub fn load_config_file(path: &Path) -> Result<PartialConfig> {
         path: path.to_path_buf(),
         source: e,
     })?;
+    validate_config(path, &partial)?;
 
     // A relative languages_file resolves against the config file's
     // directory, not the process CWD, so the config keeps working no
@@ -171,6 +172,78 @@ pub fn load_config_file(path: &Path) -> Result<PartialConfig> {
     }
 
     Ok(partial)
+}
+
+fn validate_config(path: &Path, partial: &PartialConfig) -> Result<()> {
+    if let Some(output) = partial.output.as_deref() {
+        if !matches!(
+            output,
+            "console"
+                | "json"
+                | "csv"
+                | "markdown"
+                | "md"
+                | "html"
+                | "openmetrics"
+                | "badge"
+                | "sarif"
+        ) {
+            return Err(config_value_error(
+                path,
+                "output",
+                output,
+                "console, json, csv, markdown, md, html, openmetrics, badge, or sarif",
+            ));
+        }
+    }
+
+    if let Some(sort) = partial.sort.as_deref() {
+        if !matches!(sort, "lines" | "files" | "code" | "name" | "size") {
+            return Err(config_value_error(
+                path,
+                "sort",
+                sort,
+                "lines, files, code, name, or size",
+            ));
+        }
+    }
+
+    if let Some(count_as) = partial.count_as.as_deref() {
+        for mapping in count_as.split(',') {
+            let Some((extension, language)) = mapping.split_once(':') else {
+                return Err(config_parse_error(
+                    path,
+                    format!(
+                        "invalid value '{mapping}' for 'count_as': expected EXTENSION:LANGUAGE"
+                    ),
+                ));
+            };
+            if extension.trim().is_empty() || language.trim().is_empty() {
+                return Err(config_parse_error(
+                    path,
+                    format!(
+                        "invalid value '{mapping}' for 'count_as': extension and language must not be empty"
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn config_value_error(path: &Path, field: &str, value: &str, expected: &str) -> Error {
+    config_parse_error(
+        path,
+        format!("invalid value '{value}' for '{field}': expected {expected}"),
+    )
+}
+
+fn config_parse_error(path: &Path, message: String) -> Error {
+    Error::ConfigParse {
+        path: path.to_path_buf(),
+        source: <toml::de::Error as serde::de::Error>::custom(message),
+    }
 }
 
 fn parse_comma_list(s: &str) -> Vec<String> {
@@ -194,6 +267,7 @@ fn parse_format(s: &str) -> OutputFormatType {
         "html" => OutputFormatType::Html,
         "openmetrics" => OutputFormatType::OpenMetrics,
         "badge" => OutputFormatType::Badge,
+        "sarif" => OutputFormatType::Sarif,
         _ => OutputFormatType::Console,
     }
 }
@@ -324,5 +398,84 @@ mod tests {
     #[test]
     fn test_parse_comma_list() {
         assert_eq!(parse_comma_list("a, b, c"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn unknown_config_key_is_an_error_with_the_config_path() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "threds = 4").unwrap();
+
+        let error = load_config_file(file.path()).unwrap_err();
+
+        let Error::ConfigParse { path, source } = error else {
+            panic!("expected config parse error");
+        };
+        assert_eq!(path, file.path());
+        assert!(source.to_string().contains("unknown field `threds`"));
+    }
+
+    #[test]
+    fn invalid_output_and_sort_values_are_errors() {
+        for source in [r#"output = "jsno""#, r#"sort = "largest""#] {
+            let mut file = NamedTempFile::new().unwrap();
+            writeln!(file, "{source}").unwrap();
+
+            assert!(matches!(
+                load_config_file(file.path()),
+                Err(Error::ConfigParse { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn malformed_count_as_values_are_errors() {
+        for value in ["broken", ":rust", "rs:", "rs:rust,"] {
+            let mut file = NamedTempFile::new().unwrap();
+            writeln!(file, "count_as = \"{value}\"").unwrap();
+
+            assert!(matches!(
+                load_config_file(file.path()),
+                Err(Error::ConfigParse { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn all_supported_config_enum_values_are_accepted() {
+        for (output, expected) in [
+            ("console", OutputFormatType::Console),
+            ("json", OutputFormatType::Json),
+            ("csv", OutputFormatType::Csv),
+            ("markdown", OutputFormatType::Markdown),
+            ("md", OutputFormatType::Markdown),
+            ("html", OutputFormatType::Html),
+            ("openmetrics", OutputFormatType::OpenMetrics),
+            ("badge", OutputFormatType::Badge),
+            ("sarif", OutputFormatType::Sarif),
+        ] {
+            let mut file = NamedTempFile::new().unwrap();
+            writeln!(file, "output = \"{output}\"").unwrap();
+
+            let partial = load_config_file(file.path()).unwrap();
+            let mut config = Config::default();
+            partial.apply_to(&mut config);
+            assert_eq!(config.output.format, expected);
+        }
+
+        for (sort, expected) in [
+            ("lines", SortBy::Lines),
+            ("files", SortBy::Files),
+            ("code", SortBy::Code),
+            ("name", SortBy::Name),
+            ("size", SortBy::Size),
+        ] {
+            let mut file = NamedTempFile::new().unwrap();
+            writeln!(file, "sort = \"{sort}\"").unwrap();
+
+            let partial = load_config_file(file.path()).unwrap();
+            let mut config = Config::default();
+            partial.apply_to(&mut config);
+            assert_eq!(config.output.sort_by, expected);
+        }
     }
 }
