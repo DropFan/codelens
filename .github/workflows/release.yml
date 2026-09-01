@@ -56,16 +56,18 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+      # audit-check installs the latest cargo-audit, whose own MSRV may be
+      # newer than this project's MSRV. Run it while stable is still active.
+      - name: Security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@1.88
 
       - name: Check MSRV
         run: cargo +1.88 check --workspace --all-targets --locked
-
-      - name: Security audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
   create-release:
     name: Create Release
