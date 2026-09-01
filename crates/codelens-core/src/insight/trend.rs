@@ -1,6 +1,7 @@
 //! Trend tracking with snapshots.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -116,6 +117,24 @@ pub fn save_snapshot(
     git_commit: Option<String>,
     git_branch: Option<String>,
 ) -> Result<PathBuf> {
+    save_snapshot_at(
+        project_root,
+        result,
+        label,
+        git_commit,
+        git_branch,
+        Utc::now(),
+    )
+}
+
+fn save_snapshot_at(
+    project_root: &Path,
+    result: AnalysisResult,
+    label: Option<String>,
+    git_commit: Option<String>,
+    git_branch: Option<String>,
+    now: DateTime<Utc>,
+) -> Result<PathBuf> {
     let dir = snapshots_dir(project_root);
     fs::create_dir_all(&dir).map_err(|e| Error::FileRead {
         path: dir.clone(),
@@ -130,7 +149,6 @@ pub fn save_snapshot(
         );
     }
 
-    let now = Utc::now();
     let snapshot = Snapshot {
         version: 1,
         timestamp: now,
@@ -140,15 +158,34 @@ pub fn save_snapshot(
         result,
     };
 
-    let filename = now.format("%Y-%m-%dT%H-%M-%SZ").to_string() + ".json";
-    let path = dir.join(&filename);
     let json = serde_json::to_string_pretty(&snapshot)?;
-    fs::write(&path, json).map_err(|e| Error::FileRead {
-        path: path.clone(),
-        source: e,
-    })?;
-
-    Ok(path)
+    let stem = now.format("%Y-%m-%dT%H-%M-%S%.9fZ").to_string();
+    for collision in 0usize.. {
+        let filename = if collision == 0 {
+            format!("{stem}.json")
+        } else {
+            format!("{stem}~{collision:020}.json")
+        };
+        let path = dir.join(filename);
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(json.as_bytes())
+                    .map_err(|source| Error::FileRead {
+                        path: path.clone(),
+                        source,
+                    })?;
+                return Ok(path);
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(source) => {
+                return Err(Error::FileRead {
+                    path: path.clone(),
+                    source,
+                });
+            }
+        }
+    }
+    unreachable!("the snapshot collision counter is unbounded")
 }
 
 pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
@@ -176,7 +213,11 @@ pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
         }
     }
 
-    metas.sort_by_key(|m| m.timestamp);
+    metas.sort_by(|a, b| {
+        a.timestamp
+            .cmp(&b.timestamp)
+            .then_with(|| a.file_path.cmp(&b.file_path))
+    });
     Ok(metas)
 }
 
@@ -379,6 +420,44 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_with_the_same_timestamp_never_overwrite() {
+        let dir = TempDir::new().unwrap();
+        let now = Utc::now();
+
+        let first = save_snapshot_at(
+            dir.path(),
+            make_result(10, 1),
+            Some("first".into()),
+            None,
+            None,
+            now,
+        )
+        .unwrap();
+        let second = save_snapshot_at(
+            dir.path(),
+            make_result(20, 2),
+            Some("second".into()),
+            None,
+            None,
+            now,
+        )
+        .unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(list_snapshots(dir.path()).unwrap().len(), 2);
+        assert_eq!(
+            load_snapshot(&first).unwrap().label.as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            load_snapshot(&second).unwrap().label.as_deref(),
+            Some("second")
+        );
+        assert_eq!(resolve_snapshot(dir.path(), "latest").unwrap(), second);
+        assert_eq!(resolve_snapshot(dir.path(), "latest~1").unwrap(), first);
+    }
+
+    #[test]
     fn test_gitignore_created() {
         let dir = TempDir::new().unwrap();
         save_snapshot(dir.path(), make_result(10, 1), None, None, None).unwrap();
@@ -389,7 +468,6 @@ mod tests {
     fn test_resolve_latest() {
         let dir = TempDir::new().unwrap();
         save_snapshot(dir.path(), make_result(10, 1), None, None, None).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100)); // ensure different second in timestamp
         save_snapshot(
             dir.path(),
             make_result(20, 2),
@@ -414,7 +492,6 @@ mod tests {
             None,
         )
         .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100));
         save_snapshot(
             dir.path(),
             make_result(20, 2),
@@ -446,7 +523,6 @@ mod tests {
             None,
         )
         .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100));
         save_snapshot(
             dir.path(),
             make_result(150, 7),
