@@ -97,7 +97,6 @@ fn attach_function_hotspots(
         let touches = hotspot::count_function_touches(&spans, &hunks);
 
         let lines: Vec<&str> = content.lines().collect();
-        let keywords_re = &lang.complexity_patterns().keywords_re;
         let mut functions: Vec<FunctionHotspot> = spans
             .iter()
             .zip(touches)
@@ -105,11 +104,7 @@ fn attach_function_hotspots(
             .map(|(span, touched)| {
                 let end = span.end_line.min(lines.len());
                 let body = lines[span.start_line - 1..end].join("\n");
-                let cyclomatic = keywords_re
-                    .as_ref()
-                    .map(|re| re.find_iter(&body).count())
-                    .unwrap_or(0)
-                    + 1;
+                let cyclomatic = analyzer.analyze(&body, &lang).cyclomatic;
                 FunctionHotspot {
                     name: span.name.clone(),
                     start_line: span.start_line,
@@ -152,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn function_breakdown_honors_count_as_mapping() {
+    fn function_breakdown_honors_mapping_and_ignores_non_code_keywords() {
         let temp = tempfile::TempDir::new().unwrap();
         init_repo(temp.path());
 
@@ -160,7 +155,13 @@ mod tests {
         // know: only the config's count_as mapping makes it detectable.
         std::fs::write(
             temp.path().join("main.foo"),
-            "fn alpha() {\n    let x = 1;\n    println!(\"{x}\");\n}\n",
+            concat!(
+                "fn alpha() {\n",
+                "    let marker = \"if for while match && || one\";\n",
+                "    // if for while match && ||\n",
+                "    if true { println!(\"{marker}\"); }\n",
+                "}\n",
+            ),
         )
         .unwrap();
         git(temp.path(), &["add", "."]);
@@ -170,7 +171,13 @@ mod tests {
         // the span registers at least one commit.
         std::fs::write(
             temp.path().join("main.foo"),
-            "fn alpha() {\n    let x = 2;\n    println!(\"{x}\");\n}\n",
+            concat!(
+                "fn alpha() {\n",
+                "    let marker = \"if for while match && || two\";\n",
+                "    // if for while match && ||\n",
+                "    if true { println!(\"{marker}\"); }\n",
+                "}\n",
+            ),
         )
         .unwrap();
         git(temp.path(), &["add", "."]);
@@ -208,6 +215,10 @@ mod tests {
             .functions
             .as_ref()
             .expect("custom-mapped language must get a function breakdown");
-        assert!(functions.iter().any(|f| f.name == "alpha"));
+        let alpha = functions.iter().find(|f| f.name == "alpha").unwrap();
+        assert_eq!(
+            alpha.cyclomatic, 2,
+            "only the function base and real if should count"
+        );
     }
 }
