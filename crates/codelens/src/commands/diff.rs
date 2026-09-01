@@ -53,9 +53,7 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     };
     drop_submodule_files(&mut to_result, &submodules);
 
-    if !analysis_is_valid(&from_ref, &from_result)
-        || !analysis_is_valid(&to_label, &to_result)
-    {
+    if !analysis_is_valid(&from_ref, &from_result) || !analysis_is_valid(&to_label, &to_result) {
         return Ok(ExitCode::FAILURE);
     }
 
