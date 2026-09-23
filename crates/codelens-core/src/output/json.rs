@@ -166,10 +166,15 @@ mod tests {
             health: HealthReport {
                 score: 90.0,
                 grade: crate::insight::Grade::A,
-                model: "default".to_string(),
+                model: "default-v2".to_string(),
                 dimensions: vec![],
                 by_directory: vec![],
                 worst_files: vec![],
+                scope: crate::insight::health::HealthScope::Production,
+                confidence: Default::default(),
+                tail_risk: Default::default(),
+                by_language: vec![],
+                test_health: None,
                 regression: None,
             },
             estimation: EstimationComparison {

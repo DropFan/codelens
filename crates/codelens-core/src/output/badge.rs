@@ -178,10 +178,15 @@ mod tests {
         let report = HealthReport {
             score: 82.3,
             grade: Grade::B,
-            model: "default".to_string(),
+            model: "default-v2".to_string(),
             dimensions: vec![],
             by_directory: vec![],
             worst_files: vec![],
+            scope: crate::insight::health::HealthScope::Production,
+            confidence: Default::default(),
+            tail_risk: Default::default(),
+            by_language: vec![],
+            test_health: None,
             regression: None,
         };
 

@@ -1,13 +1,13 @@
 //! Default scoring model for general-purpose projects.
 
-use super::{DimensionWeight, HealthDimension, RawMetrics, ScoringModel};
+use super::{DimensionWeight, HealthDimension, HealthScoringFlow, RawMetrics, ScoringModel};
 
 /// Duplication must stay last: `without_duplication` drops it by
 /// slicing off the tail (checked by test).
 const ALL_DIMENSIONS: &[DimensionWeight] = &[
     DimensionWeight {
         dimension: HealthDimension::Complexity,
-        weight: 0.25,
+        weight: 0.30,
     },
     DimensionWeight {
         dimension: HealthDimension::FuncSize,
@@ -15,7 +15,7 @@ const ALL_DIMENSIONS: &[DimensionWeight] = &[
     },
     DimensionWeight {
         dimension: HealthDimension::CommentRatio,
-        weight: 0.10,
+        weight: 0.05,
     },
     DimensionWeight {
         dimension: HealthDimension::FileSize,
@@ -23,11 +23,11 @@ const ALL_DIMENSIONS: &[DimensionWeight] = &[
     },
     DimensionWeight {
         dimension: HealthDimension::NestingDepth,
-        weight: 0.15,
+        weight: 0.05,
     },
     DimensionWeight {
         dimension: HealthDimension::Duplication,
-        weight: 0.10,
+        weight: 0.20,
     },
 ];
 
@@ -40,7 +40,7 @@ impl DefaultModel {
     pub fn new() -> Self {
         Self {
             dimensions: ALL_DIMENSIONS,
-            name: "default",
+            name: "default-v2",
         }
     }
 
@@ -54,7 +54,7 @@ impl DefaultModel {
     pub fn without_duplication() -> Self {
         Self {
             dimensions: &ALL_DIMENSIONS[..ALL_DIMENSIONS.len() - 1],
-            name: "default-no-dup",
+            name: "default-v2-no-dup",
         }
     }
 }
@@ -74,6 +74,10 @@ impl ScoringModel for DefaultModel {
         self.dimensions
     }
 
+    fn health_scoring_flow(&self) -> HealthScoringFlow {
+        HealthScoringFlow::FileFirstV2
+    }
+
     fn score_dimension(&self, dimension: HealthDimension, metrics: &RawMetrics) -> f64 {
         match dimension {
             HealthDimension::Complexity => score_complexity(metrics.avg_cyclomatic),
@@ -84,9 +88,57 @@ impl ScoringModel for DefaultModel {
             HealthDimension::Duplication => score_duplication(metrics.duplication_ratio),
         }
     }
+
+    fn total_score(&self, metrics: &RawMetrics) -> f64 {
+        if metrics.total_files == 0 {
+            return 0.0;
+        }
+        let total_weight: f64 = self
+            .dimensions
+            .iter()
+            .map(|dimension| dimension.weight)
+            .sum();
+        if total_weight == 0.0 {
+            return 0.0;
+        }
+        let scores: Vec<(HealthDimension, f64, f64)> = self
+            .dimensions
+            .iter()
+            .map(|dimension| {
+                (
+                    dimension.dimension,
+                    self.score_dimension(dimension.dimension, metrics),
+                    dimension.weight,
+                )
+            })
+            .collect();
+        let base = scores
+            .iter()
+            .map(|(_, score, weight)| score * weight)
+            .sum::<f64>()
+            / total_weight;
+        let core_floor = scores
+            .iter()
+            .filter(|(dimension, _, _)| {
+                matches!(
+                    dimension,
+                    HealthDimension::Complexity
+                        | HealthDimension::FuncSize
+                        | HealthDimension::FileSize
+                        | HealthDimension::Duplication
+                )
+            })
+            .map(|(_, score, _)| *score)
+            .min_by(f64::total_cmp)
+            .unwrap_or(base);
+        (0.85 * base + 0.15 * core_floor).clamp(0.0, 100.0)
+    }
 }
 
 fn interpolate(value: f64, breakpoints: &[(f64, f64)]) -> f64 {
+    if !value.is_finite() {
+        return 1.0;
+    }
     if breakpoints.is_empty() {
         return 50.0;
     }
@@ -115,8 +167,9 @@ fn score_complexity(avg_cc: f64) -> f64 {
             (3.0, 100.0),
             (6.0, 80.0),
             (10.0, 60.0),
-            (15.0, 40.0),
-            (25.0, 20.0),
+            (15.0, 35.0),
+            (25.0, 10.0),
+            (40.0, 1.0),
         ],
     )
 }
@@ -129,8 +182,9 @@ fn score_func_size(avg_lines: f64) -> f64 {
             (15.0, 100.0),
             (30.0, 80.0),
             (50.0, 60.0),
-            (80.0, 40.0),
-            (150.0, 20.0),
+            (80.0, 35.0),
+            (150.0, 10.0),
+            (300.0, 1.0),
         ],
     )
 }
@@ -139,12 +193,12 @@ fn score_comment_ratio(ratio: f64) -> f64 {
     interpolate(
         ratio,
         &[
-            (0.0, 40.0),
-            (0.03, 70.0),
+            (0.0, 60.0),
+            (0.03, 80.0),
             (0.05, 100.0),
             (0.30, 100.0),
-            (0.50, 70.0),
-            (0.80, 40.0),
+            (0.50, 80.0),
+            (0.80, 60.0),
         ],
     )
 }
@@ -157,8 +211,9 @@ fn score_file_size(avg_lines: f64) -> f64 {
             (200.0, 100.0),
             (400.0, 80.0),
             (600.0, 60.0),
-            (1000.0, 40.0),
-            (2000.0, 20.0),
+            (1000.0, 35.0),
+            (2000.0, 10.0),
+            (4000.0, 1.0),
         ],
     )
 }
@@ -172,11 +227,12 @@ fn score_duplication(ratio: f64) -> f64 {
         ratio,
         &[
             (0.00, 100.0),
-            (0.30, 100.0),
-            (0.40, 80.0),
-            (0.50, 60.0),
-            (0.60, 40.0),
-            (0.75, 20.0),
+            (0.25, 100.0),
+            (0.35, 80.0),
+            (0.45, 60.0),
+            (0.60, 30.0),
+            (0.75, 10.0),
+            (0.90, 1.0),
         ],
     )
 }
@@ -186,11 +242,12 @@ fn score_nesting(depth: usize) -> f64 {
         depth as f64,
         &[
             (0.0, 100.0),
-            (3.0, 100.0),
-            (4.0, 80.0),
-            (6.0, 60.0),
-            (8.0, 40.0),
-            (12.0, 20.0),
+            (2.0, 100.0),
+            (3.0, 85.0),
+            (4.0, 65.0),
+            (6.0, 35.0),
+            (8.0, 10.0),
+            (12.0, 1.0),
         ],
     )
 }
@@ -225,6 +282,14 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolate_non_finite_is_worst_score() {
+        let bp = &[(0.0, 100.0), (10.0, 20.0)];
+        assert_eq!(interpolate(f64::NAN, bp), 1.0);
+        assert_eq!(interpolate(f64::INFINITY, bp), 1.0);
+        assert_eq!(interpolate(f64::NEG_INFINITY, bp), 1.0);
+    }
+
+    #[test]
     fn test_score_complexity_excellent() {
         assert!((score_complexity(2.0) - 100.0).abs() < 0.01);
     }
@@ -244,12 +309,12 @@ mod tests {
 
     #[test]
     fn test_score_comment_ratio_too_few() {
-        assert!(score_comment_ratio(0.0) < 50.0);
+        assert!((score_comment_ratio(0.0) - 60.0).abs() < 0.01);
     }
 
     #[test]
     fn test_score_comment_ratio_too_many() {
-        assert!(score_comment_ratio(0.80) < 50.0);
+        assert!((score_comment_ratio(0.80) - 60.0).abs() < 0.01);
     }
 
     #[test]
@@ -302,11 +367,14 @@ mod tests {
 
     #[test]
     fn test_default_model_name() {
-        assert_eq!(DefaultModel::new().name(), "default");
+        assert_eq!(DefaultModel::new().name(), "default-v2");
         // The reduced-scope variant must be distinguishable in
         // machine-read output (JSON "model" field, openmetrics label),
         // or consumers cannot tell the scoring basis changed.
-        assert_eq!(DefaultModel::without_duplication().name(), "default-no-dup");
+        assert_eq!(
+            DefaultModel::without_duplication().name(),
+            "default-v2-no-dup"
+        );
     }
 
     #[test]
@@ -330,7 +398,7 @@ mod tests {
     fn test_without_duplication_renormalizes_weights() {
         // Perfect metrics except a terrible duplication ratio: the full
         // model is dragged down by the Duplication dimension, while the
-        // unmeasured model must land on a full 100 — not the 90 that an
+        // unmeasured model must land on a full 100 — not the 80 that an
         // un-renormalized weight sum would produce.
         let metrics = RawMetrics {
             avg_cyclomatic: 2.0,
@@ -347,6 +415,25 @@ mod tests {
         assert!(
             (unmeasured - 100.0).abs() < 0.001,
             "unmeasured model must renormalize to 100, got {unmeasured}"
+        );
+    }
+
+    #[test]
+    fn test_severe_weighted_dimension_cannot_hide_in_an_a_grade() {
+        let metrics = RawMetrics {
+            avg_cyclomatic: 2.0,
+            avg_func_lines: 10.0,
+            comment_ratio: 0.15,
+            depth: 2,
+            avg_file_lines: 100.0,
+            total_files: 1,
+            duplication_ratio: 0.90,
+        };
+
+        let score = DefaultModel::new().total_score(&metrics);
+        assert!(
+            score < 70.0,
+            "severe duplication must be visible, got {score}"
         );
     }
 }

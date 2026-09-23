@@ -144,15 +144,25 @@ fn regression_results(regression: &crate::insight::health::RegressionReport) -> 
         .regressed_files
         .iter()
         .map(|file| {
+            let message = if file.is_new {
+                format!(
+                    "New file fails the health gate against {}: {} ({:.1})",
+                    regression.baseline, file.to_grade, file.to_score
+                )
+            } else {
+                format!(
+                    "Health regressed against {}: {} ({:.1}) → {} ({:.1})",
+                    regression.baseline,
+                    file.from_grade,
+                    file.from_score,
+                    file.to_grade,
+                    file.to_score
+                )
+            };
             json!({
                 "ruleId": "codelens/health-regression",
                 "level": "error",
-                "message": { "text": format!(
-                    "Health regressed against {}: {} ({:.1}) → {} ({:.1})",
-                    regression.baseline,
-                    file.from_grade, file.from_score,
-                    file.to_grade, file.to_score
-                )},
+                "message": { "text": message },
                 "locations": [location(&file.path.display().to_string())],
             })
         })
@@ -217,7 +227,7 @@ mod tests {
         HealthReport {
             score: 55.0,
             grade: Grade::F,
-            model: "default".to_string(),
+            model: "default-v2".to_string(),
             dimensions: vec![],
             by_directory: vec![],
             worst_files: vec![
@@ -236,20 +246,33 @@ mod tests {
                     dimensions: vec![],
                 },
             ],
+            scope: crate::insight::health::HealthScope::Production,
+            confidence: Default::default(),
+            tail_risk: Default::default(),
+            by_language: vec![],
+            test_health: None,
             regression: Some(RegressionReport {
                 baseline: "git:main".to_string(),
+                model: "default-v2".to_string(),
                 baseline_score: 80.0,
                 baseline_grade: Grade::B,
+                baseline_scope: crate::insight::health::HealthScope::Production,
+                current_score: 55.0,
+                current_grade: Grade::F,
+                current_scope: crate::insight::health::HealthScope::Production,
+                scope_changed: false,
                 score_delta: -25.0,
                 project_regressed: true,
                 regressed_files: vec![FileRegression {
                     path: PathBuf::from("src/worse.rs"),
+                    is_new: true,
                     from_score: 82.0,
                     from_grade: Grade::B,
                     to_score: 71.0,
                     to_grade: Grade::C,
                 }],
                 improved_files: 0,
+                by_language: vec![],
                 failed: true,
             }),
         }
@@ -277,6 +300,10 @@ mod tests {
             "src/bad.rs"
         );
         assert_eq!(results[1]["ruleId"], "codelens/health-regression");
+        assert!(results[1]["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("New file"));
     }
 
     #[test]

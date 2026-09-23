@@ -8,6 +8,7 @@ use codelens_core::insight::health;
 use codelens_core::insight::hotspot;
 use codelens_core::insight::scoring::default::DefaultModel;
 use codelens_core::insight::trend;
+use codelens_core::{analyze, Config};
 
 fn make_realistic_result() -> AnalysisResult {
     let files = vec![
@@ -23,11 +24,14 @@ fn make_realistic_result() -> AnalysisResult {
             size: 3000,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 5,
                 cyclomatic: 12,
                 cognitive: 0,
                 max_depth: 3,
                 avg_func_lines: 18.0,
+                ..Complexity::default()
             },
         },
         FileStats {
@@ -42,11 +46,14 @@ fn make_realistic_result() -> AnalysisResult {
             size: 8000,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 8,
                 cyclomatic: 35,
                 cognitive: 0,
                 max_depth: 6,
                 avg_func_lines: 35.0,
+                ..Complexity::default()
             },
         },
         FileStats {
@@ -61,11 +68,14 @@ fn make_realistic_result() -> AnalysisResult {
             size: 15000,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 12,
                 cyclomatic: 60,
                 cognitive: 0,
                 max_depth: 8,
                 avg_func_lines: 42.0,
+                ..Complexity::default()
             },
         },
         FileStats {
@@ -80,11 +90,14 @@ fn make_realistic_result() -> AnalysisResult {
             size: 2000,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 6,
                 cyclomatic: 8,
                 cognitive: 0,
                 max_depth: 2,
                 avg_func_lines: 10.0,
+                ..Complexity::default()
             },
         },
         FileStats {
@@ -99,11 +112,14 @@ fn make_realistic_result() -> AnalysisResult {
             size: 4000,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 10,
                 cyclomatic: 15,
                 cognitive: 0,
                 max_depth: 3,
                 avg_func_lines: 15.0,
+                ..Complexity::default()
             },
         },
     ];
@@ -181,11 +197,14 @@ fn test_trend_save_and_diff() {
         size: 4000,
         duplicate_lines: 0,
         complexity: Complexity {
+            functions_measured: true,
+            control_flow_measured: true,
             functions: 8,
             cyclomatic: 16,
             cognitive: 0,
             max_depth: 3,
             avg_func_lines: 20.0,
+            ..Complexity::default()
         },
     });
     result2.summary = Summary::from_file_stats(&result2.files);
@@ -225,4 +244,131 @@ fn test_output_format_with_reports() {
     let json_str = String::from_utf8(buffer).unwrap();
     assert!(json_str.contains("\"score\""));
     assert!(json_str.contains("\"grade\""));
+}
+
+#[test]
+fn equivalent_multilanguage_samples_score_within_five_points() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let samples = [
+        (
+            "sample.rs",
+            r#"// Classify a value and sum positive entries.
+fn classify(value: i32) -> i32 {
+    if value > 10 {
+        value * 2
+    } else if value > 0 {
+        value + 1
+    } else {
+        0
+    }
+}
+
+fn sum_positive(values: &[i32]) -> i32 {
+    let mut total = 0;
+    for value in values {
+        if *value > 0 {
+            total += value;
+        }
+    }
+    total
+}
+"#,
+        ),
+        (
+            "sample.go",
+            r#"// Classify a value and sum positive entries.
+func classify(value int) int {
+    if value > 10 {
+        return value * 2
+    } else if value > 0 {
+        return value + 1
+    } else {
+        return 0
+    }
+}
+
+func sumPositive(values []int) int {
+    total := 0
+    for _, value := range values {
+        if value > 0 {
+            total += value
+        }
+    }
+    return total
+}
+"#,
+        ),
+        (
+            "sample.ts",
+            r#"// Classify a value and sum positive entries.
+function classify(value: number): number {
+    if (value > 10) {
+        return value * 2;
+    } else if (value > 0) {
+        return value + 1;
+    } else {
+        return 0;
+    }
+}
+
+function sumPositive(values: number[]): number {
+    let total = 0;
+    for (const value of values) {
+        if (value > 0) {
+            total += value;
+        }
+    }
+    return total;
+}
+"#,
+        ),
+        (
+            "sample.py",
+            r#"# Classify a value and sum positive entries.
+def classify(value):
+    if value > 10:
+        return value * 2
+    elif value > 0:
+        return value + 1
+    else:
+        return 0
+
+
+def sum_positive(values):
+    total = 0
+    for value in values:
+        if value > 0:
+            total += value
+    return total
+"#,
+        ),
+    ];
+    for (name, source) in samples {
+        std::fs::write(dir.path().join(name), source).unwrap();
+    }
+
+    let config = Config {
+        no_dup_scan: true,
+        ..Config::default()
+    };
+    let result = analyze(&[dir.path()], &config).unwrap();
+    let report = health::score(&result, &DefaultModel::without_duplication(), 10);
+    let scores: Vec<f64> = report
+        .by_language
+        .iter()
+        .map(|language| language.score)
+        .collect();
+
+    assert_eq!(scores.len(), 4);
+    let minimum = scores.iter().copied().min_by(f64::total_cmp).unwrap();
+    let maximum = scores.iter().copied().max_by(f64::total_cmp).unwrap();
+    assert!(
+        maximum - minimum < 5.0,
+        "equivalent language samples diverged: {:?}",
+        report
+            .by_language
+            .iter()
+            .map(|language| (&language.language, language.score))
+            .collect::<Vec<_>>()
+    );
 }

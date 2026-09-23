@@ -528,11 +528,14 @@ mod tests {
                 },
                 size: 0,
                 complexity: crate::analyzer::stats::Complexity {
+                    functions_measured: false,
+                    control_flow_measured: true,
                     cyclomatic: complexity,
                     functions: 0,
                     cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
+                    ..Default::default()
                 },
                 tokens_est: 0,
             },
@@ -556,11 +559,14 @@ mod tests {
                 },
                 size: 0,
                 complexity: crate::analyzer::stats::Complexity {
+                    functions_measured: false,
+                    control_flow_measured: true,
                     cyclomatic: 400,
                     functions: 0,
                     cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
+                    ..Default::default()
                 },
                 tokens_est: 0,
             },
@@ -577,11 +583,14 @@ mod tests {
                 },
                 size: 0,
                 complexity: crate::analyzer::stats::Complexity {
+                    functions_measured: false,
+                    control_flow_measured: true,
                     cyclomatic: 100,
                     functions: 0,
                     cognitive: 0,
                     max_depth: 0,
                     avg_func_lines: 0.0,
+                    ..Default::default()
                 },
                 tokens_est: 0,
             },

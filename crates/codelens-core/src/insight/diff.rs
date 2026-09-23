@@ -38,13 +38,13 @@ pub fn build(
 ) -> DiffReport {
     let health = health::compare_with_baseline(from_result, to_result, model, from_label);
     let (delta, by_language) = compute_delta(&from_result.summary, &to_result.summary);
-    let to_score = health.baseline_score + health.score_delta;
+    let to_score = health.current_score;
 
     DiffReport {
         from: from_label.to_string(),
         to: to_label.to_string(),
         to_score,
-        to_grade: model.grade(to_score),
+        to_grade: health.current_grade,
         health,
         delta,
         by_language,
@@ -83,11 +83,14 @@ mod tests {
             size: 100,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 3,
                 cyclomatic,
                 cognitive: cyclomatic,
                 max_depth: 2,
                 avg_func_lines: 15.0,
+                ..Complexity::default()
             },
         }
     }
@@ -102,6 +105,7 @@ mod tests {
         assert_eq!(report.delta.code.signed_delta(), 100);
         assert_eq!(report.delta.files.signed_delta(), 1);
         assert_eq!(report.health.baseline, "main");
+        assert_eq!(report.health.model, "default-v2");
         assert!(
             !report.health.failed,
             "modest growth must not read as regression"
@@ -110,5 +114,7 @@ mod tests {
             (report.to_score - report.health.baseline_score - report.health.score_delta).abs()
                 < 0.001
         );
+        assert_eq!(report.to_score, report.health.current_score);
+        assert_eq!(report.to_grade, report.health.current_grade);
     }
 }
