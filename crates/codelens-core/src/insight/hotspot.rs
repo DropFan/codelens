@@ -167,7 +167,7 @@ pub fn analyze(
         })
         .collect();
 
-    normalize_and_score(&mut hotspots);
+    score_hotspots(&mut hotspots);
     hotspots.sort_by(|a, b| {
         b.hotspot_score
             .partial_cmp(&a.hotspot_score)
@@ -204,32 +204,14 @@ pub fn format_age(days: u64) -> String {
     }
 }
 
-fn normalize_and_score(hotspots: &mut [FileHotspot]) {
-    if hotspots.is_empty() {
-        return;
-    }
-    let max_churn = hotspots.iter().map(|h| h.churn.commits).max().unwrap_or(1) as f64;
-    let max_cc = hotspots
-        .iter()
-        .map(|h| h.complexity.cyclomatic)
-        .max()
-        .unwrap_or(1) as f64;
-
+fn score_hotspots(hotspots: &mut [FileHotspot]) {
     for h in hotspots.iter_mut() {
-        let norm_churn = if max_churn > 0.0 {
-            h.churn.commits as f64 / max_churn
-        } else {
-            0.0
-        };
-        let norm_cc = if max_cc > 0.0 {
-            h.complexity.cyclomatic as f64 / max_cc
-        } else {
-            0.0
-        };
-        h.hotspot_score = norm_churn * norm_cc;
+        let churn_risk = 1.0 - 2.0_f64.powf(-(h.churn.commits as f64) / 10.0);
+        let complexity_risk = 1.0 - 2.0_f64.powf(-(h.complexity.cyclomatic as f64) / 15.0);
+        h.hotspot_score = (churn_risk * complexity_risk).sqrt();
         h.risk = match h.hotspot_score {
-            s if s > 0.7 => RiskLevel::High,
-            s if s > 0.3 => RiskLevel::Medium,
+            s if s >= 0.70 => RiskLevel::High,
+            s if s >= 0.40 => RiskLevel::Medium,
             _ => RiskLevel::Low,
         };
     }
@@ -288,11 +270,14 @@ mod tests {
                 size: 5000,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 5,
                     cyclomatic: 40,
                     cognitive: 0,
                     max_depth: 6,
                     avg_func_lines: 50.0,
+                    ..Complexity::default()
                 },
             },
             FileStats {
@@ -307,11 +292,14 @@ mod tests {
                 size: 2000,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 4,
                     cyclomatic: 10,
                     cognitive: 0,
                     max_depth: 3,
                     avg_func_lines: 20.0,
+                    ..Complexity::default()
                 },
             },
             FileStats {
@@ -326,11 +314,14 @@ mod tests {
                 size: 1000,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 2,
                     cyclomatic: 4,
                     cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 20.0,
+                    ..Complexity::default()
                 },
             },
         ];
@@ -364,8 +355,53 @@ mod tests {
     fn test_hotspot_highest_is_hot() {
         let report = analyze(&make_churns(), &make_analysis(), "90d", 100, 10);
         assert_eq!(report.files[0].path, PathBuf::from("hot.rs"));
-        assert!((report.files[0].hotspot_score - 1.0).abs() < 0.01);
+        let expected = ((1.0 - 2.0_f64.powf(-5.0)) * (1.0 - 2.0_f64.powf(-(40.0 / 15.0)))).sqrt();
+        assert!((report.files[0].hotspot_score - expected).abs() < 1e-9);
         assert_eq!(report.files[0].risk, RiskLevel::High);
+    }
+
+    #[test]
+    fn test_hotspot_score_is_independent_of_other_files() {
+        let churns = make_churns();
+        let analysis = make_analysis();
+        let original = analyze(&churns, &analysis, "90d", 100, 10);
+        let warm_score = original
+            .files
+            .iter()
+            .find(|file| file.path == Path::new("warm.rs"))
+            .unwrap()
+            .hotspot_score;
+
+        let mut expanded_churns = churns;
+        expanded_churns.push(FileChurn {
+            path: PathBuf::from("extreme.rs"),
+            commits: 10_000,
+            lines_added: 1_000_000,
+            lines_deleted: 1_000_000,
+            last_commit_ts: 1_700_000_500,
+        });
+        let mut expanded_analysis = analysis;
+        expanded_analysis.files.push(FileStats {
+            path: PathBuf::from("extreme.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats::default(),
+            size: 0,
+            duplicate_lines: 0,
+            complexity: Complexity {
+                cyclomatic: 10_000,
+                ..Complexity::default()
+            },
+        });
+
+        let expanded = analyze(&expanded_churns, &expanded_analysis, "90d", 100, 10);
+        let expanded_warm_score = expanded
+            .files
+            .iter()
+            .find(|file| file.path == Path::new("warm.rs"))
+            .unwrap()
+            .hotspot_score;
+
+        assert!((warm_score - expanded_warm_score).abs() < 1e-12);
     }
 
     #[test]
