@@ -73,13 +73,44 @@ codelens --list-languages
 
 Score code health across six dimensions (complexity, function size, comment ratio, file size, nesting depth, line duplication) with grades from A to F.
 
+The default `v2` pipeline scores each production file first. A file score is
+85% weighted dimensions plus 15% from its weakest reliable core dimension.
+Language and directory scores combine an `sqrt(code lines)` weighted center
+with the worst 10% of their files, using an 85/15 split. The project score then
+weights language scores by production code lines. Test code is reported
+separately; documentation and data formats do not affect the main score.
+Unavailable measurements are omitted and the remaining weights are
+renormalized, with confidence showing how much of the configured model was
+actually measured.
+
+The historical `v1` pipeline remains available for existing dashboards and CI
+gates. It aggregates raw metrics across all analyzed files with the original
+weights, curves, function matcher, and bracket-depth behavior. New analyses
+retain both v1 and v2 complexity inputs; snapshots created before this feature
+fall back to their original metrics. v1 and v2 scores are intentionally not
+comparable, so use the same version on both sides of a baseline and rebuild
+saved baselines when migrating.
+
 ```bash
 codelens health .               # Project, directory, and file-level report
 codelens health . --top 20      # Show top 20 worst files
 codelens health . -f json       # Output as JSON
+codelens health . --health-model v1   # Reproduce the historical algorithm
 codelens health . --fail-under B   # CI gate: exit 1 if health is below B
 codelens health . --baseline main --fail-on-regression   # regression gate
 ```
+
+`--health-model v1|v2` is a global option and applies to the default report,
+`health`, `diff`, and MCP server. It can also be set in `.codelens.toml`:
+
+```toml
+health_model = "v1"
+```
+
+Command-line selection overrides configuration; configuration overrides the
+built-in default (`v2`). Machine-readable reports retain the stable internal
+names `default` (v1) and `default-v2` (v2); HTML reports display the clearer
+user-facing names `v1` and `v2`.
 
 `--fail-under` accepts a grade (`A`/`B`/`C`/`D`) or a numeric score
 (`75`), turning the health report into a CI quality gate — fail a PR
@@ -87,17 +118,21 @@ when project health drops below your threshold.
 
 `--baseline` compares against a trend snapshot (`latest`, `latest~1`, a
 date) or any git ref (`main`, `HEAD~1`, a tag — analyzed via a temporary
-worktree). With `--fail-on-regression`, the gate fails only when the
-project letter grade drops or a file present in both trees drops a
-grade: legacy debt never blocks a PR, only the changes do ("clean as
-you code"). The delta ("B 87.9 → C 77.2") renders in console, markdown
-(great for PR comments), and JSON.
+worktree). With `--fail-on-regression`, the gate fails when the project or
+an existing file drops a grade, when either drops at least 5 points within
+the same grade, or when a new file receives an F. Legacy debt stays visible
+without blocking unrelated changes ("clean as you code"). The delta
+("B 87.9 → C 77.2") renders in console, markdown (great for PR comments),
+HTML, and JSON. Comparisons use only measurements available on both sides
+and include per-language score changes. A `tests-only` ↔ `production` scope
+change is called out explicitly; its project-level delta is informational
+and does not fail the regression gate.
 
 On very large codebases, `--no-dup-scan` skips line-duplication
 collection to save memory; the health score then omits the duplication
 dimension (it is not scored as clean — the remaining weights are
 renormalized), and machine-readable output reports the scoring model as
-`default-no-dup` instead of `default`.
+`default-no-dup` for v1 or `default-v2-no-dup` for v2.
 
 ### Hotspot Detection
 
@@ -284,6 +319,9 @@ git_info = true
 
 # Skip line-duplication analysis (health score omits the duplication dimension)
 no_dup_scan = true
+
+# Health scoring pipeline: "v1" (historical) or "v2" (default)
+health_model = "v2"
 
 # Custom language definitions (relative paths resolve against this file's directory)
 languages_file = "my-langs.toml"

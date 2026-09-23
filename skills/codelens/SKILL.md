@@ -42,6 +42,7 @@ Use when onboarding onto a codebase or before estimating work in it.
 ```bash
 codelens .                      # stats + health + cost estimate in one report
 codelens health . --top 10      # worst files and directories, A-F grades
+codelens health . --health-model v1  # reproduce historical scores
 codelens hotspot .              # risky files: frequently changed AND complex
 ```
 
@@ -102,6 +103,11 @@ Report the movement, not just the endpoint: "health 79.7 (C) → 84.2 (B),
 file-size dimension F → A" is the sentence the user wants. Per-file grade
 drops listed by `diff` are the regressions to fix before shipping.
 
+Use the same `--health-model` on both sides. v2 comparisons automatically
+limit old snapshots to measurements available on both sides. A switch between
+`tests-only` and `production` is reported as a scope change instead of being
+treated as a project-score regression.
+
 ## Workflow 4 — Quality gates in CI
 
 Use when the user wants declining code health to block PRs.
@@ -120,10 +126,12 @@ see the repository README for current wiring.
 
 ## Interpretation guide (stable concepts)
 
-- **Grades**: A is healthy, C is "needs attention", F drags the project
-  down. The project score aggregates per-dimension scores (complexity,
-  function size, comments, file size, nesting, duplication — run
-  `codelens health --help` for the current set).
+- **Grades**: A is healthy, C is "needs attention", F marks serious debt.
+  The default v2 pipeline scores files first, summarizes each language, then
+  weights production-language scores by code lines. It reports test health
+  separately. Use `--health-model v1` only when reproducing historical scores
+  or migrating an existing gate; v1 also preserves the historical function
+  matcher and all-bracket nesting metric, not only the old weights.
 - **Hotspot = churn × complexity.** Frequently changed simple files are
   fine; complex stable files are fine; the intersection is where defects
   cluster. Age and author concentration qualify the risk.
@@ -145,6 +153,7 @@ see the repository README for current wiring.
 | Situation | Flag |
 |---|---|
 | Huge repo, memory pressure | `--no-dup-scan` |
+| Reproduce a historical health gate | `--health-model v1` |
 | Agent-consumed output | `-f json` (also: csv, markdown, html, sarif, openmetrics) |
 | Unrecognized in-house language / DSL | `--languages-file <toml>` (schema in README) |
 | Extension counted as wrong language | `--count-as ext:lang` |
