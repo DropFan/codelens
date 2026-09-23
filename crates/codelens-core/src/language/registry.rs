@@ -252,6 +252,14 @@ fn validate_regexes(id: &str, lang: &Language, path: &Path) -> Result<()> {
             });
         }
     }
+    if let Some(pattern) = &lang.legacy_function_pattern {
+        if let Err(e) = Regex::new(pattern) {
+            return Err(crate::error::Error::InvalidLanguage {
+                name: id.to_string(),
+                reason: format!("invalid legacy_function_pattern in {}: {e}", path.display()),
+            });
+        }
+    }
     if let Some(pattern) = keywords_pattern(&lang.complexity_keywords) {
         if let Err(e) = Regex::new(&pattern) {
             return Err(crate::error::Error::InvalidLanguage {

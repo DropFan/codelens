@@ -76,6 +76,14 @@ impl std::ops::AddAssign for LineStats {
 /// Code complexity metrics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Complexity {
+    /// Whether the language definition provided function recognition rules.
+    /// Older snapshots default to false rather than claiming a measurement.
+    #[serde(default)]
+    pub functions_measured: bool,
+    /// Whether the language definition provided control-flow rules.
+    /// Older snapshots default to false rather than claiming a measurement.
+    #[serde(default)]
+    pub control_flow_measured: bool,
     /// Number of functions/methods.
     pub functions: usize,
     /// Total cyclomatic complexity.
@@ -89,11 +97,50 @@ pub struct Complexity {
     pub max_depth: usize,
     /// Average lines per function.
     pub avg_func_lines: f64,
+    /// Function count produced by the v1 analyzer. Absent in snapshots
+    /// created before versioned health models were introduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_functions: Option<usize>,
+    /// Cyclomatic complexity produced by the v1 analyzer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_cyclomatic: Option<usize>,
+    /// Maximum bracket depth produced by the v1 analyzer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_max_depth: Option<usize>,
+    /// Average function length produced by the v1 analyzer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_avg_func_lines: Option<f64>,
 }
 
 impl Complexity {
+    /// Return the historical v1 metrics, falling back to the primary fields
+    /// for snapshots written before explicit legacy metrics existed.
+    pub fn legacy_metrics(&self) -> (usize, usize, usize, f64) {
+        (
+            self.legacy_functions.unwrap_or(self.functions),
+            self.legacy_cyclomatic.unwrap_or(self.cyclomatic),
+            self.legacy_max_depth.unwrap_or(self.max_depth),
+            self.legacy_avg_func_lines.unwrap_or(self.avg_func_lines),
+        )
+    }
+
     /// Add another Complexity to this one.
     pub fn add(&mut self, other: &Complexity) {
+        let self_had_legacy = self.legacy_functions.is_some()
+            || self.legacy_cyclomatic.is_some()
+            || self.legacy_max_depth.is_some()
+            || self.legacy_avg_func_lines.is_some();
+        let other_has_legacy = other.legacy_functions.is_some()
+            || other.legacy_cyclomatic.is_some()
+            || other.legacy_max_depth.is_some()
+            || other.legacy_avg_func_lines.is_some();
+        let (self_legacy_functions, self_legacy_cyclomatic, self_legacy_depth, self_legacy_avg) =
+            self.legacy_metrics();
+        let (other_legacy_functions, other_legacy_cyclomatic, other_legacy_depth, other_legacy_avg) =
+            other.legacy_metrics();
+
+        self.functions_measured |= other.functions_measured;
+        self.control_flow_measured |= other.control_flow_measured;
         let combined_functions = self.functions + other.functions;
         if combined_functions > 0 {
             let combined_function_lines = self.avg_func_lines * self.functions as f64
@@ -104,6 +151,20 @@ impl Complexity {
         self.cyclomatic += other.cyclomatic;
         self.cognitive += other.cognitive;
         self.max_depth = self.max_depth.max(other.max_depth);
+
+        if self_had_legacy || other_has_legacy {
+            let combined_functions = self_legacy_functions + other_legacy_functions;
+            let combined_function_lines = self_legacy_avg * self_legacy_functions as f64
+                + other_legacy_avg * other_legacy_functions as f64;
+            self.legacy_functions = Some(combined_functions);
+            self.legacy_cyclomatic = Some(self_legacy_cyclomatic + other_legacy_cyclomatic);
+            self.legacy_max_depth = Some(self_legacy_depth.max(other_legacy_depth));
+            self.legacy_avg_func_lines = Some(if combined_functions > 0 {
+                combined_function_lines / combined_functions as f64
+            } else {
+                0.0
+            });
+        }
     }
 }
 
@@ -233,24 +294,12 @@ pub struct Summary {
     #[serde(default)]
     pub duplicate_lines: usize,
     /// Whether line-level duplication was collected for this analysis
-    /// (false under --no-dup-scan). Serde-defaults to true so snapshots
-    /// from older versions keep their historical scoring behavior:
-    /// absent duplication data reads as measured-and-clean. Only
-    /// analyses that explicitly skipped collection take the
-    /// "not measured" path (Duplication dimension excluded).
-    ///
-    /// The derive(Default) value is deliberately `false` — the opposite
-    /// of the serde default. False is the safe failure mode: a caller
-    /// that forgets to set it merely drops the Duplication dimension,
-    /// whereas true would present unmeasured data as measured-and-clean.
+    /// (false under --no-dup-scan). Old snapshots without this field also
+    /// deserialize to false: absent data is unknown, not measured-and-clean.
     /// `from_file_stats` does NOT set this field (or `uloc`); callers
     /// rebuilding a Summary must carry both over themselves.
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub dup_scanned: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Summary {
@@ -493,11 +542,14 @@ mod tests {
             size: 100,
             duplicate_lines: 0,
             complexity: Complexity {
+                functions_measured: true,
+                control_flow_measured: true,
                 functions: 1,
                 cyclomatic: 2,
                 cognitive: 0,
                 max_depth: 1,
                 avg_func_lines: 10.0,
+                ..Complexity::default()
             },
         }
     }
@@ -768,18 +820,24 @@ mod tests {
     #[test]
     fn test_complexity_add() {
         let mut c1 = Complexity {
+            functions_measured: true,
+            control_flow_measured: true,
             functions: 10,
             cyclomatic: 20,
             cognitive: 0,
             max_depth: 5,
             avg_func_lines: 20.0,
+            ..Complexity::default()
         };
         let c2 = Complexity {
+            functions_measured: false,
+            control_flow_measured: true,
             functions: 5,
             cyclomatic: 10,
             cognitive: 0,
             max_depth: 8,
             avg_func_lines: 10.0,
+            ..Complexity::default()
         };
 
         c1.add(&c2);
@@ -788,6 +846,54 @@ mod tests {
         assert_eq!(c1.cyclomatic, 30);
         assert_eq!(c1.max_depth, 8); // max of 5 and 8
         assert!((c1.avg_func_lines - 16.666_666).abs() < 0.000_001);
+        assert!(c1.functions_measured);
+        assert!(c1.control_flow_measured);
+    }
+
+    #[test]
+    fn test_complexity_add_aggregates_legacy_metrics_independently() {
+        let mut c1 = Complexity {
+            functions: 10,
+            cyclomatic: 20,
+            max_depth: 2,
+            avg_func_lines: 20.0,
+            legacy_functions: Some(2),
+            legacy_cyclomatic: Some(12),
+            legacy_max_depth: Some(5),
+            legacy_avg_func_lines: Some(40.0),
+            ..Complexity::default()
+        };
+        let c2 = Complexity {
+            functions: 5,
+            cyclomatic: 10,
+            max_depth: 3,
+            avg_func_lines: 10.0,
+            legacy_functions: Some(3),
+            legacy_cyclomatic: Some(8),
+            legacy_max_depth: Some(7),
+            legacy_avg_func_lines: Some(20.0),
+            ..Complexity::default()
+        };
+
+        c1.add(&c2);
+
+        assert_eq!(c1.legacy_functions, Some(5));
+        assert_eq!(c1.legacy_cyclomatic, Some(20));
+        assert_eq!(c1.legacy_max_depth, Some(7));
+        assert_eq!(c1.legacy_avg_func_lines, Some(28.0));
+    }
+
+    #[test]
+    fn test_old_complexity_snapshot_defaults_measurement_flags_to_false() {
+        let complexity: Complexity = serde_json::from_str(
+            r#"{"functions":2,"cyclomatic":4,"cognitive":3,"max_depth":2,"avg_func_lines":10.0}"#,
+        )
+        .unwrap();
+
+        assert!(!complexity.functions_measured);
+        assert!(!complexity.control_flow_measured);
+        assert_eq!(complexity.legacy_metrics(), (2, 4, 2, 10.0));
+        assert!(complexity.legacy_functions.is_none());
     }
 
     #[test]
@@ -823,11 +929,14 @@ mod tests {
                 size: 2000,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 5,
                     cyclomatic: 10,
                     cognitive: 0,
                     max_depth: 3,
                     avg_func_lines: 16.0,
+                    ..Complexity::default()
                 },
             },
             FileStats {
@@ -842,11 +951,14 @@ mod tests {
                 size: 1000,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 3,
                     cyclomatic: 6,
                     cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 13.3,
+                    ..Complexity::default()
                 },
             },
             FileStats {
@@ -861,11 +973,14 @@ mod tests {
                 size: 500,
                 duplicate_lines: 0,
                 complexity: Complexity {
+                    functions_measured: true,
+                    control_flow_measured: true,
                     functions: 2,
                     cyclomatic: 4,
                     cognitive: 0,
                     max_depth: 2,
                     avg_func_lines: 10.0,
+                    ..Complexity::default()
                 },
             },
         ];
@@ -921,19 +1036,16 @@ mod tests {
     }
 
     #[test]
-    fn test_old_snapshot_without_dup_scanned_reads_as_measured() {
-        // Snapshots written before the field existed must keep their
-        // historical behavior: no duplication data scores as clean.
+    fn test_old_snapshot_without_dup_scanned_reads_as_unmeasured() {
+        // Snapshots written before the field existed carry no evidence that
+        // duplication was measured, so the dimension must be excluded.
         let mut json = analysis_result_json();
         json["summary"]
             .as_object_mut()
             .unwrap()
             .remove("dup_scanned");
         let result: AnalysisResult = serde_json::from_value(json).unwrap();
-        assert!(
-            result.summary.dup_scanned,
-            "missing dup_scanned must default to true (old-snapshot path)"
-        );
+        assert!(!result.summary.dup_scanned);
     }
 
     #[test]

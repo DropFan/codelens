@@ -256,7 +256,8 @@ name = "JavaScript"
 extensions = [".js", ".mjs", ".cjs", ".jsx"]
 line_comments = ["//"]
 block_comments = [["/*", "*/"]]
-function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
+function_pattern = "(?m)^\\s*(?:(?:export|default|public|private|protected|static|async|abstract|readonly|override|get|set)\\s+)*(?:function\\s+\\w+|constructor\\s*\\(|[A-Za-z_$][\\w$]*\\s*(?:<[^>{}\\n]+>)?\\s*\\([^;{}\\n]*\\)\\s*(?::[^={}\\n]+)?\\s*\\{|(?:(?:const|let|var)\\s+)?[A-Za-z_$][\\w$]*\\s*[=:]\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>))|\\b(?:map|filter|reduce|forEach|find|some|every|flatMap|then|catch)\\s*\\(\\s*(?:async\\s+)?(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>"
+legacy_function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
 string_delimiters = [
     { start = '"', end = '"', escape = "\\" },
@@ -269,7 +270,8 @@ name = "TypeScript"
 extensions = [".ts", ".tsx", ".mts", ".cts"]
 line_comments = ["//"]
 block_comments = [["/*", "*/"]]
-function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
+function_pattern = "(?m)^\\s*(?:(?:export|default|public|private|protected|static|async|abstract|readonly|override|get|set)\\s+)*(?:function\\s+\\w+|constructor\\s*\\(|[A-Za-z_$][\\w$]*\\s*(?:<[^>{}\\n]+>)?\\s*\\([^;{}\\n]*\\)\\s*(?::[^={}\\n]+)?\\s*\\{|(?:(?:const|let|var)\\s+)?[A-Za-z_$][\\w$]*\\s*[=:]\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>))|\\b(?:map|filter|reduce|forEach|find|some|every|flatMap|then|catch)\\s*\\(\\s*(?:async\\s+)?(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>"
+legacy_function_pattern = "(?m)^\\s*(async\\s+)?function\\s+\\w+|\\w+\\s*[=:]\\s*(async\\s+)?function|\\w+\\s*[=:]\\s*(async\\s+)?\\([^)]*\\)\\s*=>"
 complexity_keywords = ["if", "else", "for", "while", "switch", "case", "catch", "?", "??", "&&", "||"]
 string_delimiters = [
     { start = '"', end = '"', escape = "\\" },

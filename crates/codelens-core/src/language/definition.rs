@@ -37,6 +37,11 @@ pub struct Language {
     #[serde(default)]
     pub function_pattern: Option<String>,
 
+    /// Historical function pattern used only to reproduce v1 health scores.
+    /// When absent, v1 uses `function_pattern`.
+    #[serde(default)]
+    pub(crate) legacy_function_pattern: Option<String>,
+
     /// Keywords that contribute to cyclomatic complexity.
     #[serde(default)]
     pub complexity_keywords: Vec<String>,
@@ -52,6 +57,10 @@ pub struct Language {
     /// Lazily-compiled complexity regex patterns.
     #[serde(skip)]
     pub(crate) complexity_cache: OnceLock<ComplexityPatterns>,
+
+    /// Lazily-compiled historical function matcher.
+    #[serde(skip)]
+    pub(crate) legacy_function_cache: OnceLock<Option<Regex>>,
 }
 
 /// Precompiled regex patterns for complexity analysis.
@@ -73,10 +82,12 @@ impl Clone for Language {
             block_comments: self.block_comments.clone(),
             string_delimiters: self.string_delimiters.clone(),
             function_pattern: self.function_pattern.clone(),
+            legacy_function_pattern: self.legacy_function_pattern.clone(),
             complexity_keywords: self.complexity_keywords.clone(),
             nested_comments: self.nested_comments,
             tokens_cache: OnceLock::new(),
             complexity_cache: OnceLock::new(),
+            legacy_function_cache: OnceLock::new(),
         }
     }
 }
@@ -95,7 +106,6 @@ impl Language {
                 .function_pattern
                 .as_ref()
                 .and_then(|p| Regex::new(p).ok());
-
             let keywords_re = keywords_pattern(&self.complexity_keywords)
                 .and_then(|pattern| Regex::new(&pattern).ok());
 
@@ -104,6 +114,18 @@ impl Language {
                 keywords_re,
             }
         })
+    }
+
+    /// Get the historical function matcher. Languages without a versioned
+    /// override use their current matcher for both scoring models.
+    pub(crate) fn legacy_function_re(&self) -> Option<&Regex> {
+        if let Some(pattern) = &self.legacy_function_pattern {
+            return self
+                .legacy_function_cache
+                .get_or_init(|| Regex::new(pattern).ok())
+                .as_ref();
+        }
+        self.complexity_patterns().function_re.as_ref()
     }
 }
 
@@ -161,10 +183,12 @@ impl Default for Language {
             block_comments: vec![],
             string_delimiters: vec![],
             function_pattern: None,
+            legacy_function_pattern: None,
             complexity_keywords: vec![],
             nested_comments: false,
             tokens_cache: OnceLock::new(),
             complexity_cache: OnceLock::new(),
+            legacy_function_cache: OnceLock::new(),
         }
     }
 }

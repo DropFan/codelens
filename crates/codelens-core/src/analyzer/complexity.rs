@@ -23,6 +23,12 @@ pub struct FunctionSpan {
 /// Analyzes code complexity metrics.
 pub struct ComplexityAnalyzer;
 
+#[derive(Clone, Copy)]
+struct KeywordOccurrence {
+    offset: usize,
+    is_control_flow: bool,
+}
+
 impl ComplexityAnalyzer {
     pub fn new() -> Self {
         Self
@@ -34,6 +40,12 @@ impl ComplexityAnalyzer {
     pub fn analyze(&self, content: &str, lang: &Language) -> Complexity {
         let mut complexity = Complexity::default();
         let patterns = lang.complexity_patterns();
+        complexity.functions_measured = patterns.function_re.is_some();
+        complexity.control_flow_measured = patterns.keywords_re.is_some();
+        complexity.legacy_functions = Some(0);
+        complexity.legacy_cyclomatic = Some(0);
+        complexity.legacy_max_depth = Some(0);
+        complexity.legacy_avg_func_lines = Some(0.0);
 
         // Languages without any complexity signals configured (documents
         // and data formats like Markdown/HTML/JSON) get no complexity
@@ -54,21 +66,39 @@ impl ComplexityAnalyzer {
             .map(|re| function_spans_in(&code, re, lang))
             .unwrap_or_default();
         complexity.functions = function_spans.len();
+        let legacy_function_spans = lang
+            .legacy_function_re()
+            .map(|re| legacy_function_spans_in(&code, re, lang))
+            .unwrap_or_default();
 
         // Count complexity keywords (single alternation regex, one pass)
-        let keyword_offsets: Vec<usize> = patterns
+        let keyword_occurrences: Vec<KeywordOccurrence> = patterns
             .keywords_re
             .as_ref()
-            .map(|re| re.find_iter(&code).map(|m| m.start()).collect())
+            .map(|re| {
+                re.find_iter(&code)
+                    .map(|matched| KeywordOccurrence {
+                        offset: matched.start(),
+                        is_control_flow: is_control_flow_keyword(matched.as_str()),
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        complexity.cyclomatic = keyword_offsets.len();
+        complexity.cyclomatic = keyword_occurrences.len();
 
         // Base complexity is 1 per function
         complexity.cyclomatic += complexity.functions;
+        complexity.legacy_functions = Some(legacy_function_spans.len());
+        complexity.legacy_cyclomatic =
+            Some(keyword_occurrences.len() + legacy_function_spans.len());
+        complexity.legacy_max_depth = Some(scan_legacy_bracket_depth(&code));
 
-        // One bracket scan yields both the max nesting depth and the
-        // nesting-weighted (cognitive) keyword cost.
-        let (max_depth, cognitive) = self.scan_depth(&code, &keyword_offsets);
+        let (max_depth, cognitive) = self.scan_depth(
+            &code,
+            &keyword_occurrences,
+            &function_spans,
+            uses_brace_control_flow(&lang.name),
+        );
         complexity.max_depth = max_depth;
         complexity.cognitive = cognitive;
 
@@ -78,6 +108,14 @@ impl ComplexityAnalyzer {
                 .map(|span| span.end_line - span.start_line + 1)
                 .sum();
             complexity.avg_func_lines = function_lines as f64 / function_spans.len() as f64;
+        }
+        if !legacy_function_spans.is_empty() {
+            let function_lines: usize = legacy_function_spans
+                .iter()
+                .map(|span| span.end_line - span.start_line + 1)
+                .sum();
+            complexity.legacy_avg_func_lines =
+                Some(function_lines as f64 / legacy_function_spans.len() as f64);
         }
 
         complexity
@@ -94,64 +132,248 @@ impl ComplexityAnalyzer {
         function_spans_in(&code, re, lang)
     }
 
-    /// One pass over the content computing (max nesting depth, cognitive
-    /// complexity). Depth comes from bracket pairs. The caller supplies
-    /// source with comments and strings already masked.
-    ///
-    /// Cognitive complexity: each control-flow keyword (already located
-    /// by the caller, offsets ascending) costs its bracket depth at that
-    /// point (min 1), so `if` nested three levels deep costs more than
-    /// `if` at the top of a function.
-    fn scan_depth(&self, content: &str, keyword_offsets: &[usize]) -> (usize, usize) {
-        let bytes = content.as_bytes();
-        let mut max_depth: usize = 0;
-        let mut current_depth: usize = 0;
-        let mut cognitive: usize = 0;
-        let mut next_kw = 0;
-        let mut i = 0;
-
-        while i < bytes.len() {
-            // Charge keywords reached at the current bracket depth.
-            while next_kw < keyword_offsets.len() && keyword_offsets[next_kw] <= i {
-                cognitive += current_depth.max(1);
-                next_kw += 1;
-            }
-
-            match bytes[i] {
-                b'{' | b'(' | b'[' => {
-                    current_depth += 1;
-                    max_depth = max_depth.max(current_depth);
-                }
-                b'}' | b')' | b']' => {
-                    current_depth = current_depth.saturating_sub(1);
-                }
-                _ => {}
-            }
-            i += 1;
+    /// Compute control-flow nesting and nesting-weighted keyword cost.
+    /// Braced languages count only blocks opened by control-flow keywords;
+    /// indentation languages rank the indentation of control-flow lines.
+    fn scan_depth(
+        &self,
+        content: &str,
+        keywords: &[KeywordOccurrence],
+        function_spans: &[FunctionSpan],
+        uses_braces: bool,
+    ) -> (usize, usize) {
+        if uses_braces {
+            return scan_braced_depth(content, keywords);
         }
-        // Retain a defensive tail pass if a future matcher reports an offset
-        // at the end of the source.
-        while next_kw < keyword_offsets.len() {
-            cognitive += current_depth.max(1);
-            next_kw += 1;
-        }
-
-        (max_depth, cognitive)
+        scan_indented_depth(content, keywords, function_spans)
     }
 }
 
+fn scan_braced_depth(content: &str, keywords: &[KeywordOccurrence]) -> (usize, usize) {
+    let bytes = content.as_bytes();
+    let mut max_depth: usize = 0;
+    let mut control_depth: usize = 0;
+    let mut cognitive: usize = 0;
+    let mut next_kw = 0;
+    let mut pending_controls: Vec<(usize, usize)> = Vec::new();
+    let mut brace_stack = Vec::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        while next_kw < keywords.len() && keywords[next_kw].offset <= i {
+            let keyword = keywords[next_kw];
+            let depth = if keyword.is_control_flow || !pending_controls.is_empty() {
+                control_depth + 1
+            } else {
+                control_depth.max(1)
+            };
+            cognitive += depth;
+            if keyword.is_control_flow {
+                max_depth = max_depth.max(depth);
+                let delimiter_depth = (paren_depth, bracket_depth);
+                if pending_controls.last().copied() != Some(delimiter_depth) {
+                    pending_controls.push(delimiter_depth);
+                }
+            }
+            next_kw += 1;
+        }
+
+        match bytes[i] {
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'{' => {
+                // A closure or object literal inside a condition may open a
+                // brace before the control-flow body. Only claim a brace
+                // after delimiters have returned to the keyword's level.
+                let opens_control = pending_controls.last().is_some_and(|&(paren, bracket)| {
+                    paren_depth == paren && bracket_depth == bracket
+                });
+                brace_stack.push(opens_control);
+                if opens_control {
+                    pending_controls.pop();
+                    control_depth += 1;
+                }
+            }
+            b'}' => {
+                if brace_stack.pop().unwrap_or(false) {
+                    control_depth = control_depth.saturating_sub(1);
+                }
+            }
+            b';' => {
+                // A semicolon nested inside a condition's closure does not
+                // finish the outer control statement. At the same delimiter
+                // level it does finish a braceless statement.
+                pending_controls
+                    .retain(|&(paren, bracket)| paren_depth > paren || bracket_depth > bracket);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    while next_kw < keywords.len() {
+        let keyword = keywords[next_kw];
+        let depth = if keyword.is_control_flow {
+            control_depth + 1
+        } else {
+            control_depth.max(1)
+        };
+        cognitive += depth;
+        if keyword.is_control_flow {
+            max_depth = max_depth.max(depth);
+        }
+        next_kw += 1;
+    }
+
+    (max_depth, cognitive)
+}
+
+fn scan_indented_depth(
+    content: &str,
+    keywords: &[KeywordOccurrence],
+    function_spans: &[FunctionSpan],
+) -> (usize, usize) {
+    if keywords.is_empty() {
+        return (0, 0);
+    }
+
+    let mut line_starts = vec![0usize];
+    for (offset, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            line_starts.push(offset + 1);
+        }
+    }
+    let line_for = |offset: usize| line_starts.partition_point(|&start| start <= offset);
+    let indent_for = |line: usize| {
+        let start = line_starts[line.saturating_sub(1)];
+        content.as_bytes()[start..]
+            .iter()
+            .take_while(|&&byte| byte == b' ' || byte == b'\t')
+            .map(|&byte| if byte == b'\t' { 4 } else { 1 })
+            .sum::<usize>()
+    };
+    let group_for = |line: usize| {
+        function_spans
+            .iter()
+            .position(|span| (span.start_line..=span.end_line).contains(&line))
+            .unwrap_or(function_spans.len())
+    };
+
+    let positions: Vec<(usize, usize, bool)> = keywords
+        .iter()
+        .map(|keyword| {
+            let line = line_for(keyword.offset);
+            (group_for(line), indent_for(line), keyword.is_control_flow)
+        })
+        .collect();
+    let mut indent_levels = vec![Vec::new(); function_spans.len() + 1];
+    for &(group, indent, is_control_flow) in &positions {
+        if is_control_flow {
+            indent_levels[group].push(indent);
+        }
+    }
+    for levels in &mut indent_levels {
+        levels.sort_unstable();
+        levels.dedup();
+    }
+
+    let mut max_depth = 0;
+    let mut cognitive = 0;
+    for (group, indent, is_control_flow) in positions {
+        let depth = indent_levels[group]
+            .partition_point(|level| *level <= indent)
+            .max(1);
+        cognitive += depth;
+        if is_control_flow {
+            max_depth = max_depth.max(depth);
+        }
+    }
+    (max_depth, cognitive)
+}
+
+/// Historical v1 depth counted every bracket pair, including function calls,
+/// array literals, and the function body itself. Keep it isolated from the
+/// control-flow-only v2 depth so both models remain reproducible.
+fn scan_legacy_bracket_depth(content: &str) -> usize {
+    let mut max_depth = 0usize;
+    let mut current_depth = 0usize;
+    for byte in content.bytes() {
+        match byte {
+            b'{' | b'(' | b'[' => {
+                current_depth += 1;
+                max_depth = max_depth.max(current_depth);
+            }
+            b'}' | b')' | b']' => current_depth = current_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max_depth
+}
+
+fn is_control_flow_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword.to_ascii_lowercase().as_str(),
+        "if" | "elif"
+            | "elseif"
+            | "elsif"
+            | "else"
+            | "unless"
+            | "for"
+            | "foreach"
+            | "while"
+            | "until"
+            | "loop"
+            | "match"
+            | "switch"
+            | "select"
+            | "case"
+            | "when"
+            | "catch"
+            | "except"
+            | "rescue"
+            | "with"
+            | "try"
+            | "repeat"
+            | "cond"
+            | "receive"
+            | "guard"
+            | "do"
+            | "perform"
+            | "evaluate"
+    )
+}
+
 fn function_spans_in(content: &str, re: &Regex, lang: &Language) -> Vec<FunctionSpan> {
+    function_spans_in_mode(content, re, lang, true)
+}
+
+fn legacy_function_spans_in(content: &str, re: &Regex, lang: &Language) -> Vec<FunctionSpan> {
+    function_spans_in_mode(content, re, lang, false)
+}
+
+fn function_spans_in_mode(
+    content: &str,
+    re: &Regex,
+    lang: &Language,
+    reject_control_signatures: bool,
+) -> Vec<FunctionSpan> {
     let matches: Vec<(usize, usize, String)> = re
         .find_iter(content)
-        .map(|m| {
+        .filter_map(|m| {
+            if reject_control_signatures && is_control_signature(m.as_str()) {
+                return None;
+            }
             // Patterns like `(?m)^\s*fn ...` swallow preceding blank lines;
             // anchor the span at the signature rather than that whitespace.
             let lead_ws = m.as_str().len() - m.as_str().trim_start().len();
-            (
+            Some((
                 m.start() + lead_ws,
                 m.end(),
                 trailing_identifier(m.as_str()),
-            )
+            ))
         })
         .collect();
     if matches.is_empty() {
@@ -198,6 +420,19 @@ fn function_spans_in(content: &str, re: &Regex, lang: &Language) -> Vec<Function
         .collect()
 }
 
+fn is_control_signature(matched: &str) -> bool {
+    let first = matched
+        .trim_start()
+        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .find(|part| !part.is_empty())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        first.as_str(),
+        "if" | "else" | "for" | "while" | "switch" | "catch" | "with"
+    )
+}
+
 fn uses_curly_function_bodies(language: &str) -> bool {
     matches!(
         language,
@@ -214,6 +449,30 @@ fn uses_curly_function_bodies(language: &str) -> bool {
             | "Bash"
             | "Zsh"
             | "Fish"
+            | "PowerShell"
+            | "JavaScript"
+            | "TypeScript"
+            | "Swift"
+            | "Objective-C"
+            | "Dart"
+            | "R"
+            | "Solidity"
+    )
+}
+
+fn uses_brace_control_flow(language: &str) -> bool {
+    matches!(
+        language,
+        "Rust"
+            | "C"
+            | "C++"
+            | "Zig"
+            | "Go"
+            | "Java"
+            | "Kotlin"
+            | "Groovy"
+            | "C#"
+            | "PHP"
             | "PowerShell"
             | "JavaScript"
             | "TypeScript"
@@ -403,6 +662,7 @@ fn trailing_identifier(matched: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::LanguageRegistry;
 
     fn make_rust_lang() -> Language {
         Language {
@@ -443,6 +703,60 @@ pub async fn async_fn() {}
 
         let complexity = analyzer.analyze(content, &lang);
         assert_eq!(complexity.functions, 3);
+        assert!(complexity.functions_measured);
+        assert!(complexity.control_flow_measured);
+    }
+
+    #[test]
+    fn test_missing_rules_are_reported_as_unmeasured() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = Language {
+            name: "Custom".to_string(),
+            extensions: vec![".custom".to_string()],
+            ..Default::default()
+        };
+
+        let complexity = analyzer.analyze("value = 1\n", &lang);
+
+        assert!(!complexity.functions_measured);
+        assert!(!complexity.control_flow_measured);
+    }
+
+    #[test]
+    fn test_javascript_and_typescript_common_function_forms() {
+        let registry = LanguageRegistry::with_builtin().unwrap();
+        let analyzer = ComplexityAnalyzer::new();
+        let source = r#"
+function declared(value) { return value; }
+class Service {
+  constructor(value) { this.value = value; }
+  async load<T>(value: T): Promise<T> { return value; }
+  method(value) { return value; }
+  field = (value) => { return value; };
+}
+const expression = value => value * 2;
+const values = [1, 2].map((value) => value + 1);
+if (values.length) { consume(values); }
+"#;
+
+        for language in ["JavaScript", "TypeScript"] {
+            let lang = registry.get(language).unwrap();
+            let complexity = analyzer.analyze(source, &lang);
+            assert_eq!(
+                complexity.functions, 7,
+                "{language} should recognize declarations, methods, arrows, and callbacks"
+            );
+            assert_eq!(
+                complexity.legacy_functions,
+                Some(2),
+                "{language} v1 must retain the historical function matcher"
+            );
+            assert_eq!(complexity.legacy_cyclomatic, Some(3));
+            assert_eq!(complexity.legacy_max_depth, Some(2));
+            assert_eq!(complexity.legacy_avg_func_lines, Some(1.0));
+            assert!(complexity.functions_measured);
+            assert!(complexity.control_flow_measured);
+        }
     }
 
     #[test]
@@ -485,7 +799,7 @@ fn real() {
         assert_eq!(complexity.functions, 1);
         assert_eq!(complexity.cyclomatic, 1);
         assert_eq!(complexity.cognitive, 0);
-        assert_eq!(complexity.max_depth, 1);
+        assert_eq!(complexity.max_depth, 0);
     }
 
     #[test]
@@ -543,10 +857,9 @@ fn real() {
             "fn main() {{\n    let ansi = \"\\x1b[1;32m{opens}\";\n    let c = '[';\n    // brackets in a comment: {opens} {parens}\n    println!(\"{parens}\");\n}}\n",
         );
         let complexity = analyzer.analyze(&content, &lang);
-        assert!(
-            complexity.max_depth <= 3,
-            "string/comment brackets must be ignored, got depth {}",
-            complexity.max_depth
+        assert_eq!(
+            complexity.max_depth, 0,
+            "ordinary brackets must not count as control-flow nesting"
         );
     }
 
@@ -559,11 +872,89 @@ fn real() {
         // the real brackets that follow it
         let content = "fn f<'a>(x: &'a str) { if true { g(x); } }\n";
         let complexity = analyzer.analyze(content, &lang);
-        assert!(
-            complexity.max_depth >= 2,
-            "brackets after lifetimes must still count, got {}",
-            complexity.max_depth
-        );
+        assert_eq!(complexity.max_depth, 1);
+    }
+
+    #[test]
+    fn test_max_depth_ignores_calls_arrays_and_literals() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = r#"
+fn f() {
+    let values = [call(one(), two([1, 2, 3])), other()];
+    let map = Thing { values, nested: Some(call(three())) };
+}
+"#;
+
+        let complexity = analyzer.analyze(content, &lang);
+
+        assert_eq!(complexity.max_depth, 0);
+        assert!(complexity.legacy_max_depth.unwrap() > complexity.max_depth);
+    }
+
+    #[test]
+    fn test_max_depth_counts_nested_control_flow_only() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = r#"
+impl Worker {
+    fn run() {
+        if ready() {
+            for item in items() {
+                while item.pending() {
+                    process(item);
+                }
+            }
+        }
+    }
+}
+"#;
+
+        let complexity = analyzer.analyze(content, &lang);
+
+        assert_eq!(complexity.max_depth, 3);
+    }
+
+    #[test]
+    fn test_control_block_skips_closure_brace_in_condition() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = r#"
+fn run(values: &[i32]) {
+    if values.iter().any(|value| { value > 0 }) {
+        for value in values {
+            consume(value);
+        }
+    }
+}
+"#;
+
+        let complexity = analyzer.analyze(content, &lang);
+
+        assert_eq!(complexity.max_depth, 2);
+    }
+
+    #[test]
+    fn test_indentation_depth_counts_control_levels() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = Language {
+            name: "Python".to_string(),
+            extensions: vec![".py".to_string()],
+            line_comments: vec!["#".to_string()],
+            function_pattern: Some(r"(?m)^\s*def\s+\w+".to_string()),
+            complexity_keywords: vec![
+                "if".to_string(),
+                "for".to_string(),
+                "while".to_string(),
+                "and".to_string(),
+            ],
+            ..Default::default()
+        };
+        let content = "def run():\n    if ready:\n        for item in items:\n            while item.pending:\n                work(item)\n";
+
+        let complexity = analyzer.analyze(content, &lang);
+
+        assert_eq!(complexity.max_depth, 3);
     }
 
     #[test]
@@ -588,6 +979,18 @@ fn real() {
             flat_c.cognitive,
             nested_c.cognitive
         );
+    }
+
+    #[test]
+    fn test_cognitive_condition_operators_use_pending_control_depth() {
+        let analyzer = ComplexityAnalyzer::new();
+        let lang = make_rust_lang();
+        let content = "fn f() { if outer() { if left() && right() { work(); } } }\n";
+
+        let complexity = analyzer.analyze(content, &lang);
+
+        // outer if = 1, inner if = 2, && in the inner condition = 2.
+        assert_eq!(complexity.cognitive, 5);
     }
 
     #[test]
@@ -671,6 +1074,6 @@ fn main() {
 "#;
 
         let complexity = analyzer.analyze(content, &lang);
-        assert!(complexity.max_depth >= 4);
+        assert_eq!(complexity.max_depth, 3);
     }
 }
