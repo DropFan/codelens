@@ -53,7 +53,10 @@ fn run() -> Result<ExitCode> {
                 commands::trend::run_trend(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
             }
             #[cfg(feature = "mcp")]
-            cli::Command::Mcp => mcp::run().map(|()| ExitCode::SUCCESS),
+            cli::Command::Mcp => {
+                let config = commands::build_config(&cli)?;
+                mcp::run(config).map(|()| ExitCode::SUCCESS)
+            }
             cli::Command::Estimate(args) => {
                 commands::estimate::run_estimate(args, &cli.advanced).map(|()| ExitCode::SUCCESS)
             }

@@ -15,7 +15,7 @@ use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::Deserialize;
 
-use codelens_core::insight::scoring::default::DefaultModel;
+use codelens_core::insight::scoring::HealthModelVersion;
 use codelens_core::insight::{coupling, health, hotspot};
 use codelens_core::{analyze, Config, GitClient};
 
@@ -71,25 +71,49 @@ pub struct FileArgs {
     pub file: String,
 }
 
-#[derive(Clone, Default)]
-pub struct CodelensServer;
+#[derive(Clone)]
+pub struct CodelensServer {
+    config: Config,
+}
+
+impl Default for CodelensServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 fn arg_path(path: Option<String>) -> PathBuf {
     PathBuf::from(path.unwrap_or_else(|| ".".to_string()))
 }
 
+fn health_report(
+    result: &codelens_core::AnalysisResult,
+    top_n: usize,
+    version: HealthModelVersion,
+) -> codelens_core::insight::health::HealthReport {
+    let model = crate::commands::scoring_model_for(version, result.summary.dup_scanned);
+    health::score(result, model.as_ref(), top_n)
+}
+
 #[tool_router]
 impl CodelensServer {
     pub fn new() -> Self {
-        Self
+        Self {
+            config: default_config(),
+        }
+    }
+
+    pub fn with_config(config: Config) -> Self {
+        Self { config }
     }
 
     #[tool(
         description = "Repository overview: files, lines, languages, complexity, test ratio, and estimated LLM token count. Use before working in an unfamiliar repository."
     )]
     async fn repo_overview(&self, Parameters(args): Parameters<PathArgs>) -> String {
+        let config = self.config.clone();
         run_blocking(move || {
-            let result = analyze(&[arg_path(args.path)], &default_config())?;
+            let result = analyze(&[arg_path(args.path)], &config)?;
             Ok(serde_json::to_string(&result.summary)?)
         })
         .await
@@ -99,9 +123,10 @@ impl CodelensServer {
         description = "Code health report (A-F grades): project score, per-dimension scores, worst directories and files. Use to find what most needs refactoring, or to check health before/after edits."
     )]
     async fn code_health(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
+        let config = self.config.clone();
         run_blocking(move || {
-            let result = analyze(&[arg_path(args.path)], &default_config())?;
-            let report = health::score(&result, &DefaultModel::new(), args.top.unwrap_or(10));
+            let result = analyze(&[arg_path(args.path)], &config)?;
+            let report = health_report(&result, args.top.unwrap_or(10), config.health_model);
             Ok(serde_json::to_string(&report)?)
         })
         .await
@@ -111,12 +136,13 @@ impl CodelensServer {
         description = "Change hotspots: files that are both complex and frequently changed (the likeliest bug sources), with code age and author concentration (knowledge islands: risky files effectively one person knows). Requires a git repository. Use to gauge risk before touching a file."
     )]
     async fn hotspots(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
+        let config = self.config.clone();
         run_blocking(move || {
             let path = arg_path(args.path);
             let since_arg = args.since.unwrap_or_else(|| "90d".to_string());
             let since = codelens_core::git::parse_since(&since_arg);
             let git_client = GitClient::detect(&path)?;
-            let mut result = analyze(&[path], &default_config())?;
+            let mut result = analyze(&[path], &config)?;
             // Git paths are repo-root-relative; align the analysis side so
             // churn/knowledge joins work when `path` is a subdirectory.
             crate::commands::rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
@@ -165,12 +191,13 @@ impl CodelensServer {
         description = "Metrics for one source file: lines, size, cyclomatic/cognitive complexity, nesting depth, and its health score with the weakest dimension."
     )]
     async fn file_metrics(&self, Parameters(args): Parameters<FileArgs>) -> String {
+        let config = self.config.clone();
         run_blocking(move || {
-            let result = analyze(&[PathBuf::from(&args.file)], &default_config())?;
+            let result = analyze(&[PathBuf::from(&args.file)], &config)?;
             let Some(stats) = result.files.first() else {
                 anyhow::bail!("file not recognized as source code: {}", args.file);
             };
-            let report = health::score(&result, &DefaultModel::new(), 1);
+            let report = health_report(&result, 1, config.health_model);
             Ok(serde_json::json!({
                 "stats": stats,
                 "health": report.worst_files.first(),
@@ -199,16 +226,62 @@ impl ServerHandler for CodelensServer {
 }
 
 /// Run the MCP server over stdio until the client disconnects.
-pub fn run() -> anyhow::Result<()> {
+pub fn run(config: Config) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     runtime.block_on(async {
         use rmcp::ServiceExt;
-        let service = CodelensServer::new()
+        let service = CodelensServer::with_config(config)
             .serve(rmcp::transport::stdio())
             .await?;
         service.waiting().await?;
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codelens_core::{AnalysisResult, Summary};
+    use std::time::Duration;
+
+    fn empty_result(dup_scanned: bool) -> AnalysisResult {
+        let summary = Summary {
+            dup_scanned,
+            ..Summary::default()
+        };
+        AnalysisResult {
+            files: Vec::new(),
+            summary,
+            elapsed: Duration::ZERO,
+            scanned_files: 0,
+            skipped_files: 0,
+            error_files: 0,
+        }
+    }
+
+    #[test]
+    fn health_report_uses_actual_duplication_scope() {
+        assert_eq!(
+            health_report(&empty_result(true), 10, HealthModelVersion::V2).model,
+            "default-v2"
+        );
+        assert_eq!(
+            health_report(&empty_result(false), 10, HealthModelVersion::V2).model,
+            "default-v2-no-dup"
+        );
+        assert_eq!(
+            health_report(&empty_result(true), 10, HealthModelVersion::V1).model,
+            "default"
+        );
+    }
+
+    #[test]
+    fn health_report_scores_empty_analysis_as_f() {
+        let report = health_report(&empty_result(false), 10, HealthModelVersion::V2);
+        assert_eq!(report.score, 0.0);
+        assert_eq!(report.grade.to_string(), "F");
+        assert!(report.dimensions.is_empty());
+    }
 }

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::insight::scoring::HealthModelVersion;
 
 use super::{Config, OutputFormatType, SortBy};
 
@@ -33,6 +34,8 @@ pub struct PartialConfig {
     pub languages_file: Option<PathBuf>,
     /// Skip line-level duplication collection.
     pub no_dup_scan: Option<bool>,
+    /// Health scoring pipeline (`v1` or `v2`).
+    pub health_model: Option<HealthModelVersion>,
     /// Minimum lines.
     pub min_lines: Option<usize>,
     /// Maximum lines.
@@ -107,6 +110,9 @@ impl PartialConfig {
         }
         if let Some(no_dup_scan) = self.no_dup_scan {
             config.no_dup_scan = no_dup_scan;
+        }
+        if let Some(health_model) = self.health_model {
+            config.health_model = health_model;
         }
         if let Some(min_lines) = self.min_lines {
             config.filter.min_lines = Some(min_lines);
@@ -356,6 +362,31 @@ mod tests {
         let mut config = Config::default();
         partial.apply_to(&mut config);
         assert!(!config.no_dup_scan);
+    }
+
+    #[test]
+    fn test_health_model_from_config_file() {
+        let partial: PartialConfig = toml::from_str("health_model = \"v1\"").unwrap();
+        let mut config = Config::default();
+        partial.apply_to(&mut config);
+        assert_eq!(config.health_model, HealthModelVersion::V1);
+
+        let config = Config::default();
+        assert_eq!(config.health_model, HealthModelVersion::V2);
+    }
+
+    #[test]
+    fn test_invalid_health_model_lists_supported_values() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "health_model = \"future\"").unwrap();
+
+        let error = load_config_file(file.path()).unwrap_err();
+        let Error::ConfigParse { source, .. } = error else {
+            panic!("expected config parse error");
+        };
+        let detail = source.to_string();
+        assert!(detail.contains("v1"));
+        assert!(detail.contains("v2"));
     }
 
     #[test]

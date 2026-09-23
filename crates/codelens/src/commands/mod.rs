@@ -18,7 +18,7 @@ use colored::Colorize;
 
 use codelens_core::config::{Config, PartialConfig};
 use codelens_core::git::GitClient;
-use codelens_core::insight::scoring::default::DefaultModel;
+use codelens_core::insight::scoring::{HealthModelVersion, ScoringModel};
 use codelens_core::output::{create_output, OutputOptions, Report};
 use codelens_core::{analyze, LanguageRegistry};
 
@@ -47,10 +47,10 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
 
     // Bundle stats + health + estimation into ONE report so machine
     // formats (JSON/HTML) stay parseable as a single document.
-    let scoring_model = scoring_model_for(result.summary.dup_scanned);
+    let scoring_model = scoring_model_for(config.health_model, result.summary.dup_scanned);
     let health_top_n = config.output.top_n.unwrap_or(10);
     let health_report =
-        codelens_core::insight::health::score(&result, &scoring_model, health_top_n);
+        codelens_core::insight::health::score(&result, scoring_model.as_ref(), health_top_n);
 
     let cost_config = codelens_core::CostConfig::default();
     let cocomo_basic = codelens_core::CocomoBasicModel::default();
@@ -101,7 +101,7 @@ pub(crate) fn list_languages(languages_file: Option<&Path>) -> Result<()> {
 /// Unlike the previous behavior, a config file that exists but fails to parse
 /// is a hard error even when found via the default search path — silently
 /// ignoring it made bad configs undiagnosable.
-fn load_partial_config(advanced: &cli::AdvancedArgs) -> Result<Option<PartialConfig>> {
+pub(crate) fn load_partial_config(advanced: &cli::AdvancedArgs) -> Result<Option<PartialConfig>> {
     if advanced.no_config {
         return Ok(None);
     }
@@ -139,6 +139,9 @@ fn resolve_config(
     }
     if advanced.no_dup_scan {
         config.no_dup_scan = true;
+    }
+    if let Some(health_model) = advanced.health_model {
+        config.health_model = health_model.into();
     }
     if let Some(ref path) = advanced.languages_file {
         config.languages_file = Some(path.clone());
@@ -227,7 +230,7 @@ fn resolve_config(
     config
 }
 
-fn build_config(cli: &Cli) -> Result<Config> {
+pub(crate) fn build_config(cli: &Cli) -> Result<Config> {
     let partial = load_partial_config(&cli.advanced)?;
     Ok(resolve_config(
         &cli.filter,
@@ -303,12 +306,11 @@ fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: 
 /// Scoring model matching an analysis: when duplication was not
 /// collected the Duplication dimension is excluded (its weight
 /// redistributed) instead of scoring the absent data as clean.
-pub(crate) fn scoring_model_for(dup_scanned: bool) -> DefaultModel {
-    if dup_scanned {
-        DefaultModel::new()
-    } else {
-        DefaultModel::without_duplication()
-    }
+pub(crate) fn scoring_model_for(
+    version: HealthModelVersion,
+    dup_scanned: bool,
+) -> Box<dyn ScoringModel> {
+    codelens_core::insight::scoring::scoring_model_for(version, dup_scanned)
 }
 
 /// Rewrite analysis file paths to be repo-root-relative.
@@ -581,15 +583,15 @@ mod tests {
 
     #[test]
     fn scoring_model_drops_duplication_when_not_scanned() {
-        use codelens_core::insight::scoring::{HealthDimension, ScoringModel};
+        use codelens_core::insight::scoring::HealthDimension;
 
-        let with_dup = scoring_model_for(true);
+        let with_dup = scoring_model_for(HealthModelVersion::V2, true);
         assert!(with_dup
             .dimensions()
             .iter()
             .any(|d| d.dimension == HealthDimension::Duplication));
 
-        let without_dup = scoring_model_for(false);
+        let without_dup = scoring_model_for(HealthModelVersion::V2, false);
         assert!(without_dup
             .dimensions()
             .iter()
@@ -620,5 +622,21 @@ mod tests {
         assert!(config.filter.languages.is_empty());
         assert!(config.filter.smart_exclude);
         assert!(config.walker.use_gitignore);
+        assert_eq!(config.health_model, HealthModelVersion::V2);
+    }
+
+    #[test]
+    fn health_model_cli_overrides_config_file() {
+        let partial = partial("health_model = \"v1\"");
+        let cli = parse(&["codelens"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&partial));
+        assert_eq!(config.health_model, HealthModelVersion::V1);
+
+        let cli = parse(&["codelens", "health", ".", "--health-model", "v2"]);
+        let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected health subcommand");
+        };
+        let config = resolve_config(&args.filter, &args.output, &cli.advanced, Some(&partial));
+        assert_eq!(config.health_model, HealthModelVersion::V2);
     }
 }

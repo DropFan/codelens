@@ -4,6 +4,7 @@ mod file;
 
 pub use file::{load_config_file, PartialConfig};
 
+use crate::insight::scoring::HealthModelVersion;
 use crate::walker::WalkerConfig;
 
 /// Main configuration structure.
@@ -26,6 +27,9 @@ pub struct Config {
     /// with this set the Duplication dimension is omitted from health
     /// scoring instead of being fabricated from zero data.
     pub no_dup_scan: bool,
+    /// Complete health scoring pipeline. V2 is the default; V1 exists for
+    /// reproducible historical gates and reports.
+    pub health_model: HealthModelVersion,
 }
 
 /// Filter configuration.

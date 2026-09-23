@@ -57,11 +57,19 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
         return Ok(ExitCode::FAILURE);
     }
 
-    // Both sides were analyzed with the same config, so the duplication
-    // dimension is either measured on both or excluded on both.
-    let model = scoring_model_for(!config.no_dup_scan);
-    let report =
-        codelens_core::insight::diff::build(&from_ref, &to_label, &from_result, &to_result, &model);
+    // Use the dimension only when both results prove it was collected.
+    // This also keeps future snapshot-backed callers on the safe path.
+    let model = scoring_model_for(
+        config.health_model,
+        from_result.summary.dup_scanned && to_result.summary.dup_scanned,
+    );
+    let report = codelens_core::insight::diff::build(
+        &from_ref,
+        &to_label,
+        &from_result,
+        &to_result,
+        model.as_ref(),
+    );
     let failed = report.health.failed;
     write_report(Report::Diff(Box::new(report)), &config.output)?;
 

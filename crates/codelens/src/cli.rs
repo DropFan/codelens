@@ -123,7 +123,8 @@ pub struct HealthArgs {
     pub baseline: Option<String>,
 
     /// Exit non-zero when health regressed against --baseline: the project
-    /// grade dropped, or any file present in both trees dropped a grade.
+    /// or an existing file dropped a grade or at least 5 points, or a new
+    /// file received an F.
     /// Only changes fail the gate, never pre-existing debt.
     #[arg(long, requires = "baseline")]
     pub fail_on_regression: bool,
@@ -467,6 +468,12 @@ pub struct AdvancedArgs {
     #[arg(long, global = true)]
     pub no_dup_scan: bool,
 
+    /// Health scoring pipeline used by the default report, health, diff,
+    /// and MCP. V2 is the default; use v1 to reproduce historical scores
+    /// and gates. Other subcommands are unaffected.
+    #[arg(long, global = true, value_enum, value_name = "VERSION")]
+    pub health_model: Option<HealthModelArg>,
+
     /// Configuration file path.
     #[arg(short, long, global = true)]
     pub config: Option<PathBuf>,
@@ -505,6 +512,22 @@ pub enum OutputFormatArg {
     Badge,
     /// SARIF 2.1.0 for GitHub code scanning / reviewdog.
     Sarif,
+}
+
+/// User-selectable health scoring pipeline.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HealthModelArg {
+    V1,
+    V2,
+}
+
+impl From<HealthModelArg> for codelens_core::insight::scoring::HealthModelVersion {
+    fn from(arg: HealthModelArg) -> Self {
+        match arg {
+            HealthModelArg::V1 => Self::V1,
+            HealthModelArg::V2 => Self::V2,
+        }
+    }
 }
 
 /// Sort order argument.
@@ -573,6 +596,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens health .\x1b[0m               \x1b[2m# Health report for current directory\x1b[0m
   \x1b[1;36mcodelens health src -f json\x1b[0m     \x1b[2m# Health report in JSON format\x1b[0m
   \x1b[1;36mcodelens health . --top 20\x1b[0m      \x1b[2m# Show top 20 worst files/directories\x1b[0m
+  \x1b[1;36mcodelens health . --health-model v1\x1b[0m  \x1b[2m# Reproduce historical scoring\x1b[0m
 
 \x1b[1;32mHotspot\x1b[0m \x1b[2m(churn x complexity):\x1b[0m
   \x1b[1;36mcodelens hotspot .\x1b[0m              \x1b[2m# Hotspots in last 90 days (default)\x1b[0m
@@ -589,6 +613,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens diff main\x1b[0m              \x1b[2m# main vs working tree\x1b[0m
   \x1b[1;36mcodelens diff v1.0..v2.0\x1b[0m        \x1b[2m# Two refs\x1b[0m
   \x1b[1;36mcodelens diff main --fail-on-regression\x1b[0m  \x1b[2m# Gate CI on health regressions\x1b[0m
+  \x1b[1;36mcodelens diff main --health-model v1\x1b[0m  \x1b[2m# Compare with historical scoring\x1b[0m
 
 \x1b[1;32mTrend\x1b[0m \x1b[2m(snapshot comparison):\x1b[0m
   \x1b[1;36mcodelens trend --save\x1b[0m           \x1b[2m# Save a snapshot\x1b[0m
@@ -625,5 +650,30 @@ mod tests {
             help.contains("omitted"),
             "--no-dup-scan help should say the Duplication dimension is omitted"
         );
+    }
+
+    #[test]
+    fn health_model_accepts_only_supported_versions() {
+        let cli = Cli::try_parse_from(["codelens", "--health-model", "v1"]).unwrap();
+        assert_eq!(cli.advanced.health_model, Some(HealthModelArg::V1));
+
+        let cli = Cli::try_parse_from(["codelens", "health", ".", "--health-model", "v2"]).unwrap();
+        assert_eq!(cli.advanced.health_model, Some(HealthModelArg::V2));
+
+        let error = Cli::try_parse_from(["codelens", "--health-model", "future"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("v1"));
+        assert!(error.contains("v2"));
+    }
+
+    #[test]
+    fn health_model_help_names_affected_surfaces() {
+        let help = Cli::command().render_long_help().to_string();
+
+        assert!(help.contains("default report, health, diff, and MCP"));
+        assert!(help.contains("Other subcommands are unaffected"));
+        assert!(help.contains("health . --health-model v1"));
+        assert!(help.contains("diff main --health-model v1"));
     }
 }

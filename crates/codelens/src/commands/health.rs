@@ -67,15 +67,17 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
         // Compare with the Duplication dimension only when BOTH sides
         // measured it — an unmeasured side's zero duplicate counts would
         // otherwise fabricate phantom regressions or improvements. Old
-        // snapshots without the flag keep the historical measured path.
+        // snapshots without the flag take the safe unmeasured path.
         // This joint model scopes the comparison ONLY; the main report
         // below keeps the current analysis's own measurement scope.
-        let compare_model =
-            scoring_model_for(result.summary.dup_scanned && baseline_result.summary.dup_scanned);
+        let compare_model = scoring_model_for(
+            config.health_model,
+            result.summary.dup_scanned && baseline_result.summary.dup_scanned,
+        );
         Some(health::compare_with_baseline(
             &baseline_result,
             &result,
-            &compare_model,
+            compare_model.as_ref(),
             &label,
         ))
     } else {
@@ -85,8 +87,8 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     // The main report and the absolute --fail-under gate always follow
     // what THIS analysis measured: the same tree must score the same no
     // matter how an unrelated baseline snapshot was collected.
-    let model = scoring_model_for(result.summary.dup_scanned);
-    let mut report = health::score(&result, &model, top_n);
+    let model = scoring_model_for(config.health_model, result.summary.dup_scanned);
+    let mut report = health::score(&result, model.as_ref(), top_n);
     report.regression = regression;
     let score = report.score;
     let grade = report.grade;
