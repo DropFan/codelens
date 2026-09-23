@@ -44,6 +44,24 @@ struct HtmlFileHealth {
     top_issue: String,
 }
 
+struct HtmlLanguageHealth {
+    language: String,
+    score_display: u32,
+    grade: Grade,
+    file_count: usize,
+    code_lines: usize,
+    confidence: String,
+    tail_score: u32,
+}
+
+struct HtmlLanguageHealthChange {
+    language: String,
+    status: String,
+    before: String,
+    after: String,
+    delta: String,
+}
+
 #[derive(Template)]
 #[template(path = "health.html")]
 struct HealthHtmlReport {
@@ -51,9 +69,73 @@ struct HealthHtmlReport {
     model: String,
     grade: String,
     score: u32,
+    scope: String,
+    confidence: String,
+    tail_score: u32,
+    failing_files: usize,
+    failing_ratio: u32,
+    test_health: String,
+    baseline_comparison: String,
+    scope_change: String,
+    comparison_verdict: String,
+    language_changes: Vec<HtmlLanguageHealthChange>,
     dimensions: Vec<HtmlDimensionScore>,
+    by_language: Vec<HtmlLanguageHealth>,
     by_directory: Vec<HtmlDirectoryHealth>,
     worst_files: Vec<HtmlFileHealth>,
+}
+
+fn html_language_health_change(
+    language: &crate::insight::health::LanguageHealthChange,
+) -> HtmlLanguageHealthChange {
+    HtmlLanguageHealthChange {
+        language: language.language.clone(),
+        status: language.status.to_string(),
+        before: format_optional_health(language.from_grade, language.from_score),
+        after: format_optional_health(language.to_grade, language.to_score),
+        delta: format_optional_delta(language.score_delta),
+    }
+}
+
+fn format_optional_health(grade: Option<Grade>, score: Option<f64>) -> String {
+    match (grade, score) {
+        (Some(grade), Some(score)) => format!("{grade} ({score:.1})"),
+        _ => "-".to_string(),
+    }
+}
+
+fn format_optional_delta(delta: Option<f64>) -> String {
+    match delta {
+        Some(delta) if delta >= 0.0 => format!("+{delta:.1}"),
+        Some(delta) => format!("{delta:.1}"),
+        None => "-".to_string(),
+    }
+}
+
+fn health_model_display_name(model: &str) -> String {
+    match model {
+        "default" => "v1".to_string(),
+        "default-no-dup" => "v1 (no duplication scan)".to_string(),
+        "default-v2" => "v2".to_string(),
+        "default-v2-no-dup" => "v2 (no duplication scan)".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn html_language_health(language: &crate::insight::health::LanguageHealth) -> HtmlLanguageHealth {
+    HtmlLanguageHealth {
+        language: language.language.clone(),
+        score_display: language.score as u32,
+        grade: language.grade,
+        file_count: language.file_count,
+        code_lines: language.code_lines,
+        confidence: format!(
+            "{} ({:.0}%)",
+            language.confidence.level,
+            language.confidence.coverage * 100.0
+        ),
+        tail_score: language.tail_risk.tail_score as u32,
+    }
 }
 
 // ── Hotspot ──────────────────────────────────────────────
@@ -137,8 +219,11 @@ struct TrendHtmlReport {
     from_label: String,
     to_date: String,
     to_label: String,
+    health_model: String,
     metrics: Vec<HtmlTrendMetric>,
     by_language: Vec<HtmlLanguageTrend>,
+    health_scope_change: String,
+    health_by_language: Vec<HtmlLanguageHealthChange>,
     history: Vec<HtmlHistoryPoint>,
 }
 
@@ -204,7 +289,13 @@ struct CombinedHtmlReport<'a> {
     health_grade: String,
     health_score: u32,
     health_model: String,
+    health_scope: String,
+    health_confidence: String,
+    health_tail_score: u32,
+    health_failing_files: usize,
+    health_test: String,
     dimensions: Vec<HtmlDimensionScore>,
+    health_languages: Vec<HtmlLanguageHealth>,
     worst_files: Vec<HtmlFileHealth>,
     total_sloc: usize,
     estimation_rows: Vec<HtmlComparisonRow>,
@@ -315,7 +406,25 @@ impl HtmlOutput {
             elapsed_secs: result.elapsed.as_secs_f64(),
             health_grade: health.grade.to_string(),
             health_score: health.score as u32,
-            health_model: health.model.clone(),
+            health_model: health_model_display_name(&health.model),
+            health_scope: health.scope.to_string(),
+            health_confidence: format!(
+                "{} ({:.0}%)",
+                health.confidence.level,
+                health.confidence.coverage * 100.0
+            ),
+            health_tail_score: health.tail_risk.tail_score as u32,
+            health_failing_files: health.tail_risk.failing_files,
+            health_test: health
+                .test_health
+                .as_ref()
+                .map(|test| {
+                    format!(
+                        "{} ({:.1}, {} files)",
+                        test.grade, test.score, test.file_count
+                    )
+                })
+                .unwrap_or_default(),
             dimensions: health
                 .dimensions
                 .iter()
@@ -324,6 +433,11 @@ impl HtmlOutput {
                     score_display: d.score as u32,
                     grade: d.grade,
                 })
+                .collect(),
+            health_languages: health
+                .by_language
+                .iter()
+                .map(html_language_health)
                 .collect(),
             worst_files: health
                 .worst_files
@@ -358,11 +472,72 @@ impl HtmlOutput {
         report: &crate::insight::health::HealthReport,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let regression = report.regression.as_ref();
         let html = HealthHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            model: report.model.clone(),
+            model: health_model_display_name(&report.model),
             grade: report.grade.to_string(),
             score: report.score as u32,
+            scope: report.scope.to_string(),
+            confidence: format!(
+                "{} ({:.0}%)",
+                report.confidence.level,
+                report.confidence.coverage * 100.0
+            ),
+            tail_score: report.tail_risk.tail_score as u32,
+            failing_files: report.tail_risk.failing_files,
+            failing_ratio: (report.tail_risk.failing_ratio * 100.0).round() as u32,
+            test_health: report
+                .test_health
+                .as_ref()
+                .map(|test| {
+                    format!(
+                        "{} ({:.1}, {} files)",
+                        test.grade, test.score, test.file_count
+                    )
+                })
+                .unwrap_or_default(),
+            baseline_comparison: regression
+                .map(|comparison| {
+                    format!(
+                        "{} using {}: {} ({:.1}) → {} ({:.1}), Δ {}",
+                        comparison.baseline,
+                        health_model_display_name(&comparison.model),
+                        comparison.baseline_grade,
+                        comparison.baseline_score,
+                        comparison.current_grade,
+                        comparison.current_score,
+                        format_optional_delta(Some(comparison.score_delta)),
+                    )
+                })
+                .unwrap_or_default(),
+            scope_change: regression
+                .filter(|comparison| comparison.scope_changed)
+                .map(|comparison| {
+                    format!(
+                        "Scope changed: {} → {}. Project delta is informational.",
+                        comparison.baseline_scope, comparison.current_scope
+                    )
+                })
+                .unwrap_or_default(),
+            comparison_verdict: regression
+                .map(|comparison| {
+                    if comparison.failed {
+                        "REGRESSED".to_string()
+                    } else {
+                        "NO REGRESSION".to_string()
+                    }
+                })
+                .unwrap_or_default(),
+            language_changes: regression
+                .map(|comparison| {
+                    comparison
+                        .by_language
+                        .iter()
+                        .map(html_language_health_change)
+                        .collect()
+                })
+                .unwrap_or_default(),
             dimensions: report
                 .dimensions
                 .iter()
@@ -371,6 +546,11 @@ impl HtmlOutput {
                     score_display: d.score as u32,
                     grade: d.grade,
                 })
+                .collect(),
+            by_language: report
+                .by_language
+                .iter()
+                .map(html_language_health)
                 .collect(),
             by_directory: report
                 .by_directory
@@ -525,8 +705,23 @@ impl HtmlOutput {
             ),
             to_date: report.to.clone(),
             to_label: format!("health {} ({:.1})", report.to_grade, report.to_score),
+            health_model: health_model_display_name(&report.health.model),
             metrics,
             by_language,
+            health_scope_change: if report.health.scope_changed {
+                format!(
+                    "Scope changed: {} → {}. Project delta is informational.",
+                    report.health.baseline_scope, report.health.current_scope
+                )
+            } else {
+                String::new()
+            },
+            health_by_language: report
+                .health
+                .by_language
+                .iter()
+                .map(html_language_health_change)
+                .collect(),
             history: Vec::new(),
         };
         write!(writer, "{}", html.render()?)?;
@@ -607,8 +802,11 @@ impl HtmlOutput {
             from_label: report.from.label.as_deref().unwrap_or("").to_string(),
             to_date: report.to.timestamp.format("%Y-%m-%d").to_string(),
             to_label: report.to.label.as_deref().unwrap_or("").to_string(),
+            health_model: String::new(),
             metrics,
             by_language,
+            health_scope_change: String::new(),
+            health_by_language: Vec::new(),
             history,
         };
         write!(writer, "{}", html.render()?)?;
@@ -675,5 +873,144 @@ impl HtmlOutput {
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::stats::{AnalysisResult, FileStats, LineStats, Summary};
+    use crate::insight::health::{
+        Confidence, HealthReport, HealthScope, LanguageHealth, LanguageHealthChange,
+        LanguageHealthChangeStatus, RegressionReport, TailRisk,
+    };
+    use crate::insight::scoring::default::DefaultModel;
+    use crate::output::{OutputFormat, OutputOptions, Report};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    #[test]
+    fn health_model_display_name_is_user_facing() {
+        assert_eq!(health_model_display_name("default"), "v1");
+        assert_eq!(
+            health_model_display_name("default-no-dup"),
+            "v1 (no duplication scan)"
+        );
+        assert_eq!(health_model_display_name("default-v2"), "v2");
+        assert_eq!(
+            health_model_display_name("default-v2-no-dup"),
+            "v2 (no duplication scan)"
+        );
+        assert_eq!(health_model_display_name("custom"), "custom");
+    }
+
+    #[test]
+    fn health_html_renders_language_health_before_file_details() {
+        let report = HealthReport {
+            score: 82.0,
+            grade: Grade::B,
+            model: "default-v2".to_string(),
+            dimensions: vec![],
+            by_directory: vec![],
+            worst_files: vec![],
+            scope: HealthScope::Production,
+            confidence: Confidence::from_coverage(1.0),
+            tail_risk: TailRisk::default(),
+            by_language: vec![LanguageHealth {
+                language: "Rust".to_string(),
+                score: 82.0,
+                grade: Grade::B,
+                file_count: 4,
+                code_lines: 300,
+                confidence: Confidence::from_coverage(1.0),
+                dimensions: vec![],
+                tail_risk: TailRisk::default(),
+            }],
+            test_health: None,
+            regression: Some(RegressionReport {
+                baseline: "main".to_string(),
+                model: "default-v2".to_string(),
+                baseline_score: 84.0,
+                baseline_grade: Grade::B,
+                baseline_scope: HealthScope::TestsOnly,
+                current_score: 82.0,
+                current_grade: Grade::B,
+                current_scope: HealthScope::Production,
+                scope_changed: true,
+                score_delta: -2.0,
+                project_regressed: false,
+                regressed_files: vec![],
+                improved_files: 0,
+                by_language: vec![LanguageHealthChange {
+                    language: "Rust".to_string(),
+                    status: LanguageHealthChangeStatus::Changed,
+                    from_score: Some(84.0),
+                    from_grade: Some(Grade::B),
+                    to_score: Some(82.0),
+                    to_grade: Some(Grade::B),
+                    score_delta: Some(-2.0),
+                }],
+                failed: false,
+            }),
+        };
+        let mut output = Vec::new();
+
+        HtmlOutput::new()
+            .write(
+                &Report::Health(report),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+
+        let html = String::from_utf8(output).unwrap();
+        let language_summary = html.find("By Language").unwrap();
+        let language_change = html.find("Language Health Changes").unwrap();
+        let file_details = html.find("Worst Files").unwrap_or(html.len());
+        assert!(language_summary < language_change);
+        assert!(language_change < file_details);
+        assert!(html.contains("Scope changed: tests-only → production"));
+        assert!(html.contains("B (84.0)"));
+        assert!(html.contains("B (82.0)"));
+        assert!(html.contains("Model: v2"));
+        assert!(!html.contains("Model: default-v2"));
+    }
+
+    #[test]
+    fn diff_html_identifies_the_health_model() {
+        let files = vec![FileStats {
+            path: PathBuf::from("src/lib.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats {
+                total: 12,
+                code: 10,
+                comment: 1,
+                blank: 1,
+            },
+            ..FileStats::default()
+        }];
+        let result = AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::from_millis(1),
+            scanned_files: 1,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        let report =
+            crate::insight::diff::build("before", "after", &result, &result, &DefaultModel::new());
+        let mut output = Vec::new();
+
+        HtmlOutput::new()
+            .write(
+                &Report::Diff(Box::new(report)),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+
+        let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("Health model: v2"));
+        assert!(!html.contains("Health model: default-v2"));
     }
 }

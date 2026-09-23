@@ -66,8 +66,21 @@
             <h1>Code Health Report</h1>
             <p style="color: var(--text-secondary)">Generated: {{ generated_at }} | Model: {{ model }}</p>
             <div class="grade-badge grade-{{ grade }}">{{ grade }}</div>
-            <div class="score-text">Score: {{ score }} / 100</div>
+            <div class="score-text">Score: {{ score }} / 100 | Scope: {{ scope }} | Confidence: {{ confidence }}</div>
+            <div class="score-text">Tail 10%: {{ tail_score }} | F files: {{ failing_files }} ({{ failing_ratio }}%)</div>
+            {% if !test_health.is_empty() %}<div class="score-text">Test code: {{ test_health }}</div>{% endif %}
         </header>
+
+        {% if !baseline_comparison.is_empty() %}
+        <section>
+            <h2>Baseline Comparison</h2>
+            <div class="stat-card">
+                <div class="value" style="font-size: 1.2rem">{{ comparison_verdict }}</div>
+                <div class="label">{{ baseline_comparison }}</div>
+                {% if !scope_change.is_empty() %}<div class="label">{{ scope_change }}</div>{% endif %}
+            </div>
+        </section>
+        {% endif %}
 
         <section class="stats-grid">
             {% for dim in dimensions %}
@@ -87,6 +100,48 @@
                 <canvas id="radarChart"></canvas>
             </div>
         </section>
+
+        {% if !by_language.is_empty() %}
+        <section>
+            <h2>By Language</h2>
+            <table>
+                <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code</th><th>Confidence</th><th>Tail 10%</th></tr></thead>
+                <tbody>
+                {% for language in by_language %}
+                <tr>
+                    <td><strong>{{ language.language }}</strong></td>
+                    <td>{{ language.score_display }}</td>
+                    <td>{{ language.grade }}</td>
+                    <td>{{ language.file_count }}</td>
+                    <td>{{ language.code_lines }}</td>
+                    <td>{{ language.confidence }}</td>
+                    <td>{{ language.tail_score }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        {% if !language_changes.is_empty() %}
+        <section>
+            <h2>Language Health Changes</h2>
+            <table>
+                <thead><tr><th>Language</th><th>Status</th><th>Before</th><th>After</th><th>Delta</th></tr></thead>
+                <tbody>
+                {% for language in language_changes %}
+                <tr>
+                    <td><strong>{{ language.language }}</strong></td>
+                    <td>{{ language.status }}</td>
+                    <td>{{ language.before }}</td>
+                    <td>{{ language.after }}</td>
+                    <td>{{ language.delta }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
 
         {% if !by_directory.is_empty() %}
         <section>

@@ -457,17 +457,39 @@ impl ConsoleOutput {
         };
         writeln!(
             writer,
-            "  Project Score: {}  Grade: {}",
+            "  Project Score: {}  Grade: {}  Model: {}",
             format!("{:.1}", report.score).bold(),
             colored_grade,
+            report.model,
         )?;
+        writeln!(
+            writer,
+            "  Scope: {}  Confidence: {} ({:.0}%)  Tail 10%: {:.1}  F files: {} ({:.1}%)",
+            report.scope,
+            report.confidence.level,
+            report.confidence.coverage * 100.0,
+            report.tail_risk.tail_score,
+            report.tail_risk.failing_files,
+            report.tail_risk.failing_ratio * 100.0,
+        )?;
+        if let Some(test_health) = &report.test_health {
+            writeln!(
+                writer,
+                "  Test Code: {:.1} ({})  Files: {}  Confidence: {} ({:.0}%)",
+                test_health.score,
+                test_health.grade,
+                test_health.file_count,
+                test_health.confidence.level,
+                test_health.confidence.coverage * 100.0,
+            )?;
+        }
         writeln!(writer)?;
 
         // Baseline comparison (--baseline)
         if let Some(reg) = &report.regression {
             let arrow = format!(
                 "{} ({:.1}) → {} ({:.1})",
-                reg.baseline_grade, reg.baseline_score, report.grade, report.score
+                reg.baseline_grade, reg.baseline_score, reg.current_grade, reg.current_score
             );
             let delta = if reg.score_delta >= 0.0 {
                 format!("+{:.1}", reg.score_delta).green().to_string()
@@ -476,11 +498,19 @@ impl ConsoleOutput {
             };
             writeln!(
                 writer,
-                "  Baseline: {}  {}  Δ {}",
+                "  Baseline: {}  Model: {}  {}  Δ {}",
                 reg.baseline.bold(),
+                reg.model,
                 arrow,
                 delta
             )?;
+            if reg.scope_changed {
+                writeln!(
+                    writer,
+                    "  Scope changed: {} → {} (project delta is informational)",
+                    reg.baseline_scope, reg.current_scope
+                )?;
+            }
             if reg.improved_files > 0 {
                 writeln!(writer, "  Improved files: {}", reg.improved_files)?;
             }
@@ -498,15 +528,52 @@ impl ConsoleOutput {
                     Cell::new("After").add_attribute(Attribute::Bold),
                 ]);
                 for f in &reg.regressed_files {
+                    let before = if f.is_new {
+                        "NEW".to_string()
+                    } else {
+                        format!("{} ({:.1})", f.from_grade, f.from_score)
+                    };
                     reg_table.add_row(vec![
                         Cell::new(f.path.display().to_string()).fg(Color::Cyan),
-                        Cell::new(format!("{} ({:.1})", f.from_grade, f.from_score))
-                            .fg(Self::grade_color(f.from_grade)),
+                        Cell::new(before).fg(if f.is_new {
+                            Color::Cyan
+                        } else {
+                            Self::grade_color(f.from_grade)
+                        }),
                         Cell::new(format!("{} ({:.1})", f.to_grade, f.to_score))
                             .fg(Self::grade_color(f.to_grade)),
                     ]);
                 }
                 writeln!(writer, "{reg_table}")?;
+            }
+
+            if !reg.by_language.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "{}", "  Language Health Changes".bold())?;
+                let mut language_table = Table::new();
+                language_table
+                    .load_preset(UTF8_FULL)
+                    .set_content_arrangement(ContentArrangement::Dynamic);
+                language_table.set_header(vec![
+                    Cell::new("Language").add_attribute(Attribute::Bold),
+                    Cell::new("Status").add_attribute(Attribute::Bold),
+                    Cell::new("Before").add_attribute(Attribute::Bold),
+                    Cell::new("After").add_attribute(Attribute::Bold),
+                    Cell::new("Delta").add_attribute(Attribute::Bold),
+                ]);
+                for language in &reg.by_language {
+                    language_table.add_row(vec![
+                        Cell::new(&language.language).fg(Color::Cyan),
+                        Cell::new(language.status.to_string()),
+                        Cell::new(format_optional_health(
+                            language.from_grade,
+                            language.from_score,
+                        )),
+                        Cell::new(format_optional_health(language.to_grade, language.to_score)),
+                        Cell::new(format_optional_delta(language.score_delta)),
+                    ]);
+                }
+                writeln!(writer, "{language_table}")?;
             }
 
             let verdict = if reg.failed {
@@ -537,6 +604,41 @@ impl ConsoleOutput {
         }
         writeln!(writer, "{dim_table}")?;
         writeln!(writer)?;
+
+        if !report.by_language.is_empty() {
+            writeln!(writer, "{}", "By Language".bold())?;
+            writeln!(writer)?;
+            let mut language_table = Table::new();
+            language_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            language_table.set_header(vec![
+                Cell::new("Language").add_attribute(Attribute::Bold),
+                Cell::new("Score").add_attribute(Attribute::Bold),
+                Cell::new("Grade").add_attribute(Attribute::Bold),
+                Cell::new("Files").add_attribute(Attribute::Bold),
+                Cell::new("Code").add_attribute(Attribute::Bold),
+                Cell::new("Confidence").add_attribute(Attribute::Bold),
+                Cell::new("Tail 10%").add_attribute(Attribute::Bold),
+            ]);
+            for language in &report.by_language {
+                language_table.add_row(vec![
+                    Cell::new(&language.language).fg(Color::Cyan),
+                    Cell::new(format!("{:.1}", language.score)),
+                    Cell::new(language.grade.to_string()).fg(Self::grade_color(language.grade)),
+                    Cell::new(Self::format_number(language.file_count)),
+                    Cell::new(Self::format_number(language.code_lines)),
+                    Cell::new(format!(
+                        "{} ({:.0}%)",
+                        language.confidence.level,
+                        language.confidence.coverage * 100.0
+                    )),
+                    Cell::new(format!("{:.1}", language.tail_risk.tail_score)),
+                ]);
+            }
+            writeln!(writer, "{language_table}")?;
+            writeln!(writer)?;
+        }
 
         if !options.summary_only {
             // By Directory table
@@ -842,9 +944,21 @@ impl ConsoleOutput {
         };
         writeln!(
             writer,
-            "  Health: {} ({:.1}) → {} ({:.1})  Δ {}",
-            reg.baseline_grade, reg.baseline_score, report.to_grade, report.to_score, delta_str
+            "  Health [{}]: {} ({:.1}) → {} ({:.1})  Δ {}",
+            reg.model,
+            reg.baseline_grade,
+            reg.baseline_score,
+            reg.current_grade,
+            reg.current_score,
+            delta_str
         )?;
+        if reg.scope_changed {
+            writeln!(
+                writer,
+                "  Scope changed: {} → {} (project delta is informational)",
+                reg.baseline_scope, reg.current_scope
+            )?;
+        }
         if reg.improved_files > 0 {
             writeln!(writer, "  Improved files: {}", reg.improved_files)?;
         }
@@ -862,12 +976,49 @@ impl ConsoleOutput {
                 Cell::new("After").add_attribute(Attribute::Bold),
             ]);
             for f in &reg.regressed_files {
+                let before = if f.is_new {
+                    "NEW".to_string()
+                } else {
+                    format!("{} ({:.1})", f.from_grade, f.from_score)
+                };
                 table.add_row(vec![
                     Cell::new(f.path.display().to_string()).fg(Color::Cyan),
-                    Cell::new(format!("{} ({:.1})", f.from_grade, f.from_score))
-                        .fg(Self::grade_color(f.from_grade)),
+                    Cell::new(before).fg(if f.is_new {
+                        Color::Cyan
+                    } else {
+                        Self::grade_color(f.from_grade)
+                    }),
                     Cell::new(format!("{} ({:.1})", f.to_grade, f.to_score))
                         .fg(Self::grade_color(f.to_grade)),
+                ]);
+            }
+            writeln!(writer, "{table}")?;
+            writeln!(writer)?;
+        }
+
+        if !reg.by_language.is_empty() {
+            writeln!(writer, "{}", "  Language Health Changes".bold())?;
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            table.set_header(vec![
+                Cell::new("Language").add_attribute(Attribute::Bold),
+                Cell::new("Status").add_attribute(Attribute::Bold),
+                Cell::new("Before").add_attribute(Attribute::Bold),
+                Cell::new("After").add_attribute(Attribute::Bold),
+                Cell::new("Delta").add_attribute(Attribute::Bold),
+            ]);
+            for language in &reg.by_language {
+                table.add_row(vec![
+                    Cell::new(&language.language).fg(Color::Cyan),
+                    Cell::new(language.status.to_string()),
+                    Cell::new(format_optional_health(
+                        language.from_grade,
+                        language.from_score,
+                    )),
+                    Cell::new(format_optional_health(language.to_grade, language.to_score)),
+                    Cell::new(format_optional_delta(language.score_delta)),
                 ]);
             }
             writeln!(writer, "{table}")?;
@@ -1199,10 +1350,30 @@ impl ConsoleOutput {
     }
 }
 
+fn format_optional_health(grade: Option<crate::insight::Grade>, score: Option<f64>) -> String {
+    match (grade, score) {
+        (Some(grade), Some(score)) => format!("{grade} ({score:.1})"),
+        _ => "-".to_string(),
+    }
+}
+
+fn format_optional_delta(delta: Option<f64>) -> String {
+    match delta {
+        Some(delta) if delta >= 0.0 => format!("+{delta:.1}"),
+        Some(delta) => format!("{delta:.1}"),
+        None => "-".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::analyzer::stats::{AnalysisResult, FileStats, LineStats, Summary};
+    use crate::insight::health::{
+        FileRegression, HealthReport, LanguageHealthChange, LanguageHealthChangeStatus,
+        RegressionReport,
+    };
+    use crate::insight::Grade;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1254,5 +1425,73 @@ mod tests {
         // Content is still intact
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("Rust"));
+    }
+
+    #[test]
+    fn test_health_comparison_uses_joint_model_score_and_marks_new_files() {
+        let report = HealthReport {
+            score: 99.0,
+            grade: Grade::A,
+            model: "default-v2".to_string(),
+            dimensions: vec![],
+            by_directory: vec![],
+            worst_files: vec![],
+            scope: crate::insight::health::HealthScope::Production,
+            confidence: Default::default(),
+            tail_risk: Default::default(),
+            by_language: vec![],
+            test_health: None,
+            regression: Some(RegressionReport {
+                baseline: "snapshot old".to_string(),
+                model: "default-v2-no-dup".to_string(),
+                baseline_score: 93.3,
+                baseline_grade: Grade::A,
+                baseline_scope: crate::insight::health::HealthScope::TestsOnly,
+                current_score: 92.0,
+                current_grade: Grade::A,
+                current_scope: crate::insight::health::HealthScope::Production,
+                scope_changed: true,
+                score_delta: -1.3,
+                project_regressed: false,
+                regressed_files: vec![FileRegression {
+                    path: PathBuf::from("src/new_bad.rs"),
+                    is_new: true,
+                    from_score: 100.0,
+                    from_grade: Grade::A,
+                    to_score: 40.0,
+                    to_grade: Grade::F,
+                }],
+                improved_files: 0,
+                by_language: vec![LanguageHealthChange {
+                    language: "Rust".to_string(),
+                    status: LanguageHealthChangeStatus::Changed,
+                    from_score: Some(93.3),
+                    from_grade: Some(Grade::A),
+                    to_score: Some(92.0),
+                    to_grade: Some(Grade::A),
+                    score_delta: Some(-1.3),
+                }],
+                failed: true,
+            }),
+        };
+        let options = OutputOptions {
+            colorize: false,
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+
+        ConsoleOutput::new()
+            .write(&Report::Health(report), &options, &mut buf)
+            .unwrap();
+
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("Model: default-v2-no-dup"));
+        assert!(text.contains("A (93.3) → A (92.0)"));
+        assert!(text.contains("Scope changed: tests-only → production"));
+        assert!(text.contains("Language Health Changes"));
+        assert!(text.contains("Rust"));
+        assert!(text.contains("-1.3"));
+        assert!(text.contains("NEW"));
+        assert!(!text.contains("A (93.3) → A (99.0)"));
     }
 }

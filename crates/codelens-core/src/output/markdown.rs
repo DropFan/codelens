@@ -232,9 +232,30 @@ impl MarkdownOutput {
         writeln!(writer)?;
         writeln!(
             writer,
-            "**Project Score:** {:.1} | **Grade:** {}",
-            report.score, report.grade
+            "**Project Score:** {:.1} | **Grade:** {} | **Model:** {}",
+            report.score, report.grade, report.model
         )?;
+        writeln!(
+            writer,
+            "**Scope:** {} | **Confidence:** {} ({:.0}%) | **Tail 10%:** {:.1} | **F files:** {} ({:.1}%)",
+            report.scope,
+            report.confidence.level,
+            report.confidence.coverage * 100.0,
+            report.tail_risk.tail_score,
+            report.tail_risk.failing_files,
+            report.tail_risk.failing_ratio * 100.0,
+        )?;
+        if let Some(test_health) = &report.test_health {
+            writeln!(
+                writer,
+                "**Test Code:** {:.1} ({}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
+                test_health.score,
+                test_health.grade,
+                test_health.file_count,
+                test_health.confidence.level,
+                test_health.confidence.coverage * 100.0,
+            )?;
+        }
         writeln!(writer)?;
 
         // Baseline comparison (--baseline)
@@ -246,14 +267,22 @@ impl MarkdownOutput {
             };
             writeln!(
                 writer,
-                "**Baseline:** {} — {} ({:.1}) → {} ({:.1}), Δ {}",
+                "**Baseline:** {} | **Comparison model:** {} — {} ({:.1}) → {} ({:.1}), Δ {}",
                 reg.baseline,
+                reg.model,
                 reg.baseline_grade,
                 reg.baseline_score,
-                report.grade,
-                report.score,
+                reg.current_grade,
+                reg.current_score,
                 delta
             )?;
+            if reg.scope_changed {
+                writeln!(
+                    writer,
+                    "**Scope changed:** {} → {} (project delta is informational and does not affect the gate)",
+                    reg.baseline_scope, reg.current_scope
+                )?;
+            }
             writeln!(writer)?;
             if !reg.regressed_files.is_empty() {
                 writeln!(writer, "## Regressed Files")?;
@@ -261,18 +290,23 @@ impl MarkdownOutput {
                 writeln!(writer, "| File | Before | After |")?;
                 writeln!(writer, "|------|--------|-------|")?;
                 for f in &reg.regressed_files {
+                    let before = if f.is_new {
+                        "NEW".to_string()
+                    } else {
+                        format!("{} ({:.1})", f.from_grade, f.from_score)
+                    };
                     writeln!(
                         writer,
-                        "| {} | {} ({:.1}) | {} ({:.1}) |",
+                        "| {} | {} | {} ({:.1}) |",
                         f.path.display(),
-                        f.from_grade,
-                        f.from_score,
+                        before,
                         f.to_grade,
                         f.to_score
                     )?;
                 }
                 writeln!(writer)?;
             }
+            write_language_health_changes(writer, &reg.by_language)?;
             writeln!(
                 writer,
                 "**Verdict:** {}",
@@ -298,6 +332,34 @@ impl MarkdownOutput {
             )?;
         }
         writeln!(writer)?;
+
+        if !report.by_language.is_empty() {
+            writeln!(writer, "## By Language")?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "| Language | Score | Grade | Files | Code | Confidence | Tail 10% |"
+            )?;
+            writeln!(
+                writer,
+                "|----------|-------|-------|-------|------|------------|----------|"
+            )?;
+            for language in &report.by_language {
+                writeln!(
+                    writer,
+                    "| {} | {:.1} | {} | {} | {} | {} ({:.0}%) | {:.1} |",
+                    language.language,
+                    language.score,
+                    language.grade,
+                    language.file_count,
+                    language.code_lines,
+                    language.confidence.level,
+                    language.confidence.coverage * 100.0,
+                    language.tail_risk.tail_score,
+                )?;
+            }
+            writeln!(writer)?;
+        }
 
         if !options.summary_only {
             if !report.by_directory.is_empty() {
@@ -523,11 +585,12 @@ impl MarkdownOutput {
         };
         writeln!(
             writer,
-            "**Health:** {} ({:.1}) → {} ({:.1}), Δ {} — {}",
+            "**Health [{}]:** {} ({:.1}) → {} ({:.1}), Δ {} — {}",
+            reg.model,
             reg.baseline_grade,
             reg.baseline_score,
-            report.to_grade,
-            report.to_score,
+            reg.current_grade,
+            reg.current_score,
             delta_str,
             if reg.failed {
                 "🔴 REGRESSED"
@@ -535,6 +598,13 @@ impl MarkdownOutput {
                 "🟢 NO REGRESSION"
             }
         )?;
+        if reg.scope_changed {
+            writeln!(
+                writer,
+                "**Scope changed:** {} → {} (project delta is informational and does not affect the gate)",
+                reg.baseline_scope, reg.current_scope
+            )?;
+        }
         writeln!(writer)?;
 
         if !reg.regressed_files.is_empty() {
@@ -543,18 +613,24 @@ impl MarkdownOutput {
             writeln!(writer, "| File | Before | After |")?;
             writeln!(writer, "|------|--------|-------|")?;
             for f in &reg.regressed_files {
+                let before = if f.is_new {
+                    "NEW".to_string()
+                } else {
+                    format!("{} ({:.1})", f.from_grade, f.from_score)
+                };
                 writeln!(
                     writer,
-                    "| {} | {} ({:.1}) | {} ({:.1}) |",
+                    "| {} | {} | {} ({:.1}) |",
                     f.path.display(),
-                    f.from_grade,
-                    f.from_score,
+                    before,
                     f.to_grade,
                     f.to_score
                 )?;
             }
             writeln!(writer)?;
         }
+
+        write_language_health_changes(writer, &reg.by_language)?;
 
         writeln!(writer, "## Metrics")?;
         writeln!(writer)?;
@@ -750,11 +826,57 @@ impl MarkdownOutput {
     }
 }
 
+fn write_language_health_changes(
+    writer: &mut dyn Write,
+    languages: &[crate::insight::health::LanguageHealthChange],
+) -> Result<()> {
+    if languages.is_empty() {
+        return Ok(());
+    }
+    writeln!(writer, "## Language Health Changes")?;
+    writeln!(writer)?;
+    writeln!(writer, "| Language | Status | Before | After | Delta |")?;
+    writeln!(writer, "|----------|--------|--------|-------|-------|")?;
+    for language in languages {
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} |",
+            language.language,
+            language.status,
+            format_optional_health(language.from_grade, language.from_score),
+            format_optional_health(language.to_grade, language.to_score),
+            format_optional_delta(language.score_delta),
+        )?;
+    }
+    writeln!(writer)?;
+    Ok(())
+}
+
+fn format_optional_health(grade: Option<crate::insight::Grade>, score: Option<f64>) -> String {
+    match (grade, score) {
+        (Some(grade), Some(score)) => format!("{grade} ({score:.1})"),
+        _ => "-".to_string(),
+    }
+}
+
+fn format_optional_delta(delta: Option<f64>) -> String {
+    match delta {
+        Some(delta) if delta >= 0.0 => format!("+{delta:.1}"),
+        Some(delta) => format!("{delta:.1}"),
+        None => "-".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Report;
     use super::*;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
+    use crate::insight::health::{
+        FileRegression, HealthReport, LanguageHealthChange, LanguageHealthChangeStatus,
+        RegressionReport,
+    };
+    use crate::insight::Grade;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -918,5 +1040,72 @@ mod tests {
 
         assert!(md_str.contains("---"));
         assert!(md_str.contains("*Generated by codelens"));
+    }
+
+    #[test]
+    fn test_health_comparison_uses_joint_model_score_and_marks_new_files() {
+        let report = HealthReport {
+            score: 99.0,
+            grade: Grade::A,
+            model: "default-v2".to_string(),
+            dimensions: vec![],
+            by_directory: vec![],
+            worst_files: vec![],
+            scope: crate::insight::health::HealthScope::Production,
+            confidence: Default::default(),
+            tail_risk: Default::default(),
+            by_language: vec![],
+            test_health: None,
+            regression: Some(RegressionReport {
+                baseline: "snapshot old".to_string(),
+                model: "default-v2-no-dup".to_string(),
+                baseline_score: 93.3,
+                baseline_grade: Grade::A,
+                baseline_scope: crate::insight::health::HealthScope::TestsOnly,
+                current_score: 92.0,
+                current_grade: Grade::A,
+                current_scope: crate::insight::health::HealthScope::Production,
+                scope_changed: true,
+                score_delta: -1.3,
+                project_regressed: false,
+                regressed_files: vec![FileRegression {
+                    path: PathBuf::from("src/new_bad.rs"),
+                    is_new: true,
+                    from_score: 100.0,
+                    from_grade: Grade::A,
+                    to_score: 40.0,
+                    to_grade: Grade::F,
+                }],
+                improved_files: 0,
+                by_language: vec![LanguageHealthChange {
+                    language: "Rust".to_string(),
+                    status: LanguageHealthChangeStatus::Changed,
+                    from_score: Some(93.3),
+                    from_grade: Some(Grade::A),
+                    to_score: Some(92.0),
+                    to_grade: Some(Grade::A),
+                    score_delta: Some(-1.3),
+                }],
+                failed: true,
+            }),
+        };
+        let mut buffer = Vec::new();
+
+        MarkdownOutput::new()
+            .write(
+                &Report::Health(report),
+                &OutputOptions::default(),
+                &mut buffer,
+            )
+            .unwrap();
+
+        let markdown = String::from_utf8(buffer).unwrap();
+        assert!(markdown.contains("**Comparison model:** default-v2-no-dup"));
+        assert!(markdown.contains("A (93.3) → A (92.0)"));
+        assert!(markdown.contains("**Scope changed:** tests-only → production"));
+        assert!(markdown.contains("## Language Health Changes"));
+        assert!(markdown.contains("| Rust | changed | A (93.3) | A (92.0) | -1.3 |"));
+        assert!(markdown.contains("| src/new_bad.rs | NEW | F (40.0) |"));
+        assert!(!markdown.contains("A (93.3) → A (99.0)"));
     }
 }

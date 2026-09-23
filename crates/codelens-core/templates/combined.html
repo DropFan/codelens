@@ -256,7 +256,9 @@
             <h2 style="text-align:center">Code Health</h2>
             <div style="text-align:center; margin-bottom: 2rem;">
                 <div class="grade-badge grade-{{ health_grade }}">{{ health_grade }}</div>
-                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Score: {{ health_score }} / 100 | Model: {{ health_model }}</div>
+                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Score: {{ health_score }} / 100 | Model: {{ health_model }} | Scope: {{ health_scope }}</div>
+                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Confidence: {{ health_confidence }} | Tail 10%: {{ health_tail_score }} | F files: {{ health_failing_files }}</div>
+                {% if !health_test.is_empty() %}<div style="color: var(--text-secondary); margin-top: 0.4rem;">Test code: {{ health_test }}</div>{% endif %}
             </div>
 
             <div class="stats-grid">
@@ -270,6 +272,26 @@
                 </div>
                 {% endfor %}
             </div>
+
+            {% if !health_languages.is_empty() %}
+            <h2>Health by Language</h2>
+            <table>
+                <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code</th><th>Confidence</th><th>Tail 10%</th></tr></thead>
+                <tbody>
+                {% for language in health_languages %}
+                <tr>
+                    <td><strong>{{ language.language }}</strong></td>
+                    <td>{{ language.score_display }}</td>
+                    <td>{{ language.grade }}</td>
+                    <td>{{ language.file_count }}</td>
+                    <td>{{ language.code_lines }}</td>
+                    <td>{{ language.confidence }}</td>
+                    <td>{{ language.tail_score }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
 
             {% if !worst_files.is_empty() %}
             <h2>Worst Files</h2>

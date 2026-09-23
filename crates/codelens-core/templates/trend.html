@@ -49,7 +49,16 @@
                 <span class="arrow">→</span>
                 <span>{{ to_date }} {{ to_label }}</span>
             </div>
+            {% if !health_model.is_empty() %}
+            <p style="color: var(--text-secondary); margin-top: 0.75rem;">Health model: {{ health_model }}</p>
+            {% endif %}
         </header>
+
+        {% if !health_scope_change.is_empty() %}
+        <section class="stat-card" style="margin-bottom: 2rem;">
+            <div class="label">{{ health_scope_change }}</div>
+        </section>
+        {% endif %}
 
         <section class="stats-grid">
             {% for m in metrics %}
@@ -98,6 +107,26 @@
                     <td>{{ lt.code_from }}</td>
                     <td>{{ lt.code_to }}</td>
                     <td class="{% if lt.code_delta > 0 %}positive{% else if lt.code_delta < 0 %}negative{% else %}neutral{% endif %}">{{ lt.code_delta_display }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        {% if !health_by_language.is_empty() %}
+        <section>
+            <h2 style="margin-bottom: 1rem">Health by Language</h2>
+            <table>
+                <thead><tr><th>Language</th><th>Status</th><th>Before</th><th>After</th><th>Delta</th></tr></thead>
+                <tbody>
+                {% for language in health_by_language %}
+                <tr>
+                    <td><strong>{{ language.language }}</strong></td>
+                    <td>{{ language.status }}</td>
+                    <td>{{ language.before }}</td>
+                    <td>{{ language.after }}</td>
+                    <td>{{ language.delta }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
