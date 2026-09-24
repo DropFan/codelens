@@ -172,6 +172,7 @@ mod tests {
                 worst_files: vec![],
                 scope: crate::insight::health::HealthScope::Production,
                 confidence: Default::default(),
+                assessment: Default::default(),
                 tail_risk: Default::default(),
                 by_language: vec![],
                 test_health: None,
@@ -198,6 +199,7 @@ mod tests {
         assert!(parsed.get("analysis").is_some());
         assert!(parsed.get("health").is_some());
         assert!(parsed.get("estimation").is_some());
+        assert_eq!(parsed["health"]["assessment"], "scored");
     }
 
     #[test]

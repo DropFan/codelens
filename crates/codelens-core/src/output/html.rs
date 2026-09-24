@@ -6,6 +6,7 @@ use askama::Template;
 
 use crate::analyzer::stats::{AnalysisResult, LanguageSummary, Summary};
 use crate::error::Result;
+use crate::insight::health::HealthAssessment;
 use crate::insight::Grade;
 
 use super::format::{OutputFormat, OutputOptions, Report};
@@ -46,8 +47,8 @@ struct HtmlFileHealth {
 
 struct HtmlLanguageHealth {
     language: String,
-    score_display: u32,
-    grade: Grade,
+    score_display: String,
+    grade: String,
     file_count: usize,
     code_lines: usize,
     confidence: String,
@@ -69,6 +70,7 @@ struct HealthHtmlReport {
     model: String,
     grade: String,
     score: u32,
+    is_scored: bool,
     scope: String,
     confidence: String,
     tail_score: u32,
@@ -123,10 +125,19 @@ fn health_model_display_name(model: &str) -> String {
 }
 
 fn html_language_health(language: &crate::insight::health::LanguageHealth) -> HtmlLanguageHealth {
+    let insufficient = language.assessment == HealthAssessment::InsufficientData;
     HtmlLanguageHealth {
         language: language.language.clone(),
-        score_display: language.score as u32,
-        grade: language.grade,
+        score_display: if insufficient {
+            format!("Estimated {}", language.score as u32)
+        } else {
+            (language.score as u32).to_string()
+        },
+        grade: if insufficient {
+            "Insufficient data".to_string()
+        } else {
+            language.grade.to_string()
+        },
         file_count: language.file_count,
         code_lines: language.code_lines,
         confidence: format!(
@@ -288,6 +299,7 @@ struct CombinedHtmlReport<'a> {
     elapsed_secs: f64,
     health_grade: String,
     health_score: u32,
+    health_is_scored: bool,
     health_model: String,
     health_scope: String,
     health_confidence: String,
@@ -406,6 +418,7 @@ impl HtmlOutput {
             elapsed_secs: result.elapsed.as_secs_f64(),
             health_grade: health.grade.to_string(),
             health_score: health.score as u32,
+            health_is_scored: health.assessment == HealthAssessment::Scored,
             health_model: health_model_display_name(&health.model),
             health_scope: health.scope.to_string(),
             health_confidence: format!(
@@ -419,10 +432,17 @@ impl HtmlOutput {
                 .test_health
                 .as_ref()
                 .map(|test| {
-                    format!(
-                        "{} ({:.1}, {} files)",
-                        test.grade, test.score, test.file_count
-                    )
+                    if test.assessment == HealthAssessment::InsufficientData {
+                        format!(
+                            "Insufficient data (estimated score: {:.1}, {} files)",
+                            test.score, test.file_count
+                        )
+                    } else {
+                        format!(
+                            "{} ({:.1}, {} files)",
+                            test.grade, test.score, test.file_count
+                        )
+                    }
                 })
                 .unwrap_or_default(),
             dimensions: health
@@ -478,6 +498,7 @@ impl HtmlOutput {
             model: health_model_display_name(&report.model),
             grade: report.grade.to_string(),
             score: report.score as u32,
+            is_scored: report.assessment == HealthAssessment::Scored,
             scope: report.scope.to_string(),
             confidence: format!(
                 "{} ({:.0}%)",
@@ -491,10 +512,17 @@ impl HtmlOutput {
                 .test_health
                 .as_ref()
                 .map(|test| {
-                    format!(
-                        "{} ({:.1}, {} files)",
-                        test.grade, test.score, test.file_count
-                    )
+                    if test.assessment == HealthAssessment::InsufficientData {
+                        format!(
+                            "Insufficient data (estimated score: {:.1}, {} files)",
+                            test.score, test.file_count
+                        )
+                    } else {
+                        format!(
+                            "{} ({:.1}, {} files)",
+                            test.grade, test.score, test.file_count
+                        )
+                    }
                 })
                 .unwrap_or_default(),
             baseline_comparison: regression
@@ -915,6 +943,7 @@ mod tests {
             worst_files: vec![],
             scope: HealthScope::Production,
             confidence: Confidence::from_coverage(1.0),
+            assessment: Default::default(),
             tail_risk: TailRisk::default(),
             by_language: vec![LanguageHealth {
                 language: "Rust".to_string(),
@@ -923,6 +952,7 @@ mod tests {
                 file_count: 4,
                 code_lines: 300,
                 confidence: Confidence::from_coverage(1.0),
+                assessment: Default::default(),
                 dimensions: vec![],
                 tail_risk: TailRisk::default(),
             }],
@@ -957,7 +987,7 @@ mod tests {
 
         HtmlOutput::new()
             .write(
-                &Report::Health(report),
+                &Report::Health(report.clone()),
                 &OutputOptions::default(),
                 &mut output,
             )
@@ -974,6 +1004,67 @@ mod tests {
         assert!(html.contains("B (82.0)"));
         assert!(html.contains("Model: v2"));
         assert!(!html.contains("Model: default-v2"));
+    }
+
+    #[test]
+    fn low_confidence_health_html_hides_the_letter_grade() {
+        let files = vec![FileStats {
+            path: PathBuf::from("src/custom.foo"),
+            language: "Custom".to_string(),
+            lines: LineStats {
+                total: 100,
+                code: 90,
+                comment: 5,
+                blank: 5,
+            },
+            size: 1_000,
+            ..FileStats::default()
+        }];
+        let result = AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::ZERO,
+            scanned_files: 1,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        let report =
+            crate::insight::health::score(&result, &DefaultModel::without_duplication(), 10);
+        let mut output = Vec::new();
+
+        HtmlOutput::new()
+            .write(
+                &Report::Health(report.clone()),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+
+        let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("class=\"assessment-badge\">Insufficient data"));
+        assert!(html.contains("Estimated score:"));
+        assert!(html.contains("Estimated 100"));
+        assert!(!html.contains("class=\"grade-badge grade-A\""));
+
+        let combined = crate::output::format::CombinedReport {
+            analysis: result,
+            health: report,
+            estimation: crate::insight::estimation::EstimationComparison {
+                total_sloc: 90,
+                reports: Vec::new(),
+            },
+        };
+        let mut output = Vec::new();
+        HtmlOutput::new()
+            .write(
+                &Report::Combined(Box::new(combined)),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("Insufficient data"));
+        assert!(html.contains("Estimated score:"));
     }
 
     #[test]

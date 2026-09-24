@@ -282,6 +282,7 @@ mod tests {
         let report = health_report(&empty_result(false), 10, HealthModelVersion::V2);
         assert_eq!(report.score, 0.0);
         assert_eq!(report.grade.to_string(), "F");
+        assert_eq!(report.assessment.to_string(), "insufficient-data");
         assert!(report.dimensions.is_empty());
     }
 }

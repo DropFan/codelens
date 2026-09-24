@@ -4,6 +4,7 @@ use std::io::Write;
 
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
+use crate::insight::health::HealthAssessment;
 
 use super::format::{OutputFormat, OutputOptions, Report};
 
@@ -230,11 +231,19 @@ impl MarkdownOutput {
     ) -> Result<()> {
         writeln!(writer, "# Code Health Report")?;
         writeln!(writer)?;
-        writeln!(
-            writer,
-            "**Project Score:** {:.1} | **Grade:** {} | **Model:** {}",
-            report.score, report.grade, report.model
-        )?;
+        if report.assessment == HealthAssessment::InsufficientData {
+            writeln!(
+                writer,
+                "**Project Assessment:** Insufficient data | **Estimated score:** {:.1} | **Model:** {}",
+                report.score, report.model
+            )?;
+        } else {
+            writeln!(
+                writer,
+                "**Project Score:** {:.1} | **Grade:** {} | **Model:** {}",
+                report.score, report.grade, report.model
+            )?;
+        }
         writeln!(
             writer,
             "**Scope:** {} | **Confidence:** {} ({:.0}%) | **Tail 10%:** {:.1} | **F files:** {} ({:.1}%)",
@@ -246,15 +255,26 @@ impl MarkdownOutput {
             report.tail_risk.failing_ratio * 100.0,
         )?;
         if let Some(test_health) = &report.test_health {
-            writeln!(
-                writer,
-                "**Test Code:** {:.1} ({}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
-                test_health.score,
-                test_health.grade,
-                test_health.file_count,
-                test_health.confidence.level,
-                test_health.confidence.coverage * 100.0,
-            )?;
+            if test_health.assessment == HealthAssessment::InsufficientData {
+                writeln!(
+                    writer,
+                    "**Test Code:** Insufficient data (estimated score: {:.1}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
+                    test_health.score,
+                    test_health.file_count,
+                    test_health.confidence.level,
+                    test_health.confidence.coverage * 100.0,
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "**Test Code:** {:.1} ({}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
+                    test_health.score,
+                    test_health.grade,
+                    test_health.file_count,
+                    test_health.confidence.level,
+                    test_health.confidence.coverage * 100.0,
+                )?;
+            }
         }
         writeln!(writer)?;
 
@@ -345,12 +365,20 @@ impl MarkdownOutput {
                 "|----------|-------|-------|-------|------|------------|----------|"
             )?;
             for language in &report.by_language {
+                let (score, grade) = if language.assessment == HealthAssessment::InsufficientData {
+                    (
+                        format!("est. {:.1}", language.score),
+                        "Insufficient data".to_string(),
+                    )
+                } else {
+                    (format!("{:.1}", language.score), language.grade.to_string())
+                };
                 writeln!(
                     writer,
-                    "| {} | {:.1} | {} | {} | {} | {} ({:.0}%) | {:.1} |",
+                    "| {} | {} | {} | {} | {} | {} ({:.0}%) | {:.1} |",
                     language.language,
-                    language.score,
-                    language.grade,
+                    score,
+                    grade,
                     language.file_count,
                     language.code_lines,
                     language.confidence.level,
@@ -1043,6 +1071,28 @@ mod tests {
     }
 
     #[test]
+    fn low_confidence_health_is_labeled_as_an_estimate() {
+        let result = make_test_result();
+        let model = crate::insight::scoring::default::DefaultModel::without_duplication();
+        let report = crate::insight::health::score(&result, &model, 10);
+        let mut buffer = Vec::new();
+
+        MarkdownOutput::new()
+            .write(
+                &Report::Health(report),
+                &OutputOptions::default(),
+                &mut buffer,
+            )
+            .unwrap();
+
+        let markdown = String::from_utf8(buffer).unwrap();
+        assert!(markdown.contains("**Project Assessment:** Insufficient data"));
+        assert!(markdown.contains("**Estimated score:**"));
+        assert!(markdown.contains("Insufficient data"));
+        assert!(!markdown.contains("**Project Score:**"));
+    }
+
+    #[test]
     fn test_health_comparison_uses_joint_model_score_and_marks_new_files() {
         let report = HealthReport {
             score: 99.0,
@@ -1053,6 +1103,7 @@ mod tests {
             worst_files: vec![],
             scope: crate::insight::health::HealthScope::Production,
             confidence: Default::default(),
+            assessment: Default::default(),
             tail_risk: Default::default(),
             by_language: vec![],
             test_health: None,

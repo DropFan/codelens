@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::analyzer::stats::{AnalysisResult, FileStats};
+use crate::analyzer::stats::{AnalysisResult, FileStats, RegionStats};
 use crate::insight::scoring::{HealthDimension, HealthScoringFlow, RawMetrics, ScoringModel};
 use crate::insight::Grade;
 
@@ -105,6 +105,23 @@ impl Default for Confidence {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HealthAssessment {
+    #[default]
+    Scored,
+    InsufficientData,
+}
+
+impl std::fmt::Display for HealthAssessment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Scored => "scored",
+            Self::InsufficientData => "insufficient-data",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct TailRisk {
     pub tail_score: f64,
@@ -132,6 +149,7 @@ pub struct LanguageHealth {
     pub file_count: usize,
     pub code_lines: usize,
     pub confidence: Confidence,
+    pub assessment: HealthAssessment,
     pub dimensions: Vec<DimensionScore>,
     pub tail_risk: TailRisk,
 }
@@ -143,6 +161,7 @@ pub struct TestHealth {
     pub file_count: usize,
     pub code_lines: usize,
     pub confidence: Confidence,
+    pub assessment: HealthAssessment,
     pub tail_risk: TailRisk,
 }
 
@@ -156,6 +175,7 @@ pub struct HealthReport {
     pub worst_files: Vec<FileHealth>,
     pub scope: HealthScope,
     pub confidence: Confidence,
+    pub assessment: HealthAssessment,
     pub tail_risk: TailRisk,
     pub by_language: Vec<LanguageHealth>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -354,6 +374,18 @@ fn comparable_results(
         return (baseline, current);
     }
 
+    // Region-aware and legacy snapshots must not be compared using different
+    // production/test boundaries. Fall back to full-file data on both sides
+    // unless both analyses explicitly support the projection.
+    if !(baseline.summary.inline_test_regions_scanned
+        && current.summary.inline_test_regions_scanned)
+    {
+        baseline.summary.inline_test_regions_scanned = false;
+        current.summary.inline_test_regions_scanned = false;
+        baseline.summary.health_regions.clear();
+        current.summary.health_regions.clear();
+    }
+
     let functions_available = baseline
         .files
         .iter()
@@ -378,6 +410,21 @@ fn comparable_results(
             }
             if !control_flow_available {
                 file.complexity.control_flow_measured = false;
+            }
+        }
+        for regions in baseline
+            .summary
+            .health_regions
+            .values_mut()
+            .chain(current.summary.health_regions.values_mut())
+        {
+            for region in [&mut regions.production, &mut regions.tests] {
+                if !functions_available {
+                    region.complexity.functions_measured = false;
+                }
+                if !control_flow_available {
+                    region.complexity.control_flow_measured = false;
+                }
             }
         }
     }
@@ -496,7 +543,7 @@ fn score_legacy(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize)
         return empty_report(model);
     }
 
-    let files: Vec<&FileStats> = result.files.iter().collect();
+    let files = deduplicated_files(&result.files);
     let mut scored: Vec<ScoredFile<'_>> = files
         .iter()
         .map(|file| ScoredFile {
@@ -552,6 +599,7 @@ fn score_legacy(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize)
             .collect(),
         scope: HealthScope::LegacyAll,
         confidence: aggregate_confidence(&scored_refs),
+        assessment: HealthAssessment::Scored,
         tail_risk: tail_risk(&scored_refs),
         by_language,
         test_health: test_health(&test_files, model, true),
@@ -560,25 +608,15 @@ fn score_legacy(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize)
 }
 
 fn score_v2(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) -> HealthReport {
-    let code = code_files(&result.files);
-    if code.is_empty() {
+    let (production, tests) = v2_scoring_files(result);
+    if production.is_empty() && tests.is_empty() {
         return empty_report(model);
     }
 
-    let production: Vec<&FileStats> = code
-        .iter()
-        .copied()
-        .filter(|file| !crate::analyzer::test_code::is_test_path(&file.path))
-        .collect();
-    let tests: Vec<&FileStats> = code
-        .iter()
-        .copied()
-        .filter(|file| crate::analyzer::test_code::is_test_path(&file.path))
-        .collect();
     let (scope, primary) = if production.is_empty() {
-        (HealthScope::TestsOnly, tests.as_slice())
+        (HealthScope::TestsOnly, &tests)
     } else {
-        (HealthScope::Production, production.as_slice())
+        (HealthScope::Production, &production)
     };
 
     let mut scored: Vec<ScoredFile<'_>> = primary
@@ -588,7 +626,8 @@ fn score_v2(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) -> 
     scored.sort_by(file_score_order);
     let scored_refs: Vec<&ScoredFile<'_>> = scored.iter().collect();
     let by_language = language_healths(&scored_refs, model);
-    let (project_score, project_confidence) = language_weighted_summary(&by_language);
+    let project_score = aggregate_file_scores(&scored_refs);
+    let project_confidence = aggregate_confidence(&scored_refs);
     let mut by_directory = directory_healths(&scored_refs, model);
     by_directory.sort_by(directory_score_order);
 
@@ -611,6 +650,7 @@ fn score_v2(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) -> 
             .collect(),
         scope,
         confidence: project_confidence,
+        assessment: assessment_for(model.health_scoring_flow(), project_confidence),
         tail_risk: tail_risk(&scored_refs),
         by_language,
         test_health: test_health(&test_refs, model, false),
@@ -618,7 +658,52 @@ fn score_v2(result: &AnalysisResult, model: &dyn ScoringModel, top_n: usize) -> 
     }
 }
 
+/// Materialize the logical files v2 scores. Full-file data remains the
+/// fallback for old snapshots and for languages/files without an inline
+/// test projection.
+fn v2_scoring_files(result: &AnalysisResult) -> (Vec<FileStats>, Vec<FileStats>) {
+    let mut production = Vec::new();
+    let mut tests = Vec::new();
+
+    for file in code_files(&result.files) {
+        if crate::analyzer::test_code::is_test_path(&file.path) {
+            tests.push(file.clone());
+            continue;
+        }
+
+        let regions = result
+            .summary
+            .inline_test_regions_scanned
+            .then(|| result.summary.health_regions.get(&file.path))
+            .flatten();
+        if let Some(regions) = regions {
+            if regions.production.lines.code > 0 {
+                production.push(project_region(file, &regions.production));
+            }
+            if regions.tests.lines.code > 0 {
+                tests.push(project_region(file, &regions.tests));
+            }
+        } else {
+            production.push(file.clone());
+        }
+    }
+
+    (production, tests)
+}
+
+fn project_region(file: &FileStats, region: &RegionStats) -> FileStats {
+    FileStats {
+        path: file.path.clone(),
+        language: file.language.clone(),
+        lines: region.lines.clone(),
+        size: region.size,
+        duplicate_lines: region.duplicate_lines,
+        complexity: region.complexity.clone(),
+    }
+}
+
 fn empty_report(model: &dyn ScoringModel) -> HealthReport {
+    let confidence = Confidence::from_coverage(0.0);
     HealthReport {
         score: 0.0,
         grade: Grade::F,
@@ -627,7 +712,8 @@ fn empty_report(model: &dyn ScoringModel) -> HealthReport {
         by_directory: Vec::new(),
         worst_files: Vec::new(),
         scope: HealthScope::Empty,
-        confidence: Confidence::from_coverage(0.0),
+        confidence,
+        assessment: assessment_for(model.health_scoring_flow(), confidence),
         tail_risk: TailRisk::default(),
         by_language: Vec::new(),
         test_health: None,
@@ -776,26 +862,12 @@ fn combine_v2_dimensions(dimensions: &[MeasuredDimension]) -> f64 {
     if total_weight == 0.0 {
         return 0.0;
     }
-    let base_score = dimensions
+    (dimensions
         .iter()
         .map(|dimension| dimension.score * dimension.weight)
         .sum::<f64>()
-        / total_weight;
-    let core_floor = dimensions
-        .iter()
-        .filter(|dimension| {
-            matches!(
-                dimension.dimension,
-                HealthDimension::Complexity
-                    | HealthDimension::FuncSize
-                    | HealthDimension::FileSize
-                    | HealthDimension::Duplication
-            )
-        })
-        .map(|dimension| dimension.score)
-        .min_by(f64::total_cmp)
-        .unwrap_or(base_score);
-    (0.85 * base_score + 0.15 * core_floor).clamp(0.0, 100.0)
+        / total_weight)
+        .clamp(0.0, 100.0)
 }
 
 fn restored_gain(dimensions: &[MeasuredDimension], index: usize, current: f64) -> f64 {
@@ -848,15 +920,21 @@ const NON_CODE_LANGUAGES: &[&str] = &[
 ];
 
 fn code_files(files: &[FileStats]) -> Vec<&FileStats> {
-    let mut seen = HashSet::new();
-    files
-        .iter()
+    deduplicated_files(files)
+        .into_iter()
         .filter(|file| {
             !NON_CODE_LANGUAGES
                 .iter()
                 .any(|language| file.language.eq_ignore_ascii_case(language))
-                && seen.insert(normalized_path(&file.path))
         })
+        .collect()
+}
+
+fn deduplicated_files(files: &[FileStats]) -> Vec<&FileStats> {
+    let mut seen = HashSet::new();
+    files
+        .iter()
+        .filter(|file| seen.insert(normalized_path(&file.path)))
         .collect()
 }
 
@@ -905,16 +983,34 @@ fn tail_risk(files: &[&ScoredFile<'_>]) -> TailRisk {
     if files.is_empty() {
         return TailRisk::default();
     }
-    let mut scores: Vec<f64> = files.iter().map(|file| file.health.score).collect();
-    scores.sort_by(f64::total_cmp);
-    let tail_count = scores.len().div_ceil(10).max(1);
-    let tail_score = scores.iter().take(tail_count).sum::<f64>() / tail_count as f64;
-    let failing_files = scores.iter().filter(|score| **score < 60.0).count();
+    let mut ordered = files.to_vec();
+    ordered.sort_by(|left, right| file_score_order(left, right));
+    let total_weight: f64 = ordered.iter().map(|file| center_weight(file.file)).sum();
+    let tail_weight = total_weight * 0.10;
+    let mut remaining = tail_weight;
+    let mut tail_sum = 0.0;
+    for file in &ordered {
+        if remaining <= 0.0 {
+            break;
+        }
+        let taken = center_weight(file.file).min(remaining);
+        tail_sum += file.health.score * taken;
+        remaining -= taken;
+    }
+    let tail_score = if tail_weight > 0.0 {
+        tail_sum / tail_weight
+    } else {
+        0.0
+    };
+    let failing_files = ordered
+        .iter()
+        .filter(|file| file.health.score < 60.0)
+        .count();
     TailRisk {
         tail_score,
         failing_files,
-        failing_ratio: failing_files as f64 / scores.len() as f64,
-        worst_score: scores[0],
+        failing_ratio: failing_files as f64 / ordered.len() as f64,
+        worst_score: ordered[0].health.score,
     }
 }
 
@@ -924,6 +1020,14 @@ fn aggregate_confidence(files: &[&ScoredFile<'_>]) -> Confidence {
             .iter()
             .map(|file| (file.confidence, center_weight(file.file))),
     ))
+}
+
+fn assessment_for(flow: HealthScoringFlow, confidence: Confidence) -> HealthAssessment {
+    if flow == HealthScoringFlow::FileFirstV2 && confidence.coverage < 0.60 {
+        HealthAssessment::InsufficientData
+    } else {
+        HealthAssessment::Scored
+    }
 }
 
 fn aggregate_dimensions(
@@ -980,7 +1084,7 @@ fn aggregate_file_scores(files: &[&ScoredFile<'_>]) -> f64 {
             .iter()
             .map(|file| (file.health.score, center_weight(file.file))),
     );
-    0.85 * center + 0.15 * tail_risk(files).tail_score
+    0.90 * center + 0.10 * tail_risk(files).tail_score
 }
 
 fn language_healths(files: &[&ScoredFile<'_>], model: &dyn ScoringModel) -> Vec<LanguageHealth> {
@@ -992,13 +1096,15 @@ fn language_healths(files: &[&ScoredFile<'_>], model: &dyn ScoringModel) -> Vec<
         .into_iter()
         .map(|(language, files)| {
             let score = aggregate_file_scores(&files);
+            let confidence = aggregate_confidence(&files);
             LanguageHealth {
                 language: language.to_string(),
                 score,
                 grade: model.grade(score),
                 file_count: files.len(),
                 code_lines: files.iter().map(|file| file.file.lines.code).sum(),
-                confidence: aggregate_confidence(&files),
+                confidence,
+                assessment: assessment_for(model.health_scoring_flow(), confidence),
                 dimensions: aggregate_dimensions(&files, model),
                 tail_risk: tail_risk(&files),
             }
@@ -1034,6 +1140,7 @@ fn legacy_language_healths(
                 file_count: scored.len(),
                 code_lines: scored.iter().map(|file| file.file.lines.code).sum(),
                 confidence: aggregate_confidence(&scored),
+                assessment: HealthAssessment::Scored,
                 dimensions: score_dimensions(&metrics, model),
                 tail_risk: tail_risk(&scored),
             }
@@ -1046,28 +1153,6 @@ fn legacy_language_healths(
             .then_with(|| left.language.cmp(&right.language))
     });
     languages
-}
-
-fn language_weighted_summary(languages: &[LanguageHealth]) -> (f64, Confidence) {
-    let total_code: usize = languages.iter().map(|language| language.code_lines).sum();
-    let weight = |language: &LanguageHealth| {
-        if total_code > 0 {
-            language.code_lines as f64
-        } else {
-            language.file_count as f64
-        }
-    };
-    let score = weighted_average(
-        languages
-            .iter()
-            .map(|language| (language.score, weight(language))),
-    );
-    let confidence = weighted_average(
-        languages
-            .iter()
-            .map(|language| (language.confidence.coverage, weight(language))),
-    );
-    (score, Confidence::from_coverage(confidence))
 }
 
 fn directory_healths(files: &[&ScoredFile<'_>], model: &dyn ScoringModel) -> Vec<DirectoryHealth> {
@@ -1098,8 +1183,7 @@ fn directory_healths(files: &[&ScoredFile<'_>], model: &dyn ScoringModel) -> Vec
     directories
         .into_iter()
         .map(|(path, files)| {
-            let languages = language_healths(&files, model);
-            let (score, _) = language_weighted_summary(&languages);
+            let score = aggregate_file_scores(&files);
             DirectoryHealth {
                 path,
                 score,
@@ -1122,15 +1206,20 @@ fn test_health(
         let raw_files: Vec<&FileStats> = files.iter().map(|file| file.file).collect();
         model.total_score(&RawMetrics::from_file_refs_legacy(&raw_files))
     } else {
-        let languages = language_healths(files, model);
-        language_weighted_summary(&languages).0
+        aggregate_file_scores(files)
     };
+    let confidence = aggregate_confidence(files);
     Some(TestHealth {
         score,
         grade: model.grade(score),
         file_count: files.len(),
         code_lines: files.iter().map(|file| file.file.lines.code).sum(),
-        confidence: aggregate_confidence(files),
+        confidence,
+        assessment: if legacy {
+            HealthAssessment::Scored
+        } else {
+            assessment_for(model.health_scoring_flow(), confidence)
+        },
         tail_risk: tail_risk(files),
     })
 }
@@ -1163,7 +1252,9 @@ fn common_parent(files: &[&FileStats]) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::stats::{Complexity, FileStats, LineStats, Summary};
+    use crate::analyzer::stats::{
+        Complexity, FileStats, HealthRegions, LineStats, RegionStats, Summary,
+    };
     use crate::insight::scoring::default::DefaultModel;
     use crate::insight::scoring::legacy::LegacyModel;
     use crate::insight::scoring::{DimensionWeight, HealthScoringFlow};
@@ -1370,6 +1461,25 @@ mod tests {
         }
     }
 
+    fn direct_score_region(score: usize, code_lines: usize) -> RegionStats {
+        RegionStats {
+            lines: LineStats {
+                total: code_lines,
+                code: code_lines,
+                comment: 0,
+                blank: 0,
+            },
+            size: code_lines as u64,
+            duplicate_lines: 0,
+            complexity: Complexity {
+                functions_measured: true,
+                functions: 1,
+                avg_func_lines: score as f64,
+                ..Complexity::default()
+            },
+        }
+    }
+
     #[test]
     fn legacy_model_reproduces_historical_non_empty_score() {
         let report = score(&make_test_result(), &LegacyModel::new(), 10);
@@ -1377,6 +1487,30 @@ mod tests {
         assert_eq!(report.model, "default");
         assert_eq!(report.scope, HealthScope::LegacyAll);
         assert!((report.score - 80.153_333).abs() < 0.01, "{}", report.score);
+    }
+
+    #[test]
+    fn legacy_flow_deduplicates_normalized_paths() {
+        let original = make_test_result();
+        let expected = score(&original, &LegacyModel::new(), 10);
+        let mut duplicated = original.clone();
+        let mut duplicate = duplicated.files[0].clone();
+        duplicate.path = PathBuf::from("./src/good.rs");
+        duplicated.files.push(duplicate);
+
+        let actual = score(&duplicated, &LegacyModel::new(), 10);
+
+        assert!((actual.score - expected.score).abs() < 0.01);
+        assert_eq!(actual.worst_files.len(), expected.worst_files.len());
+        assert_eq!(
+            actual
+                .by_directory
+                .iter()
+                .find(|directory| directory.path == Path::new("src"))
+                .unwrap()
+                .file_count,
+            2
+        );
     }
 
     #[test]
@@ -1431,7 +1565,7 @@ mod tests {
             &DirectScoreV2Model,
             200,
         );
-        assert!((report.score - 88.59).abs() < 0.01, "{}", report.score);
+        assert!((report.score - 88.86).abs() < 0.01, "{}", report.score);
 
         let mut ten = vec![("src/bad.rs", "Rust", 30)];
         let names: Vec<String> = (0..9).map(|index| format!("src/ok-{index}.rs")).collect();
@@ -1439,7 +1573,11 @@ mod tests {
             ten.push((name.as_str(), "Rust", 90));
         }
         let report = score(&result_with_direct_scores(&ten), &DirectScoreV2Model, 20);
-        assert!((report.score - 75.9).abs() < 0.01, "{}", report.score);
+        assert!((report.score - 78.6).abs() < 0.01, "{}", report.score);
+
+        ten.push(("src/new-good.rs", "Rust", 90));
+        let report = score(&result_with_direct_scores(&ten), &DirectScoreV2Model, 20);
+        assert!((report.score - 79.636_364).abs() < 0.01, "{}", report.score);
     }
 
     #[test]
@@ -1458,6 +1596,70 @@ mod tests {
     }
 
     #[test]
+    fn v2_separates_inline_test_regions_from_the_same_file() {
+        let mut result = result_with_direct_scores(&[("src/lib.rs", "Rust", 60)]);
+        result.summary.inline_test_regions_scanned = true;
+        result.summary.health_regions.insert(
+            PathBuf::from("src/lib.rs"),
+            HealthRegions {
+                production: direct_score_region(90, 80),
+                tests: direct_score_region(30, 20),
+            },
+        );
+
+        let report = score(&result, &DirectScoreV2Model, 10);
+
+        assert_eq!(report.scope, HealthScope::Production);
+        assert!((report.score - 90.0).abs() < 0.01);
+        assert_eq!(report.worst_files[0].path, Path::new("src/lib.rs"));
+        let tests = report.test_health.unwrap();
+        assert!((tests.score - 30.0).abs() < 0.01);
+        assert_eq!(tests.file_count, 1);
+        assert_eq!(tests.code_lines, 20);
+    }
+
+    #[test]
+    fn legacy_scoring_ignores_inline_test_regions() {
+        let mut result = make_test_result();
+        let expected = score(&result, &LegacyModel::new(), 10);
+        result.summary.inline_test_regions_scanned = true;
+        result.summary.health_regions.insert(
+            result.files[0].path.clone(),
+            HealthRegions {
+                production: direct_score_region(1, 1),
+                tests: direct_score_region(1, 1),
+            },
+        );
+
+        let actual = score(&result, &LegacyModel::new(), 10);
+
+        assert!((actual.score - expected.score).abs() < 0.000_001);
+        assert_eq!(actual.scope, HealthScope::LegacyAll);
+        assert_eq!(actual.assessment, HealthAssessment::Scored);
+    }
+
+    #[test]
+    fn baseline_comparison_uses_regions_only_when_both_sides_support_them() {
+        let baseline = result_with_direct_scores(&[("src/lib.rs", "Rust", 60)]);
+        let mut current = baseline.clone();
+        current.summary.inline_test_regions_scanned = true;
+        current.summary.health_regions.insert(
+            PathBuf::from("src/lib.rs"),
+            HealthRegions {
+                production: direct_score_region(90, 80),
+                tests: direct_score_region(30, 20),
+            },
+        );
+
+        let (baseline, current) = comparable_results(&baseline, &current, &DirectScoreV2Model);
+
+        assert!(!baseline.summary.inline_test_regions_scanned);
+        assert!(!current.summary.inline_test_regions_scanned);
+        assert!(baseline.summary.health_regions.is_empty());
+        assert!(current.summary.health_regions.is_empty());
+    }
+
+    #[test]
     fn v2_uses_tests_as_main_scope_only_when_no_production_exists() {
         let result = result_with_direct_scores(&[("tests/regression.rs", "Rust", 30)]);
         let report = score(&result, &DirectScoreV2Model, 10);
@@ -1467,7 +1669,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_project_score_weights_language_scores_by_code_lines() {
+    fn v2_project_score_aggregates_files_directly_across_languages() {
         let mut result = result_with_direct_scores(&[
             ("src/main.rs", "Rust", 90),
             ("src/helper.ts", "TypeScript", 30),
@@ -1477,8 +1679,21 @@ mod tests {
 
         let report = score(&result, &DirectScoreV2Model, 10);
 
-        assert!((report.score - 84.0).abs() < 0.01, "{}", report.score);
+        assert!((report.score - 70.5).abs() < 0.01, "{}", report.score);
         assert_eq!(report.by_language.len(), 2);
+    }
+
+    #[test]
+    fn v2_file_score_is_the_weighted_dimension_mean() {
+        let result = make_test_result();
+        let health = score_file(&result.files[1], &DefaultModel::new());
+        let expected = health
+            .dimensions
+            .iter()
+            .map(|dimension| dimension.score * dimension.weight)
+            .sum::<f64>();
+
+        assert!((health.score - expected).abs() < 0.000_001);
     }
 
     #[test]
@@ -1508,6 +1723,14 @@ mod tests {
         let report = score(&result, &DefaultModel::without_duplication(), 10);
 
         assert_eq!(report.confidence.level, ConfidenceLevel::Low);
+        assert_eq!(report.assessment, HealthAssessment::InsufficientData);
+        assert_eq!(
+            report.by_language[0].assessment,
+            HealthAssessment::InsufficientData
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["assessment"], "insufficient-data");
+        assert_eq!(json["by_language"][0]["assessment"], "insufficient-data");
         assert!(report.worst_files[0]
             .dimensions
             .iter()

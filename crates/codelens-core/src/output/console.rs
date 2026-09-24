@@ -7,6 +7,7 @@ use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement
 
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
+use crate::insight::health::HealthAssessment;
 
 use super::format::{OutputFormat, OutputOptions, Report};
 
@@ -445,23 +446,33 @@ impl ConsoleOutput {
         writeln!(writer)?;
 
         // Project score and grade
-        let grade_color = Self::grade_color(report.grade);
-        let grade_str = report.grade.to_string();
-        let colored_grade = match grade_color {
-            Color::Green => grade_str.green().bold().to_string(),
-            Color::Cyan => grade_str.cyan().bold().to_string(),
-            Color::Yellow => grade_str.yellow().bold().to_string(),
-            Color::Red => grade_str.red().bold().to_string(),
-            Color::DarkRed => grade_str.red().bold().to_string(),
-            _ => grade_str.bold().to_string(),
-        };
-        writeln!(
-            writer,
-            "  Project Score: {}  Grade: {}  Model: {}",
-            format!("{:.1}", report.score).bold(),
-            colored_grade,
-            report.model,
-        )?;
+        if report.assessment == HealthAssessment::InsufficientData {
+            writeln!(
+                writer,
+                "  Project Assessment: {}  Estimated Score: {}  Model: {}",
+                "INSUFFICIENT DATA".yellow().bold(),
+                format!("{:.1}", report.score).bold(),
+                report.model,
+            )?;
+        } else {
+            let grade_color = Self::grade_color(report.grade);
+            let grade_str = report.grade.to_string();
+            let colored_grade = match grade_color {
+                Color::Green => grade_str.green().bold().to_string(),
+                Color::Cyan => grade_str.cyan().bold().to_string(),
+                Color::Yellow => grade_str.yellow().bold().to_string(),
+                Color::Red => grade_str.red().bold().to_string(),
+                Color::DarkRed => grade_str.red().bold().to_string(),
+                _ => grade_str.bold().to_string(),
+            };
+            writeln!(
+                writer,
+                "  Project Score: {}  Grade: {}  Model: {}",
+                format!("{:.1}", report.score).bold(),
+                colored_grade,
+                report.model,
+            )?;
+        }
         writeln!(
             writer,
             "  Scope: {}  Confidence: {} ({:.0}%)  Tail 10%: {:.1}  F files: {} ({:.1}%)",
@@ -473,15 +484,26 @@ impl ConsoleOutput {
             report.tail_risk.failing_ratio * 100.0,
         )?;
         if let Some(test_health) = &report.test_health {
-            writeln!(
-                writer,
-                "  Test Code: {:.1} ({})  Files: {}  Confidence: {} ({:.0}%)",
-                test_health.score,
-                test_health.grade,
-                test_health.file_count,
-                test_health.confidence.level,
-                test_health.confidence.coverage * 100.0,
-            )?;
+            if test_health.assessment == HealthAssessment::InsufficientData {
+                writeln!(
+                    writer,
+                    "  Test Code: Insufficient data (estimated score: {:.1})  Files: {}  Confidence: {} ({:.0}%)",
+                    test_health.score,
+                    test_health.file_count,
+                    test_health.confidence.level,
+                    test_health.confidence.coverage * 100.0,
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "  Test Code: {:.1} ({})  Files: {}  Confidence: {} ({:.0}%)",
+                    test_health.score,
+                    test_health.grade,
+                    test_health.file_count,
+                    test_health.confidence.level,
+                    test_health.confidence.coverage * 100.0,
+                )?;
+            }
         }
         writeln!(writer)?;
 
@@ -622,10 +644,19 @@ impl ConsoleOutput {
                 Cell::new("Tail 10%").add_attribute(Attribute::Bold),
             ]);
             for language in &report.by_language {
+                let insufficient = language.assessment == HealthAssessment::InsufficientData;
                 language_table.add_row(vec![
                     Cell::new(&language.language).fg(Color::Cyan),
-                    Cell::new(format!("{:.1}", language.score)),
-                    Cell::new(language.grade.to_string()).fg(Self::grade_color(language.grade)),
+                    Cell::new(if insufficient {
+                        format!("est. {:.1}", language.score)
+                    } else {
+                        format!("{:.1}", language.score)
+                    }),
+                    if insufficient {
+                        Cell::new("Insufficient data").fg(Color::Yellow)
+                    } else {
+                        Cell::new(language.grade.to_string()).fg(Self::grade_color(language.grade))
+                    },
                     Cell::new(Self::format_number(language.file_count)),
                     Cell::new(Self::format_number(language.code_lines)),
                     Cell::new(format!(
@@ -1428,6 +1459,28 @@ mod tests {
     }
 
     #[test]
+    fn low_confidence_health_is_labeled_as_an_estimate() {
+        let result = make_result();
+        let model = crate::insight::scoring::default::DefaultModel::without_duplication();
+        let report = crate::insight::health::score(&result, &model, 10);
+        let options = OutputOptions {
+            colorize: false,
+            ..Default::default()
+        };
+        let mut buffer = Vec::new();
+
+        ConsoleOutput::new()
+            .write(&Report::Health(report), &options, &mut buffer)
+            .unwrap();
+
+        let text = String::from_utf8(buffer).unwrap();
+        assert!(text.contains("Project Assessment: INSUFFICIENT DATA"));
+        assert!(text.contains("Estimated Score:"));
+        assert!(text.contains("Insufficient data"));
+        assert!(!text.contains("Project Score:"));
+    }
+
+    #[test]
     fn test_health_comparison_uses_joint_model_score_and_marks_new_files() {
         let report = HealthReport {
             score: 99.0,
@@ -1438,6 +1491,7 @@ mod tests {
             worst_files: vec![],
             scope: crate::insight::health::HealthScope::Production,
             confidence: Default::default(),
+            assessment: Default::default(),
             tail_risk: Default::default(),
             by_language: vec![],
             test_health: None,

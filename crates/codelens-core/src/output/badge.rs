@@ -184,6 +184,7 @@ mod tests {
             worst_files: vec![],
             scope: crate::insight::health::HealthScope::Production,
             confidence: Default::default(),
+            assessment: Default::default(),
             tail_risk: Default::default(),
             by_language: vec![],
             test_health: None,

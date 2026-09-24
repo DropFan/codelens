@@ -101,37 +101,13 @@ impl ScoringModel for DefaultModel {
         if total_weight == 0.0 {
             return 0.0;
         }
-        let scores: Vec<(HealthDimension, f64, f64)> = self
+        (self
             .dimensions
             .iter()
-            .map(|dimension| {
-                (
-                    dimension.dimension,
-                    self.score_dimension(dimension.dimension, metrics),
-                    dimension.weight,
-                )
-            })
-            .collect();
-        let base = scores
-            .iter()
-            .map(|(_, score, weight)| score * weight)
+            .map(|dimension| self.score_dimension(dimension.dimension, metrics) * dimension.weight)
             .sum::<f64>()
-            / total_weight;
-        let core_floor = scores
-            .iter()
-            .filter(|(dimension, _, _)| {
-                matches!(
-                    dimension,
-                    HealthDimension::Complexity
-                        | HealthDimension::FuncSize
-                        | HealthDimension::FileSize
-                        | HealthDimension::Duplication
-                )
-            })
-            .map(|(_, score, _)| *score)
-            .min_by(f64::total_cmp)
-            .unwrap_or(base);
-        (0.85 * base + 0.15 * core_floor).clamp(0.0, 100.0)
+            / total_weight)
+            .clamp(0.0, 100.0)
     }
 }
 
@@ -419,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn test_severe_weighted_dimension_cannot_hide_in_an_a_grade() {
+    fn test_total_score_uses_declared_weights_once() {
         let metrics = RawMetrics {
             avg_cyclomatic: 2.0,
             avg_func_lines: 10.0,
@@ -432,8 +408,8 @@ mod tests {
 
         let score = DefaultModel::new().total_score(&metrics);
         assert!(
-            score < 70.0,
-            "severe duplication must be visible, got {score}"
+            (score - 80.2).abs() < 0.01,
+            "duplication must contribute exactly its declared 20% weight, got {score}"
         );
     }
 }
