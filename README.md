@@ -78,24 +78,28 @@ gates keep their established scores. It aggregates raw metrics across all
 analyzed files with the original weights, curves, function matcher, and
 bracket-depth behavior.
 
-The opt-in `v2` pipeline scores each production file first. A file score is
-85% weighted dimensions plus 15% from its weakest reliable core dimension.
-Language and directory scores combine an `sqrt(code lines)` weighted center
-with the worst 10% of their files, using an 85/15 split. The project score then
-weights language scores by production code lines. Test code is reported
-separately; documentation and data formats do not affect the main score.
-Unavailable measurements are omitted and the remaining weights are
-renormalized, with confidence showing how much of the configured model was
-actually measured. New analyses retain both v1 and v2 complexity inputs;
-snapshots created before this feature fall back to their original metrics. v1
-and v2 scores are intentionally not comparable, so use the same version on both
-sides of a baseline and rebuild saved baselines when migrating.
+The opt-in `v2` pipeline scores each production file once using the weighted
+mean of the dimensions that can actually be measured. Project, language,
+directory, and test summaries each combine an `sqrt(code lines)` weighted
+center (90%) with a continuous worst-10%-by-weight tail (10%); every scope is
+calculated directly from file scores, so penalties are not compounded through
+language or directory summaries. Path-based tests and configured inline Rust
+and Zig test blocks are reported separately; documentation and data formats do
+not affect the main score. Unavailable measurements are omitted and the
+remaining weights are renormalized. Confidence shows how much of the configured
+model was measured, and v2 results below 60% coverage are explicitly marked
+`insufficient-data` with the numeric value retained only as an estimate. New
+analyses retain both v1 and v2 inputs; old snapshots fall back to full-file
+metrics, and baseline comparisons use inline regions only when both sides
+support them. v1 and v2 scores are intentionally not comparable, so use the
+same version on both sides of a baseline and rebuild saved baselines when
+migrating.
 
 ```bash
 codelens health .               # Project, directory, and file-level report
 codelens health . --top 20      # Show top 20 worst files
 codelens health . -f json       # Output as JSON
-codelens health . --health-model v2   # Use the multilingual algorithm
+codelens health . --health-model v2   # Use file-first, language-aware scoring
 codelens health . --fail-under B   # CI gate: exit 1 if health is below B
 codelens health . --baseline main --fail-on-regression   # regression gate
 ```
@@ -320,7 +324,7 @@ git_info = true
 # Skip line-duplication analysis (health score omits the duplication dimension)
 no_dup_scan = true
 
-# Health scoring pipeline: "v1" (default) or "v2" (multilingual, opt-in)
+# Health scoring pipeline: "v1" (default) or "v2" (file-first, opt-in)
 health_model = "v2"
 
 # Custom language definitions (relative paths resolve against this file's directory)
@@ -337,9 +341,11 @@ overriding a built-in language, restate every field you still need
 stops those files from being detected at all. The built-in
 [languages.toml](crates/codelens-core/languages.toml) shows all fields in
 use, including `string_delimiters` for accurate string/comment parsing.
-`function_pattern` and `complexity_keywords` are validated when the file
-loads; an invalid regex is a hard error rather than silently disabling
-function and complexity analysis.
+`function_pattern`, `complexity_keywords`, and optional
+`inline_test_patterns` are validated when the file loads; an invalid regex is
+a hard error rather than silently disabling analysis. Each inline-test pattern
+must match through the block's opening `{`; codelens then finds the matching
+closing brace after masking comments and strings.
 
 ```toml
 # my-langs.toml
@@ -354,6 +360,8 @@ block_comments = [["/*", "*/"]]   # [open, close] pairs
 nested_comments = false           # true if /* /* */ */ nests
 function_pattern = "(?m)^\\s*def\\s+\\w+"
 complexity_keywords = ["if", "elif", "else", "for", "while"]
+# Optional v2-only production/test split for block-based inline tests
+inline_test_patterns = ["(?m)^\\s*test\\s+\\w+\\s*\\{"]
 
 # Overriding a built-in language: the whole definition is replaced, so
 # copy the fields you want to keep from the built-in languages.toml.

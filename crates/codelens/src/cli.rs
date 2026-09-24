@@ -45,9 +45,10 @@ pub enum Command {
     /// Analyze code health score.
     #[command(long_about = "Score code health across complexity, function size, \
         comment ratio, file size, nesting depth, and line duplication (skipped with \
-        --no-dup-scan). Reports at project, directory, and file \
-        levels with grades from A (best) to F (worst). Use --top to control how many items \
-        are shown per level.")]
+        --no-dup-scan). V1 is the compatibility default; v2 scores files first, separates \
+        supported inline tests, and marks results below 60% measurement coverage as \
+        insufficient data. Reports at project, language, directory, and file levels. \
+        Use --top to control how many items are shown per level.")]
     Health(HealthArgs),
     /// Detect change hotspots (churn x complexity).
     #[command(
@@ -469,8 +470,9 @@ pub struct AdvancedArgs {
     pub no_dup_scan: bool,
 
     /// Health scoring pipeline used by the default report, health, diff,
-    /// and MCP. V1 remains the default for compatibility; use v2 for the
-    /// multilingual scoring pipeline. Other subcommands are unaffected.
+    /// and MCP. V1 remains the default for compatibility; v2 scores files
+    /// first, separates supported inline tests, and reports measurement
+    /// confidence. Other subcommands are unaffected.
     #[arg(long, global = true, value_enum, value_name = "VERSION")]
     pub health_model: Option<HealthModelArg>,
 
@@ -596,7 +598,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens health .\x1b[0m               \x1b[2m# Health report for current directory\x1b[0m
   \x1b[1;36mcodelens health src -f json\x1b[0m     \x1b[2m# Health report in JSON format\x1b[0m
   \x1b[1;36mcodelens health . --top 20\x1b[0m      \x1b[2m# Show top 20 worst files/directories\x1b[0m
-  \x1b[1;36mcodelens health . --health-model v2\x1b[0m  \x1b[2m# Use multilingual scoring\x1b[0m
+  \x1b[1;36mcodelens health . --health-model v2\x1b[0m  \x1b[2m# Use file-first scoring\x1b[0m
 
 \x1b[1;32mHotspot\x1b[0m \x1b[2m(churn x complexity):\x1b[0m
   \x1b[1;36mcodelens hotspot .\x1b[0m              \x1b[2m# Hotspots in last 90 days (default)\x1b[0m
@@ -613,7 +615,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens diff main\x1b[0m              \x1b[2m# main vs working tree\x1b[0m
   \x1b[1;36mcodelens diff v1.0..v2.0\x1b[0m        \x1b[2m# Two refs\x1b[0m
   \x1b[1;36mcodelens diff main --fail-on-regression\x1b[0m  \x1b[2m# Gate CI on health regressions\x1b[0m
-  \x1b[1;36mcodelens diff main --health-model v2\x1b[0m  \x1b[2m# Compare with multilingual scoring\x1b[0m
+  \x1b[1;36mcodelens diff main --health-model v2\x1b[0m  \x1b[2m# Compare with file-first scoring\x1b[0m
 
 \x1b[1;32mTrend\x1b[0m \x1b[2m(snapshot comparison):\x1b[0m
   \x1b[1;36mcodelens trend --save\x1b[0m           \x1b[2m# Save a snapshot\x1b[0m
