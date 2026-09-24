@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::error::Result;
-use crate::language::LanguageRegistry;
+use crate::language::{Language, LanguageRegistry};
 
 use super::complexity::ComplexityAnalyzer;
 use super::counter;
-use super::stats::{FileStats, LineStats};
+use super::stats::{FileStats, HealthRegions, LineStats, RegionStats};
 
 /// Maximum bytes to inspect for binary detection.
 const BINARY_CHECK_LEN: usize = 10 * 1024;
@@ -32,6 +32,8 @@ pub struct FileAnalyzer {
     linguist: Option<Arc<crate::language::LinguistAttributes>>,
     /// Sink for per-file line hashes (ULOC / duplication analysis).
     dup_sink: Option<Arc<super::duplication::DuplicationSink>>,
+    /// Sink for production/inline-test projections used by v2 health.
+    inline_test_sink: Option<Arc<super::test_code::InlineTestSink>>,
 }
 
 /// Average bytes per line above which a file is considered minified
@@ -98,6 +100,7 @@ impl FileAnalyzer {
             no_min_gen: config.filter.no_min_gen,
             linguist: None,
             dup_sink: None,
+            inline_test_sink: None,
         }
     }
 
@@ -113,6 +116,26 @@ impl FileAnalyzer {
     pub fn with_duplication_sink(mut self, sink: Arc<super::duplication::DuplicationSink>) -> Self {
         self.dup_sink = Some(sink);
         self
+    }
+
+    /// Attach the sink that collects v2-only inline test projections.
+    pub(crate) fn with_inline_test_sink(
+        mut self,
+        sink: Arc<super::test_code::InlineTestSink>,
+    ) -> Self {
+        self.inline_test_sink = Some(sink);
+        self
+    }
+
+    fn analyze_region(&self, content: &str, language: &Language) -> RegionStats {
+        let bytes = content.as_bytes();
+        let (trie, mask) = language.tokens();
+        RegionStats {
+            lines: counter::count_stats(bytes, trie, *mask),
+            size: bytes.len() as u64,
+            duplicate_lines: 0,
+            complexity: self.complexity_analyzer.analyze(content, language),
+        }
     }
 
     /// Analyze a single file.
@@ -136,6 +159,9 @@ impl FileAnalyzer {
     ///
     /// Returns `None` if the file's language is not recognized or the file is binary.
     pub fn analyze_from_bytes(&self, path: &Path, content: &[u8]) -> Result<Option<FileStats>> {
+        let normalized_path = super::normalize_path(path);
+        let path = normalized_path.as_path();
+
         // Linguist-vendored/-generated files don't count, matching GitHub.
         if let Some(linguist) = &self.linguist {
             if linguist.is_excluded(path) {
@@ -213,9 +239,35 @@ impl FileAnalyzer {
         let text = String::from_utf8_lossy(content);
         let complexity = self.complexity_analyzer.analyze(&text, &language);
 
+        // Path-level tests take precedence. For production-path files, split
+        // only blocks that the language definition can locate and close
+        // reliably; full-file metrics above remain untouched for v1.
+        let inline_parts = if super::test_code::is_test_path(path) {
+            None
+        } else {
+            super::test_code::split_inline_tests(&text, &language)
+        };
+        if let (Some(sink), Some((production, tests))) =
+            (&self.inline_test_sink, inline_parts.as_ref())
+        {
+            sink.record(
+                path.to_path_buf(),
+                HealthRegions {
+                    production: self.analyze_region(production, &language),
+                    tests: self.analyze_region(tests, &language),
+                },
+            );
+        }
+
         // Contribute line hashes for the post-walk duplication pass.
         if let Some(sink) = &self.dup_sink {
             let mut hashes = super::duplication::line_hashes(content);
+            let mut region_hashes = inline_parts.as_ref().map(|(production, tests)| {
+                (
+                    super::duplication::line_hashes(production.as_bytes()),
+                    super::duplication::line_hashes(tests.as_bytes()),
+                )
+            });
             // Documents and data formats (languages with no complexity
             // signals) repeat lines by the format's nature, not by
             // copy-paste; they count toward ULOC but never toward the
@@ -226,8 +278,17 @@ impl FileAnalyzer {
                 for hash in &mut hashes {
                     hash.1 = false;
                 }
+                if let Some((production, tests)) = &mut region_hashes {
+                    for hash in production.iter_mut().chain(tests.iter_mut()) {
+                        hash.1 = false;
+                    }
+                }
             }
-            sink.record(path.to_path_buf(), hashes);
+            if let Some((production, tests)) = region_hashes {
+                sink.record_with_regions(path.to_path_buf(), hashes, production, tests);
+            } else {
+                sink.record(path.to_path_buf(), hashes);
+            }
         }
 
         Ok(Some(FileStats {

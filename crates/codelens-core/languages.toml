@@ -7,6 +7,7 @@
 #   block_comments = [["/*", "*/"]]
 #   function_pattern = "regex"
 #   complexity_keywords = ["if", "for"]
+#   inline_test_patterns = ["regex ending at the block opening brace"]
 #   nested_comments = false
 #   string_delimiters = [{ start = '"', end = '"', escape = "\\", multiline = false }]
 #     （未配置时默认插入单行的 " 和 '；escape 缺省为无转义，multiline 缺省 false）
@@ -22,6 +23,10 @@ line_comments = ["//"]
 block_comments = [["/*", "*/"]]
 function_pattern = "(?m)^\\s*(pub\\s+)?(async\\s+)?fn\\s+\\w+"
 complexity_keywords = ["if", "else", "for", "while", "loop", "match", "?", "&&", "||"]
+inline_test_patterns = [
+    "(?ms)^[ \\t]*#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)\\s*\\][ \\t]*(?:\\r?\\n[ \\t]*#\\s*\\[[^]\\r\\n]+\\][ \\t]*)*(?:\\r?\\n)?[ \\t]*(?:pub(?:\\([^)]*\\))?[ \\t]+)?mod[ \\t]+\\w+[ \\t]*\\{",
+    "(?ms)^[ \\t]*#\\s*\\[[ \\t]*test[ \\t]*\\][ \\t]*(?:\\r?\\n[ \\t]*#\\s*\\[[^]\\r\\n]+\\][ \\t]*)*(?:\\r?\\n)?[ \\t]*(?:pub(?:\\([^)]*\\))?[ \\t]+)?(?:async[ \\t]+)?fn[ \\t]+\\w+[^;{]*\\{",
+]
 nested_comments = true
 # ' 是生命周期/char 字面量，不是字符串定界符
 string_delimiters = [
@@ -58,6 +63,7 @@ extensions = [".zig"]
 line_comments = ["//"]
 function_pattern = "(?m)^\\s*(pub\\s+)?fn\\s+\\w+"
 complexity_keywords = ["if", "else", "for", "while", "switch", "orelse", "catch"]
+inline_test_patterns = ["(?m)^[ \\t]*test\\b[^\\r\\n{]*\\{"]
 
 # ============================================================================
 # Go

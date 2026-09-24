@@ -517,7 +517,7 @@ fn brace_body_end(
     None
 }
 
-fn matching_brace_end(content: &[u8], open: usize) -> Option<usize> {
+pub(crate) fn matching_brace_end(content: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (offset, byte) in content[open..].iter().enumerate() {
         match byte {
@@ -537,7 +537,7 @@ fn matching_brace_end(content: &[u8], open: usize) -> Option<usize> {
 /// Replace comment and string bytes with spaces while preserving byte offsets
 /// and line endings. The language token trie keeps this scanner aligned with
 /// the line counter's delimiter rules without requiring a full parser.
-fn mask_non_code(content: &str, lang: &Language) -> String {
+pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
     let source = content.as_bytes();
     let mut masked = source.to_vec();
     let (trie, process_mask) = lang.tokens();

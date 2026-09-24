@@ -46,6 +46,11 @@ pub struct Language {
     #[serde(default)]
     pub complexity_keywords: Vec<String>,
 
+    /// Regexes whose matches end at the opening brace of an inline test block.
+    /// The analyzer uses these only for v2 production/test projections.
+    #[serde(default)]
+    pub(crate) inline_test_patterns: Vec<String>,
+
     /// Whether block comments can be nested (e.g., Rust allows /* /* */ */).
     #[serde(default)]
     pub nested_comments: bool,
@@ -61,6 +66,10 @@ pub struct Language {
     /// Lazily-compiled historical function matcher.
     #[serde(skip)]
     pub(crate) legacy_function_cache: OnceLock<Option<Regex>>,
+
+    /// Lazily-compiled inline test block matchers.
+    #[serde(skip)]
+    pub(crate) inline_test_cache: OnceLock<Vec<Regex>>,
 }
 
 /// Precompiled regex patterns for complexity analysis.
@@ -84,10 +93,12 @@ impl Clone for Language {
             function_pattern: self.function_pattern.clone(),
             legacy_function_pattern: self.legacy_function_pattern.clone(),
             complexity_keywords: self.complexity_keywords.clone(),
+            inline_test_patterns: self.inline_test_patterns.clone(),
             nested_comments: self.nested_comments,
             tokens_cache: OnceLock::new(),
             complexity_cache: OnceLock::new(),
             legacy_function_cache: OnceLock::new(),
+            inline_test_cache: OnceLock::new(),
         }
     }
 }
@@ -126,6 +137,16 @@ impl Language {
                 .as_ref();
         }
         self.complexity_patterns().function_re.as_ref()
+    }
+
+    /// Get block-start matchers used to separate inline tests for v2.
+    pub(crate) fn inline_test_regexes(&self) -> &[Regex] {
+        self.inline_test_cache.get_or_init(|| {
+            self.inline_test_patterns
+                .iter()
+                .filter_map(|pattern| Regex::new(pattern).ok())
+                .collect()
+        })
     }
 }
 
@@ -185,10 +206,12 @@ impl Default for Language {
             function_pattern: None,
             legacy_function_pattern: None,
             complexity_keywords: vec![],
+            inline_test_patterns: vec![],
             nested_comments: false,
             tokens_cache: OnceLock::new(),
             complexity_cache: OnceLock::new(),
             legacy_function_cache: OnceLock::new(),
+            inline_test_cache: OnceLock::new(),
         }
     }
 }

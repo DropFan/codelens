@@ -275,7 +275,7 @@ fn analyze_at_git_ref(
         }
     }
     let mut result = analyze(&mapped, config).context("Analysis of the git ref failed")?;
-    rewrite_paths_repo_relative(&mut result.files, worktree.path());
+    rewrite_analysis_paths_repo_relative(&mut result, worktree.path());
     Ok(result)
 }
 
@@ -298,9 +298,25 @@ fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: 
     // would zero the Duplication dimension's input.
     let dup_scanned = result.summary.dup_scanned;
     let uloc = result.summary.uloc;
+    let inline_test_regions_scanned = result.summary.inline_test_regions_scanned;
+    let mut health_regions = std::mem::take(&mut result.summary.health_regions);
+    let retained_paths: std::collections::HashSet<PathBuf> = result
+        .files
+        .iter()
+        .map(|file| {
+            file.path
+                .strip_prefix("./")
+                .unwrap_or(&file.path)
+                .to_path_buf()
+        })
+        .collect();
+    health_regions
+        .retain(|path, _| retained_paths.contains(path.strip_prefix("./").unwrap_or(path)));
     result.summary = codelens_core::Summary::from_file_stats(&result.files);
     result.summary.dup_scanned = dup_scanned;
     result.summary.uloc = uloc;
+    result.summary.inline_test_regions_scanned = inline_test_regions_scanned;
+    result.summary.health_regions = health_regions;
 }
 
 /// Scoring model matching an analysis: when duplication was not
@@ -326,6 +342,33 @@ pub(crate) fn rewrite_paths_repo_relative(
             }
         }
     }
+}
+
+/// Rewrite both physical file paths and v2 health-region keys. Health and
+/// diff reports must keep the two collections aligned after normalization.
+pub(crate) fn rewrite_analysis_paths_repo_relative(
+    result: &mut codelens_core::AnalysisResult,
+    repo_root: &Path,
+) {
+    rewrite_paths_repo_relative(&mut result.files, repo_root);
+
+    let repo_root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let regions = std::mem::take(&mut result.summary.health_regions);
+    result.summary.health_regions = regions
+        .into_iter()
+        .map(|(path, stats)| {
+            let path = std::fs::canonicalize(&path)
+                .ok()
+                .and_then(|absolute| {
+                    absolute
+                        .strip_prefix(&repo_root)
+                        .ok()
+                        .map(Path::to_path_buf)
+                })
+                .unwrap_or(path);
+            (path, stats)
+        })
+        .collect();
 }
 
 /// Parse "jsp:html,tpl:php" into (extension, language) pairs.
@@ -528,6 +571,15 @@ mod tests {
         ];
         let mut summary = codelens_core::Summary::from_file_stats(&files);
         summary.dup_scanned = false;
+        summary.inline_test_regions_scanned = true;
+        summary.health_regions.insert(
+            PathBuf::from("src/a.rs"),
+            codelens_core::HealthRegions::default(),
+        );
+        summary.health_regions.insert(
+            PathBuf::from("vendor/sub/b.rs"),
+            codelens_core::HealthRegions::default(),
+        );
         let mut result = codelens_core::AnalysisResult {
             files,
             summary,
@@ -543,11 +595,49 @@ mod tests {
             !result.summary.dup_scanned,
             "summary rebuild must not resurrect the flag"
         );
+        assert!(result.summary.inline_test_regions_scanned);
+        assert_eq!(result.summary.health_regions.len(), 1);
+        assert!(result
+            .summary
+            .health_regions
+            .contains_key(std::path::Path::new("src/a.rs")));
 
         // And the measured state survives too.
         result.summary.dup_scanned = true;
         drop_submodule_files(&mut result, &[PathBuf::from("other")]);
         assert!(result.summary.dup_scanned);
+    }
+
+    #[test]
+    fn rewrite_analysis_paths_keeps_health_regions_aligned() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn production() {}\n").unwrap();
+        let files = vec![codelens_core::FileStats {
+            path: path.clone(),
+            ..Default::default()
+        }];
+        let mut summary = codelens_core::Summary::from_file_stats(&files);
+        summary
+            .health_regions
+            .insert(path, codelens_core::HealthRegions::default());
+        let mut result = codelens_core::AnalysisResult {
+            files,
+            summary,
+            elapsed: std::time::Duration::ZERO,
+            scanned_files: 1,
+            skipped_files: 0,
+            error_files: 0,
+        };
+
+        rewrite_analysis_paths_repo_relative(&mut result, dir.path());
+
+        assert_eq!(result.files[0].path, PathBuf::from("src/lib.rs"));
+        assert!(result
+            .summary
+            .health_regions
+            .contains_key(std::path::Path::new("src/lib.rs")));
     }
 
     #[test]

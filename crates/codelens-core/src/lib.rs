@@ -37,8 +37,8 @@ pub mod output;
 pub mod walker;
 
 pub use analyzer::stats::{
-    AnalysisResult, Complexity, FileStats, LanguageSummary, LineStats, RepoStats, RepoSummary,
-    SizeDistribution, Summary,
+    AnalysisResult, Complexity, FileStats, HealthRegions, LanguageSummary, LineStats, RegionStats,
+    RepoStats, RepoSummary, SizeDistribution, Summary,
 };
 pub use analyzer::{ComplexityAnalyzer, FunctionSpan};
 pub use config::Config;
@@ -51,6 +51,7 @@ pub use insight::estimation::{
 pub use language::{Language, LanguageRegistry};
 pub use output::{OutputFormat, OutputOptions};
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -90,7 +91,9 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     // --no-dup-scan skips it entirely so huge trees don't pay the memory.
     let dup_sink =
         (!config.no_dup_scan).then(|| Arc::new(analyzer::duplication::DuplicationSink::default()));
-    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config);
+    let inline_test_sink = Arc::new(analyzer::test_code::InlineTestSink::default());
+    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config)
+        .with_inline_test_sink(Arc::clone(&inline_test_sink));
     if let Some(ref sink) = dup_sink {
         file_analyzer = file_analyzer.with_duplication_sink(Arc::clone(sink));
     }
@@ -114,6 +117,7 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
 
     // Collect all file stats
     let mut all_stats = Vec::new();
+    let mut seen_paths = HashSet::new();
     let mut scanned_files = 0;
     let mut skipped_files = 0;
     let mut error_files = 0;
@@ -131,8 +135,10 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
             Arc::clone(&analyzer),
             Arc::clone(&filter),
             |stats| {
-                all_stats.push(stats);
-                scanned_files += 1;
+                if seen_paths.insert(stats.path.clone()) {
+                    all_stats.push(stats);
+                    scanned_files += 1;
+                }
             },
             |_, reason| match reason {
                 walker::SkipReason::Filtered => skipped_files += 1,
@@ -144,12 +150,19 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     // Duplication post-pass: with all line hashes gathered, each file
     // learns its duplicated-line count and the project gets its ULOC.
     let mut uloc = 0;
+    let mut health_regions = inline_test_sink.finish();
     if let Some(ref sink) = dup_sink {
-        let (unique, mut per_file_dup) = sink.finish();
+        let (unique, mut per_file_dup, per_region_dup) = sink.finish_with_regions();
         uloc = unique;
         for stats in &mut all_stats {
             if let Some(dup) = per_file_dup.remove(&stats.path) {
                 stats.duplicate_lines = dup;
+            }
+        }
+        for (path, duplicated) in per_region_dup {
+            if let Some(regions) = health_regions.get_mut(&path) {
+                regions.production.duplicate_lines = duplicated.production;
+                regions.tests.duplicate_lines = duplicated.tests;
             }
         }
     }
@@ -158,6 +171,8 @@ pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisR
     let mut summary = Summary::from_file_stats(&all_stats);
     summary.uloc = uloc;
     summary.dup_scanned = dup_sink.is_some();
+    summary.health_regions = health_regions;
+    summary.inline_test_regions_scanned = true;
     summary.sort_languages(config.output.sort_by);
     let elapsed = start.elapsed();
 
@@ -356,6 +371,73 @@ fn main() {
         assert!(result.summary.dup_scanned);
         assert!(result.summary.uloc > 0);
         assert!(result.summary.duplicate_lines > 0);
+    }
+
+    #[test]
+    fn test_analyze_deduplicates_lexically_equivalent_roots() {
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "src/lib.rs",
+            "fn only_line_in_repo() { compute_something(); }\n",
+        );
+        let root = dir.path().join("src");
+        let dotted_root = dir.path().join("./src");
+
+        let result = analyze(&[root, dotted_root], &Config::default()).unwrap();
+
+        assert_eq!(result.scanned_files, 1);
+        assert_eq!(result.summary.total_files, 1);
+        assert_eq!(result.files[0].duplicate_lines, 0);
+    }
+
+    #[test]
+    fn test_analyze_collects_inline_test_health_regions() {
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "lib.rs",
+            r#"fn production() {
+    let duplicated_value = compute_something();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn works() {
+        let duplicated_value = compute_something();
+    }
+}
+"#,
+        );
+
+        let result = analyze(&[dir.path()], &Config::default()).unwrap();
+
+        assert!(result.summary.inline_test_regions_scanned);
+        assert_eq!(result.summary.health_regions.len(), 1);
+        let regions = result.summary.health_regions.values().next().unwrap();
+        assert_eq!(regions.production.complexity.functions, 1);
+        assert_eq!(regions.tests.complexity.functions, 1);
+        assert!(regions.production.lines.code < result.files[0].lines.code);
+        assert!(regions.tests.lines.code > 0);
+        assert_eq!(regions.production.duplicate_lines, 1);
+        assert_eq!(regions.tests.duplicate_lines, 1);
+        assert_eq!(result.files[0].duplicate_lines, 2);
+    }
+
+    #[test]
+    fn test_path_level_tests_are_not_split_again() {
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "tests/integration.rs",
+            "#[test]\nfn works() { assert!(true); }\n",
+        );
+
+        let result = analyze(&[dir.path()], &Config::default()).unwrap();
+
+        assert!(result.summary.inline_test_regions_scanned);
+        assert!(result.summary.health_regions.is_empty());
     }
 
     #[test]

@@ -268,6 +268,14 @@ fn validate_regexes(id: &str, lang: &Language, path: &Path) -> Result<()> {
             });
         }
     }
+    for pattern in &lang.inline_test_patterns {
+        if let Err(e) = Regex::new(pattern) {
+            return Err(crate::error::Error::InvalidLanguage {
+                name: id.to_string(),
+                reason: format!("invalid inline_test_patterns in {}: {e}", path.display()),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -463,6 +471,29 @@ mod tests {
             "error should include the file path: {msg}"
         );
         // Nothing from the invalid file may have been registered.
+        assert!(registry.detect(Path::new("x.brk")).is_none());
+    }
+
+    #[test]
+    fn test_load_file_rejects_invalid_inline_test_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("langs.toml");
+        std::fs::write(
+            &path,
+            r#"
+                [broken]
+                name = "Broken"
+                extensions = [".brk"]
+                inline_test_patterns = ["(unclosed"]
+            "#,
+        )
+        .unwrap();
+
+        let mut registry = LanguageRegistry::with_builtin().unwrap();
+        let error = registry.load_file(&path).unwrap_err().to_string();
+
+        assert!(error.contains("inline_test_patterns"));
+        assert!(error.contains("langs.toml"));
         assert!(registry.detect(Path::new("x.brk")).is_none());
     }
 

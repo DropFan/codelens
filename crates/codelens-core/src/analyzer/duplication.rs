@@ -46,12 +46,50 @@ pub fn line_hashes(content: &[u8]) -> Vec<LineHash> {
 /// walk; consumed once afterwards to produce global duplication data.
 #[derive(Default)]
 pub struct DuplicationSink {
-    files: Mutex<Vec<(PathBuf, Vec<LineHash>)>>,
+    files: Mutex<Vec<FileLineHashes>>,
+}
+
+struct FileLineHashes {
+    path: PathBuf,
+    all: Vec<LineHash>,
+    regions: Option<RegionLineHashes>,
+}
+
+struct RegionLineHashes {
+    production: Vec<LineHash>,
+    tests: Vec<LineHash>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct RegionDuplicateLines {
+    pub(crate) production: usize,
+    pub(crate) tests: usize,
 }
 
 impl DuplicationSink {
     pub fn record(&self, path: PathBuf, hashes: Vec<LineHash>) {
-        self.files.lock().unwrap().push((path, hashes));
+        self.files.lock().unwrap().push(FileLineHashes {
+            path: super::normalize_path(&path),
+            all: hashes,
+            regions: None,
+        });
+    }
+
+    /// Record full-file hashes together with production/test partitions.
+    /// Global occurrence counts still come only from `all`, so each physical
+    /// line contributes exactly once.
+    pub(crate) fn record_with_regions(
+        &self,
+        path: PathBuf,
+        all: Vec<LineHash>,
+        production: Vec<LineHash>,
+        tests: Vec<LineHash>,
+    ) {
+        self.files.lock().unwrap().push(FileLineHashes {
+            path: super::normalize_path(&path),
+            all,
+            regions: Some(RegionLineHashes { production, tests }),
+        });
     }
 
     /// Drain the sink: (ULOC, per-file duplicated line-instance counts).
@@ -59,34 +97,56 @@ impl DuplicationSink {
     /// eligible line instance is duplicated when its content occurs 2+
     /// times across the whole tree (including repeats within one file).
     pub fn finish(&self) -> (usize, HashMap<PathBuf, usize>) {
+        let (uloc, per_file, _) = self.finish_with_regions();
+        (uloc, per_file)
+    }
+
+    pub(crate) fn finish_with_regions(
+        &self,
+    ) -> (
+        usize,
+        HashMap<PathBuf, usize>,
+        HashMap<PathBuf, RegionDuplicateLines>,
+    ) {
         let mut files = std::mem::take(&mut *self.files.lock().unwrap());
 
         // Overlapping input roots (`codelens . src`) walk a file twice;
         // keep one record per path or every line would count duplicate.
         let mut seen = std::collections::HashSet::new();
-        files.retain(|(path, _)| seen.insert(path.clone()));
+        files.retain(|file| seen.insert(file.path.clone()));
 
         let mut counts: HashMap<u64, u32> = HashMap::new();
-        for (_, hashes) in &files {
-            for &(h, _) in hashes {
+        for file in &files {
+            for &(h, _) in &file.all {
                 *counts.entry(h).or_insert(0) += 1;
             }
         }
         let uloc = counts.len();
 
-        let per_file = files
-            .into_iter()
-            .map(|(path, hashes)| {
-                let dup = hashes
-                    .iter()
-                    .filter(|(h, eligible)| *eligible && counts.get(h).copied().unwrap_or(0) >= 2)
-                    .count();
-                (path, dup)
-            })
-            .collect();
+        let mut per_file = HashMap::with_capacity(files.len());
+        let mut per_region = HashMap::new();
+        for file in files {
+            per_file.insert(file.path.clone(), duplicated_lines(&file.all, &counts));
+            if let Some(regions) = file.regions {
+                per_region.insert(
+                    file.path,
+                    RegionDuplicateLines {
+                        production: duplicated_lines(&regions.production, &counts),
+                        tests: duplicated_lines(&regions.tests, &counts),
+                    },
+                );
+            }
+        }
 
-        (uloc, per_file)
+        (uloc, per_file, per_region)
     }
+}
+
+fn duplicated_lines(hashes: &[LineHash], counts: &HashMap<u64, u32>) -> usize {
+    hashes
+        .iter()
+        .filter(|(hash, eligible)| *eligible && counts.get(hash).copied().unwrap_or(0) >= 2)
+        .count()
 }
 
 #[cfg(test)]
@@ -139,8 +199,8 @@ mod tests {
         let sink = DuplicationSink::default();
         let hashes = line_hashes(b"only_line_in_repo();\n");
         sink.record(PathBuf::from("src/a.rs"), hashes.clone());
-        // Overlapping roots walk the same file again.
-        sink.record(PathBuf::from("src/a.rs"), hashes);
+        // Overlapping roots may spell the same file differently.
+        sink.record(PathBuf::from("./src/a.rs"), hashes);
 
         let (uloc, per_file) = sink.finish();
         assert_eq!(uloc, 1);
@@ -148,6 +208,31 @@ mod tests {
             per_file[&PathBuf::from("src/a.rs")],
             0,
             "a twice-walked unique file must not become 100% duplicate"
+        );
+    }
+
+    #[test]
+    fn test_sink_attributes_duplicates_to_inline_regions() {
+        let sink = DuplicationSink::default();
+        let production = line_hashes(b"production_shared_line();\nproduction_unique_line();\n");
+        let tests = line_hashes(b"test_shared_line();\ntest_unique_line();\n");
+        let mut all = production.clone();
+        all.extend(tests.clone());
+        sink.record_with_regions(PathBuf::from("src/lib.rs"), all, production, tests);
+        sink.record(
+            PathBuf::from("src/other.rs"),
+            line_hashes(b"production_shared_line();\ntest_shared_line();\n"),
+        );
+
+        let (_, per_file, per_region) = sink.finish_with_regions();
+
+        assert_eq!(per_file[&PathBuf::from("src/lib.rs")], 2);
+        assert_eq!(
+            per_region[&PathBuf::from("src/lib.rs")],
+            RegionDuplicateLines {
+                production: 1,
+                tests: 1,
+            }
         );
     }
 

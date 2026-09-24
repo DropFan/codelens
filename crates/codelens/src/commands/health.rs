@@ -15,7 +15,7 @@ use codelens_core::output::Report;
 
 use super::{
     analyze_at_git_ref, drop_submodule_files, load_partial_config, resolve_config,
-    rewrite_paths_repo_relative, scoring_model_for, write_report,
+    rewrite_analysis_paths_repo_relative, scoring_model_for, write_report,
 };
 use crate::cli;
 
@@ -54,7 +54,7 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
         // with the baseline tree regardless of the working directory.
         let git_client = GitClient::detect(&args.paths[0]).ok();
         if let Some(client) = &git_client {
-            rewrite_paths_repo_relative(&mut result.files, client.repo_path());
+            rewrite_analysis_paths_repo_relative(&mut result, client.repo_path());
         }
         let (mut baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
         // Worktree-materialized baselines never contain submodules;

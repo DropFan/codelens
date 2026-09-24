@@ -13,7 +13,7 @@ use codelens_core::output::Report;
 
 use super::{
     analyze_at_git_ref, drop_submodule_files, load_partial_config, resolve_config,
-    rewrite_paths_repo_relative, scoring_model_for, write_report,
+    rewrite_analysis_paths_repo_relative, scoring_model_for, write_report,
 };
 use crate::cli;
 
@@ -47,7 +47,7 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
         ),
         None => {
             let mut result = analyze(&paths, &config).context("Analysis failed")?;
-            rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+            rewrite_analysis_paths_repo_relative(&mut result, git_client.repo_path());
             (result, "worktree".to_string())
         }
     };

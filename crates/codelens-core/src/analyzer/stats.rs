@@ -2,7 +2,7 @@
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -24,6 +24,31 @@ pub struct FileStats {
     pub duplicate_lines: usize,
     /// Complexity metrics.
     pub complexity: Complexity,
+}
+
+/// Metrics for one logical region of a source file.
+///
+/// Full-file metrics remain in [`FileStats`] for backwards compatibility.
+/// These projections let v2 health scoring separate production and inline
+/// test code without inventing additional files in the general statistics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegionStats {
+    /// Line statistics within this region.
+    pub lines: LineStats,
+    /// Region size in bytes.
+    pub size: u64,
+    /// Duplicated line instances belonging to this region.
+    #[serde(default)]
+    pub duplicate_lines: usize,
+    /// Complexity metrics recalculated from this region only.
+    pub complexity: Complexity,
+}
+
+/// Production and inline-test projections for one physical source file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HealthRegions {
+    pub production: RegionStats,
+    pub tests: RegionStats,
 }
 
 /// Line count statistics.
@@ -300,15 +325,24 @@ pub struct Summary {
     /// rebuilding a Summary must carry both over themselves.
     #[serde(default)]
     pub dup_scanned: bool,
+    /// Per-file production/test projections used only by v2 health scoring.
+    /// Old snapshots deserialize with an empty map and retain full-file
+    /// scoring semantics.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub health_regions: BTreeMap<PathBuf, HealthRegions>,
+    /// Whether this analysis was capable of collecting inline test regions.
+    /// Comparisons only use region projections when both sides set this flag.
+    #[serde(default)]
+    pub inline_test_regions_scanned: bool,
 }
 
 impl Summary {
     /// Build summary from a list of file statistics.
     ///
     /// WARNING: analysis-wide fields that are not derivable from per-file
-    /// stats — `dup_scanned` and `uloc` — come back as their defaults
-    /// (false / 0). Callers rebuilding a Summary from an existing analysis
-    /// must carry both over from the previous summary themselves.
+    /// stats — duplication state and inline-test projections — come back as
+    /// their defaults. Callers rebuilding a Summary from an existing analysis
+    /// must carry those fields over from the previous summary themselves.
     pub fn from_file_stats(files: &[FileStats]) -> Self {
         let mut summary = Summary::default();
         let mut by_language: HashMap<String, LanguageSummary> = HashMap::new();
@@ -1046,6 +1080,19 @@ mod tests {
             .remove("dup_scanned");
         let result: AnalysisResult = serde_json::from_value(json).unwrap();
         assert!(!result.summary.dup_scanned);
+    }
+
+    #[test]
+    fn test_old_snapshot_without_health_regions_uses_full_file_fallback() {
+        let mut json = analysis_result_json();
+        let summary = json["summary"].as_object_mut().unwrap();
+        summary.remove("health_regions");
+        summary.remove("inline_test_regions_scanned");
+
+        let result: AnalysisResult = serde_json::from_value(json).unwrap();
+
+        assert!(!result.summary.inline_test_regions_scanned);
+        assert!(result.summary.health_regions.is_empty());
     }
 
     #[test]
