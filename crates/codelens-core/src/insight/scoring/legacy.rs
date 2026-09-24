@@ -81,6 +81,9 @@ impl ScoringModel for LegacyModel {
 }
 
 fn interpolate(value: f64, breakpoints: &[(f64, f64)]) -> f64 {
+    if !value.is_finite() {
+        return 1.0;
+    }
     if breakpoints.is_empty() {
         return 50.0;
     }
@@ -209,5 +212,14 @@ mod tests {
             duplication_ratio: 0.60,
         };
         assert!((LegacyModel::new().total_score(&metrics) - 40.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn non_finite_metrics_use_the_worst_curve_score() {
+        let breakpoints = &[(0.0, 100.0), (10.0, 20.0)];
+
+        assert_eq!(interpolate(f64::NAN, breakpoints), 1.0);
+        assert_eq!(interpolate(f64::INFINITY, breakpoints), 1.0);
+        assert_eq!(interpolate(f64::NEG_INFINITY, breakpoints), 1.0);
     }
 }
