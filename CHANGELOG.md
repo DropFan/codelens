@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
 ### Added
 - Selectable health scoring pipelines through `--health-model v1|v2` and
   `.codelens.toml`; command-line selection overrides configuration and applies
