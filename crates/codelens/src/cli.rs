@@ -469,8 +469,8 @@ pub struct AdvancedArgs {
     pub no_dup_scan: bool,
 
     /// Health scoring pipeline used by the default report, health, diff,
-    /// and MCP. V2 is the default; use v1 to reproduce historical scores
-    /// and gates. Other subcommands are unaffected.
+    /// and MCP. V1 remains the default for compatibility; use v2 for the
+    /// multilingual scoring pipeline. Other subcommands are unaffected.
     #[arg(long, global = true, value_enum, value_name = "VERSION")]
     pub health_model: Option<HealthModelArg>,
 
@@ -596,7 +596,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens health .\x1b[0m               \x1b[2m# Health report for current directory\x1b[0m
   \x1b[1;36mcodelens health src -f json\x1b[0m     \x1b[2m# Health report in JSON format\x1b[0m
   \x1b[1;36mcodelens health . --top 20\x1b[0m      \x1b[2m# Show top 20 worst files/directories\x1b[0m
-  \x1b[1;36mcodelens health . --health-model v1\x1b[0m  \x1b[2m# Reproduce historical scoring\x1b[0m
+  \x1b[1;36mcodelens health . --health-model v2\x1b[0m  \x1b[2m# Use multilingual scoring\x1b[0m
 
 \x1b[1;32mHotspot\x1b[0m \x1b[2m(churn x complexity):\x1b[0m
   \x1b[1;36mcodelens hotspot .\x1b[0m              \x1b[2m# Hotspots in last 90 days (default)\x1b[0m
@@ -613,7 +613,7 @@ const EXAMPLES: &str = "\
   \x1b[1;36mcodelens diff main\x1b[0m              \x1b[2m# main vs working tree\x1b[0m
   \x1b[1;36mcodelens diff v1.0..v2.0\x1b[0m        \x1b[2m# Two refs\x1b[0m
   \x1b[1;36mcodelens diff main --fail-on-regression\x1b[0m  \x1b[2m# Gate CI on health regressions\x1b[0m
-  \x1b[1;36mcodelens diff main --health-model v1\x1b[0m  \x1b[2m# Compare with historical scoring\x1b[0m
+  \x1b[1;36mcodelens diff main --health-model v2\x1b[0m  \x1b[2m# Compare with multilingual scoring\x1b[0m
 
 \x1b[1;32mTrend\x1b[0m \x1b[2m(snapshot comparison):\x1b[0m
   \x1b[1;36mcodelens trend --save\x1b[0m           \x1b[2m# Save a snapshot\x1b[0m
@@ -672,8 +672,9 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
 
         assert!(help.contains("default report, health, diff, and MCP"));
+        assert!(help.contains("V1 remains the default for compatibility"));
         assert!(help.contains("Other subcommands are unaffected"));
-        assert!(help.contains("health . --health-model v1"));
-        assert!(help.contains("diff main --health-model v1"));
+        assert!(help.contains("health . --health-model v2"));
+        assert!(help.contains("diff main --health-model v2"));
     }
 }

@@ -15,8 +15,8 @@ use crate::insight::Grade;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HealthModelVersion {
-    V1,
     #[default]
+    V1,
     V2,
 }
 
@@ -521,8 +521,8 @@ mod tests {
     }
 
     #[test]
-    fn health_model_version_is_strict_and_defaults_to_v2() {
-        assert_eq!(HealthModelVersion::default(), HealthModelVersion::V2);
+    fn health_model_version_is_strict_and_defaults_to_v1() {
+        assert_eq!(HealthModelVersion::default(), HealthModelVersion::V1);
         assert_eq!("v1".parse(), Ok(HealthModelVersion::V1));
         assert_eq!("v2".parse(), Ok(HealthModelVersion::V2));
         assert!("default".parse::<HealthModelVersion>().is_err());

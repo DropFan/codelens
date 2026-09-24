@@ -27,8 +27,8 @@ pub struct Config {
     /// with this set the Duplication dimension is omitted from health
     /// scoring instead of being fabricated from zero data.
     pub no_dup_scan: bool,
-    /// Complete health scoring pipeline. V2 is the default; V1 exists for
-    /// reproducible historical gates and reports.
+    /// Complete health scoring pipeline. V1 remains the default for
+    /// compatibility; V2 is available as an explicit opt-in.
     pub health_model: HealthModelVersion,
 }
 

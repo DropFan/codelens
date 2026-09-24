@@ -622,21 +622,21 @@ mod tests {
         assert!(config.filter.languages.is_empty());
         assert!(config.filter.smart_exclude);
         assert!(config.walker.use_gitignore);
-        assert_eq!(config.health_model, HealthModelVersion::V2);
+        assert_eq!(config.health_model, HealthModelVersion::V1);
     }
 
     #[test]
     fn health_model_cli_overrides_config_file() {
-        let partial = partial("health_model = \"v1\"");
+        let partial = partial("health_model = \"v2\"");
         let cli = parse(&["codelens"]);
         let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, Some(&partial));
-        assert_eq!(config.health_model, HealthModelVersion::V1);
+        assert_eq!(config.health_model, HealthModelVersion::V2);
 
-        let cli = parse(&["codelens", "health", ".", "--health-model", "v2"]);
+        let cli = parse(&["codelens", "health", ".", "--health-model", "v1"]);
         let cli::Command::Health(args) = cli.command.as_ref().unwrap() else {
             panic!("expected health subcommand");
         };
         let config = resolve_config(&args.filter, &args.output, &cli.advanced, Some(&partial));
-        assert_eq!(config.health_model, HealthModelVersion::V2);
+        assert_eq!(config.health_model, HealthModelVersion::V1);
     }
 }

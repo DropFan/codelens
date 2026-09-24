@@ -73,7 +73,12 @@ codelens --list-languages
 
 Score code health across six dimensions (complexity, function size, comment ratio, file size, nesting depth, line duplication) with grades from A to F.
 
-The default `v2` pipeline scores each production file first. A file score is
+The historical `v1` pipeline remains the default so existing dashboards and CI
+gates keep their established scores. It aggregates raw metrics across all
+analyzed files with the original weights, curves, function matcher, and
+bracket-depth behavior.
+
+The opt-in `v2` pipeline scores each production file first. A file score is
 85% weighted dimensions plus 15% from its weakest reliable core dimension.
 Language and directory scores combine an `sqrt(code lines)` weighted center
 with the worst 10% of their files, using an 85/15 split. The project score then
@@ -81,21 +86,16 @@ weights language scores by production code lines. Test code is reported
 separately; documentation and data formats do not affect the main score.
 Unavailable measurements are omitted and the remaining weights are
 renormalized, with confidence showing how much of the configured model was
-actually measured.
-
-The historical `v1` pipeline remains available for existing dashboards and CI
-gates. It aggregates raw metrics across all analyzed files with the original
-weights, curves, function matcher, and bracket-depth behavior. New analyses
-retain both v1 and v2 complexity inputs; snapshots created before this feature
-fall back to their original metrics. v1 and v2 scores are intentionally not
-comparable, so use the same version on both sides of a baseline and rebuild
-saved baselines when migrating.
+actually measured. New analyses retain both v1 and v2 complexity inputs;
+snapshots created before this feature fall back to their original metrics. v1
+and v2 scores are intentionally not comparable, so use the same version on both
+sides of a baseline and rebuild saved baselines when migrating.
 
 ```bash
 codelens health .               # Project, directory, and file-level report
 codelens health . --top 20      # Show top 20 worst files
 codelens health . -f json       # Output as JSON
-codelens health . --health-model v1   # Reproduce the historical algorithm
+codelens health . --health-model v2   # Use the multilingual algorithm
 codelens health . --fail-under B   # CI gate: exit 1 if health is below B
 codelens health . --baseline main --fail-on-regression   # regression gate
 ```
@@ -108,7 +108,7 @@ health_model = "v1"
 ```
 
 Command-line selection overrides configuration; configuration overrides the
-built-in default (`v2`). Machine-readable reports retain the stable internal
+built-in default (`v1`). Machine-readable reports retain the stable internal
 names `default` (v1) and `default-v2` (v2); HTML reports display the clearer
 user-facing names `v1` and `v2`.
 
@@ -320,7 +320,7 @@ git_info = true
 # Skip line-duplication analysis (health score omits the duplication dimension)
 no_dup_scan = true
 
-# Health scoring pipeline: "v1" (historical) or "v2" (default)
+# Health scoring pipeline: "v1" (default) or "v2" (multilingual, opt-in)
 health_model = "v2"
 
 # Custom language definitions (relative paths resolve against this file's directory)

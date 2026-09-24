@@ -127,11 +127,10 @@ see the repository README for current wiring.
 ## Interpretation guide (stable concepts)
 
 - **Grades**: A is healthy, C is "needs attention", F marks serious debt.
-  The default v2 pipeline scores files first, summarizes each language, then
-  weights production-language scores by code lines. It reports test health
-  separately. Use `--health-model v1` only when reproducing historical scores
-  or migrating an existing gate; v1 also preserves the historical function
-  matcher and all-bracket nesting metric, not only the old weights.
+  The default v1 pipeline preserves historical scores, including the original
+  function matcher and all-bracket nesting metric. Use `--health-model v2` to
+  score files first, summarize each language, weight production-language
+  scores by code lines, and report test health separately.
 - **Hotspot = churn × complexity.** Frequently changed simple files are
   fine; complex stable files are fine; the intersection is where defects
   cluster. Age and author concentration qualify the risk.

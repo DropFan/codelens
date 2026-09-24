@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(config.health_model, HealthModelVersion::V1);
 
         let config = Config::default();
-        assert_eq!(config.health_model, HealthModelVersion::V2);
+        assert_eq!(config.health_model, HealthModelVersion::V1);
     }
 
     #[test]
