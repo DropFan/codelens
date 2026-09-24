@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Selectable health scoring pipelines through `--health-model v1|v2` and
+  `.codelens.toml`; command-line selection overrides configuration and applies
+  consistently to the default report, `health`, `diff`, and MCP server
+- An opt-in v2 model that scores production files first, reports test health
+  separately, summarizes each language and directory, and exposes measurement
+  coverage and confidence instead of treating unavailable metrics as healthy
+- Health model identity and multilingual breakdowns across console, Markdown,
+  HTML, JSON, SARIF, OpenMetrics, badge, and trend outputs
+
+### Changed
+- The historical v1 model remains the default, preserving existing dashboard,
+  baseline, and CI-gate scores while users evaluate or migrate to v2
+- Baseline comparisons use the selected model on both sides; v2 comparisons
+  with older snapshots use only measurements available in both analyses and
+  report production/test scope changes separately from score regressions
+
+### Fixed
+- Function recognition and complexity inputs now handle common JavaScript and
+  TypeScript declarations, methods, arrows, and callbacks, distinguish missing
+  language rules from clean code, and count control-flow nesting rather than
+  unrelated brackets while retaining the legacy inputs required by v1
+- Hotspot scores no longer change merely because a more extreme file enters or
+  leaves the analyzed set; churn and complexity now use stable risk curves
+
 ## [0.1.8] - 2026-09-01
 
 ### Added
