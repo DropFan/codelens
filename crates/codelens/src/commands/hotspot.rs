@@ -144,6 +144,7 @@ mod tests {
         git(dir, &["init"]);
         git(dir, &["config", "user.email", "test@test.com"]);
         git(dir, &["config", "user.name", "Test"]);
+        git(dir, &["config", "commit.gpgsign", "false"]);
     }
 
     #[test]

@@ -974,6 +974,11 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
     }
 
     #[test]
