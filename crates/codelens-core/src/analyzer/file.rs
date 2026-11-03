@@ -7,11 +7,12 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::error::Result;
-use crate::language::{Language, LanguageRegistry};
+use crate::language::LanguageRegistry;
 
 use super::complexity::ComplexityAnalyzer;
 use super::counter;
-use super::stats::{FileStats, HealthRegions, LineStats, RegionStats};
+use super::measurements;
+use super::stats::{FileStats, LineStats};
 
 /// Maximum bytes to inspect for binary detection.
 const BINARY_CHECK_LEN: usize = 10 * 1024;
@@ -127,17 +128,6 @@ impl FileAnalyzer {
         self
     }
 
-    fn analyze_region(&self, content: &str, language: &Language) -> RegionStats {
-        let bytes = content.as_bytes();
-        let (trie, mask) = language.tokens();
-        RegionStats {
-            lines: counter::count_stats(bytes, trie, *mask),
-            size: bytes.len() as u64,
-            duplicate_lines: 0,
-            complexity: self.complexity_analyzer.analyze(content, language),
-        }
-    }
-
     /// Analyze a single file.
     ///
     /// Returns `None` if the file's language is not recognized or the file is binary.
@@ -239,57 +229,15 @@ impl FileAnalyzer {
         let text = String::from_utf8_lossy(content);
         let complexity = self.complexity_analyzer.analyze(&text, &language);
 
-        // Path-level tests take precedence. For production-path files, split
-        // only blocks that the language definition can locate and close
-        // reliably; full-file metrics above remain untouched for v1.
-        let inline_parts = if super::test_code::is_test_path(path) {
-            None
-        } else {
-            super::test_code::split_inline_tests(&text, &language)
-        };
-        if let (Some(sink), Some((production, tests))) =
-            (&self.inline_test_sink, inline_parts.as_ref())
-        {
-            sink.record(
-                path.to_path_buf(),
-                HealthRegions {
-                    production: self.analyze_region(production, &language),
-                    tests: self.analyze_region(tests, &language),
-                },
-            );
-        }
-
-        // Contribute line hashes for the post-walk duplication pass.
-        if let Some(sink) = &self.dup_sink {
-            let mut hashes = super::duplication::line_hashes(content);
-            let mut region_hashes = inline_parts.as_ref().map(|(production, tests)| {
-                (
-                    super::duplication::line_hashes(production.as_bytes()),
-                    super::duplication::line_hashes(tests.as_bytes()),
-                )
-            });
-            // Documents and data formats (languages with no complexity
-            // signals) repeat lines by the format's nature, not by
-            // copy-paste; they count toward ULOC but never toward the
-            // duplication metric — same policy that keeps them out of
-            // complexity scoring.
-            let patterns = language.complexity_patterns();
-            if patterns.function_re.is_none() && patterns.keywords_re.is_none() {
-                for hash in &mut hashes {
-                    hash.1 = false;
-                }
-                if let Some((production, tests)) = &mut region_hashes {
-                    for hash in production.iter_mut().chain(tests.iter_mut()) {
-                        hash.1 = false;
-                    }
-                }
-            }
-            if let Some((production, tests)) = region_hashes {
-                sink.record_with_regions(path.to_path_buf(), hashes, production, tests);
-            } else {
-                sink.record(path.to_path_buf(), hashes);
-            }
-        }
+        measurements::record_supplemental_metrics(
+            path,
+            content,
+            &text,
+            &language,
+            &self.complexity_analyzer,
+            self.inline_test_sink.as_deref(),
+            self.dup_sink.as_deref(),
+        );
 
         Ok(Some(FileStats {
             path: path.to_path_buf(),

@@ -51,14 +51,7 @@ pub use insight::estimation::{
 pub use language::{Language, LanguageRegistry};
 pub use output::{OutputFormat, OutputOptions};
 
-use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
-
-use analyzer::FileAnalyzer;
-use filter::FilterChain;
-use walker::ParallelWalker;
 
 /// Build the language registry a `Config` describes: builtin languages,
 /// then the custom definitions file, then the extension remappings.
@@ -83,107 +76,7 @@ pub fn build_registry(config: &Config) -> Result<LanguageRegistry> {
 ///
 /// This is the main entry point for the library.
 pub fn analyze<P: AsRef<Path>>(paths: &[P], config: &Config) -> Result<AnalysisResult> {
-    let start = Instant::now();
-
-    // Initialize components
-    let registry = Arc::new(build_registry(config)?);
-    // The duplication sink holds every line hash until the walk ends;
-    // --no-dup-scan skips it entirely so huge trees don't pay the memory.
-    let dup_sink =
-        (!config.no_dup_scan).then(|| Arc::new(analyzer::duplication::DuplicationSink::default()));
-    let inline_test_sink = Arc::new(analyzer::test_code::InlineTestSink::default());
-    let mut file_analyzer = FileAnalyzer::new(Arc::clone(&registry), config)
-        .with_inline_test_sink(Arc::clone(&inline_test_sink));
-    if let Some(ref sink) = dup_sink {
-        file_analyzer = file_analyzer.with_duplication_sink(Arc::clone(sink));
-    }
-    if !config.filter.no_linguist {
-        // Root .gitattributes of the first analyzed tree; matches GitHub's
-        // counting for the common single-root case.
-        if let Some(root) = paths.first().map(|p| p.as_ref()) {
-            let dir = if root.is_dir() {
-                root
-            } else {
-                root.parent().unwrap_or_else(|| Path::new("."))
-            };
-            if let Some(attrs) = language::LinguistAttributes::load(dir) {
-                file_analyzer = file_analyzer.with_linguist(Arc::new(attrs));
-            }
-        }
-    }
-    let analyzer = Arc::new(file_analyzer);
-    let filter: Arc<dyn filter::Filter> = Arc::new(FilterChain::new(config)?);
-    let walker = ParallelWalker::new(config.walker.clone());
-
-    // Collect all file stats
-    let mut all_stats = Vec::new();
-    let mut seen_paths = HashSet::new();
-    let mut scanned_files = 0;
-    let mut skipped_files = 0;
-    let mut error_files = 0;
-
-    for path in paths {
-        let path = path.as_ref();
-        if !path.exists() {
-            return Err(Error::DirectoryNotFound {
-                path: path.to_path_buf(),
-            });
-        }
-
-        walker.walk_and_analyze(
-            path,
-            Arc::clone(&analyzer),
-            Arc::clone(&filter),
-            |stats| {
-                if seen_paths.insert(stats.path.clone()) {
-                    all_stats.push(stats);
-                    scanned_files += 1;
-                }
-            },
-            |_, reason| match reason {
-                walker::SkipReason::Filtered => skipped_files += 1,
-                walker::SkipReason::Error => error_files += 1,
-            },
-        )?;
-    }
-
-    // Duplication post-pass: with all line hashes gathered, each file
-    // learns its duplicated-line count and the project gets its ULOC.
-    let mut uloc = 0;
-    let mut health_regions = inline_test_sink.finish();
-    if let Some(ref sink) = dup_sink {
-        let (unique, mut per_file_dup, per_region_dup) = sink.finish_with_regions();
-        uloc = unique;
-        for stats in &mut all_stats {
-            if let Some(dup) = per_file_dup.remove(&stats.path) {
-                stats.duplicate_lines = dup;
-            }
-        }
-        for (path, duplicated) in per_region_dup {
-            if let Some(regions) = health_regions.get_mut(&path) {
-                regions.production.duplicate_lines = duplicated.production;
-                regions.tests.duplicate_lines = duplicated.tests;
-            }
-        }
-    }
-
-    // Build summary, ordered by the configured sort key
-    let mut summary = Summary::from_file_stats(&all_stats);
-    summary.uloc = uloc;
-    summary.dup_scanned = dup_sink.is_some();
-    summary.health_regions = health_regions;
-    summary.inline_test_regions_scanned = true;
-    summary.sort_languages(config.output.sort_by);
-    let elapsed = start.elapsed();
-
-    Ok(AnalysisResult {
-        files: all_stats,
-        summary,
-        elapsed,
-        scanned_files,
-        skipped_files,
-        error_files,
-    })
+    analyzer::analyze_paths(paths, config)
 }
 
 #[cfg(test)]

@@ -6,6 +6,8 @@ mod complexity;
 pub mod counter;
 pub mod duplication;
 mod file;
+mod measurements;
+mod pipeline;
 pub mod stats;
 pub mod test_code;
 pub mod tokens;
@@ -13,6 +15,7 @@ pub mod trie;
 
 pub use complexity::{ComplexityAnalyzer, FunctionSpan};
 pub use file::FileAnalyzer;
+pub(crate) use pipeline::analyze_paths;
 
 /// Normalize purely lexical path noise without resolving symlinks.
 ///
