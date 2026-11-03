@@ -42,6 +42,7 @@ Use when onboarding onto a codebase or before estimating work in it.
 ```bash
 codelens .                      # stats + health + cost estimate in one report
 codelens health . --top 10      # worst files and directories, A-F grades
+codelens health . --health-model v2  # file-first scoring + confidence
 codelens health . --health-model v1  # reproduce historical scores
 codelens hotspot .              # risky files: frequently changed AND complex
 ```
@@ -121,16 +122,33 @@ codelens diff main --fail-on-regression                 # ref-to-ref gate
 Choosing a gate: `--fail-under` enforces a floor (legacy debt counts);
 `--fail-on-regression` implements "clean as you code" (only changes fail
 the gate, pre-existing debt never does) — usually the right default for
-older codebases. There is an official GitHub Action and a pre-commit hook;
-see the repository README for current wiring.
+older codebases. With v2, measurement coverage below 60% is
+`insufficient-data`: keep the numeric value as an estimate, but never let it
+pass either gate.
+
+The official GitHub Action exposes the same choice and reports the effective
+model and assessment:
+
+```yaml
+- uses: DropFan/codelens@rust
+  id: codelens
+  with:
+    health-model: 'v2'
+    baseline: 'origin/${{ github.base_ref }}'
+    fail-on-regression: 'true'
+# Read steps.codelens.outputs.model and steps.codelens.outputs.assessment.
+```
+
+See the repository README for the full Action and pre-commit wiring.
 
 ## Interpretation guide (stable concepts)
 
 - **Grades**: A is healthy, C is "needs attention", F marks serious debt.
   The default v1 pipeline preserves historical scores, including the original
   function matcher and all-bracket nesting metric. Use `--health-model v2` to
-  score files first, summarize each language, weight production-language
-  scores by code lines, and report test health separately.
+  score files first and aggregate those files directly across production
+  languages; per-language scores explain the composition rather than feeding
+  a second project-level weighting pass. v2 reports test health separately.
 - **Hotspot = churn × complexity.** Frequently changed simple files are
   fine; complex stable files are fine; the intersection is where defects
   cluster. Age and author concentration qualify the risk.
@@ -142,16 +160,18 @@ see the repository README for current wiring.
   (gitignore, linguist attributes, smart excludes). If numbers look
   inflated, check what was scanned before distrusting the tool — `--by-file`
   or `-v` shows what got counted.
-- **Test stats count separate test FILES only.** Languages that inline
-  tests into source files (Rust `#[cfg(test)]`, D `unittest`) will show a
-  near-zero test ratio even with excellent coverage. Verify with a quick
-  grep before reporting "this project lacks tests".
+- **Ordinary test stats count separate test FILES only.** They can show a
+  near-zero Test Files/Test Ratio for languages that inline tests into source
+  files. v2 health reports separately score configured inline test regions
+  (currently Rust `#[cfg(test)]` and Zig `test` blocks); do not use the
+  ordinary ratio alone to claim that such a project lacks tests.
 
 ## Situational flags worth knowing
 
 | Situation | Flag |
 |---|---|
 | Huge repo, memory pressure | `--no-dup-scan` |
+| File-first health with confidence and inline-test separation | `--health-model v2` |
 | Reproduce a historical health gate | `--health-model v1` |
 | Agent-consumed output | `-f json` (also: csv, markdown, html, sarif, openmetrics) |
 | Unrecognized in-house language / DSL | `--languages-file <toml>` (schema in README) |
