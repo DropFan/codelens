@@ -70,14 +70,22 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
         &to_result,
         model.as_ref(),
     );
-    let failed = report.health.failed;
+    let assessment = report.health.assessment;
+    let failed = report.health.gate_failed();
     write_report(Report::Diff(Box::new(report)), &config.output)?;
 
     if args.fail_on_regression && failed {
-        eprintln!(
-            "{}: health regressed from '{from_ref}' to '{to_label}'",
-            "gate failed".red().bold(),
-        );
+        if assessment == codelens_core::insight::health::HealthAssessment::InsufficientData {
+            eprintln!(
+                "{}: comparison from '{from_ref}' to '{to_label}' has insufficient measurement coverage; its score delta is an estimate and cannot satisfy --fail-on-regression",
+                "gate failed".red().bold(),
+            );
+        } else {
+            eprintln!(
+                "{}: health regressed from '{from_ref}' to '{to_label}'",
+                "gate failed".red().bold(),
+            );
+        }
         return Ok(ExitCode::FAILURE);
     }
     Ok(ExitCode::SUCCESS)

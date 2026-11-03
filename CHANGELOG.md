@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- V2 health reports now separate configured Rust and Zig inline-test regions
+  from production code while preserving full-file statistics and old snapshot
+  compatibility
+- Machine-readable health outputs expose assessment state: OpenMetrics emits
+  assessment info metrics, SARIF reports insufficient measurement coverage,
+  and the GitHub Action accepts a health-model override and exports `model`
+  and `assessment` outputs
+
+### Changed
+- V2 combines file scores directly across languages, uses each dimension's
+  configured weight exactly once, and applies a continuous worst-10%-by-code
+  tail so small or multilingual projects do not receive compounded penalties
+- V2 results below 60% measurement coverage remain visible as estimates but
+  cannot pass `--fail-under` or `--fail-on-regression`; insufficient-data
+  badges use a neutral color instead of displaying a passing grade
+
+### Fixed
+- V1 clamps non-finite metric inputs instead of producing non-finite scores
+- Lexically equivalent overlapping input paths no longer duplicate files or
+  contaminate duplication counts and health summaries
+- Rust function detection recognizes visibility-qualified declarations such
+  as `pub(crate) fn` and `pub(super) async fn`
+- The standalone `diff --fail-on-regression` gate now rejects v2 comparisons
+  with insufficient measurement coverage, matching the `health` command
+
 ## [0.2.0] - 2026-09-24
 
 ### Added

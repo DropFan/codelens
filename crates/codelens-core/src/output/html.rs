@@ -527,7 +527,7 @@ impl HtmlOutput {
                 .unwrap_or_default(),
             baseline_comparison: regression
                 .map(|comparison| {
-                    format!(
+                    let summary = format!(
                         "{} using {}: {} ({:.1}) → {} ({:.1}), Δ {}",
                         comparison.baseline,
                         health_model_display_name(&comparison.model),
@@ -536,7 +536,12 @@ impl HtmlOutput {
                         comparison.current_grade,
                         comparison.current_score,
                         format_optional_delta(Some(comparison.score_delta)),
-                    )
+                    );
+                    if comparison.assessment == HealthAssessment::InsufficientData {
+                        format!("{summary}. Insufficient data; score delta is an estimate.")
+                    } else {
+                        summary
+                    }
                 })
                 .unwrap_or_default(),
             scope_change: regression
@@ -550,7 +555,9 @@ impl HtmlOutput {
                 .unwrap_or_default(),
             comparison_verdict: regression
                 .map(|comparison| {
-                    if comparison.failed {
+                    if comparison.assessment == HealthAssessment::InsufficientData {
+                        "INSUFFICIENT DATA".to_string()
+                    } else if comparison.failed {
                         "REGRESSED".to_string()
                     } else {
                         "NO REGRESSION".to_string()
@@ -736,7 +743,9 @@ impl HtmlOutput {
             health_model: health_model_display_name(&report.health.model),
             metrics,
             by_language,
-            health_scope_change: if report.health.scope_changed {
+            health_scope_change: if report.health.assessment == HealthAssessment::InsufficientData {
+                "Insufficient data; health delta is an estimate.".to_string()
+            } else if report.health.scope_changed {
                 format!(
                     "Scope changed: {} → {}. Project delta is informational.",
                     report.health.baseline_scope, report.health.current_scope
@@ -960,6 +969,7 @@ mod tests {
             regression: Some(RegressionReport {
                 baseline: "main".to_string(),
                 model: "default-v2".to_string(),
+                assessment: Default::default(),
                 baseline_score: 84.0,
                 baseline_grade: Grade::B,
                 baseline_scope: HealthScope::TestsOnly,

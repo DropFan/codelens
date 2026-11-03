@@ -533,6 +533,12 @@ impl ConsoleOutput {
                     reg.baseline_scope, reg.current_scope
                 )?;
             }
+            if reg.assessment == HealthAssessment::InsufficientData {
+                writeln!(
+                    writer,
+                    "  Assessment: insufficient data (score delta is an estimate)"
+                )?;
+            }
             if reg.improved_files > 0 {
                 writeln!(writer, "  Improved files: {}", reg.improved_files)?;
             }
@@ -598,7 +604,9 @@ impl ConsoleOutput {
                 writeln!(writer, "{language_table}")?;
             }
 
-            let verdict = if reg.failed {
+            let verdict = if reg.assessment == HealthAssessment::InsufficientData {
+                "INSUFFICIENT DATA".yellow().bold().to_string()
+            } else if reg.failed {
                 "REGRESSED".red().bold().to_string()
             } else {
                 "NO REGRESSION".green().bold().to_string()
@@ -988,6 +996,12 @@ impl ConsoleOutput {
                 writer,
                 "  Scope changed: {} → {} (project delta is informational)",
                 reg.baseline_scope, reg.current_scope
+            )?;
+        }
+        if reg.assessment == HealthAssessment::InsufficientData {
+            writeln!(
+                writer,
+                "  Assessment: insufficient data (score delta is an estimate)"
             )?;
         }
         if reg.improved_files > 0 {
@@ -1498,6 +1512,7 @@ mod tests {
             regression: Some(RegressionReport {
                 baseline: "snapshot old".to_string(),
                 model: "default-v2-no-dup".to_string(),
+                assessment: Default::default(),
                 baseline_score: 93.3,
                 baseline_grade: Grade::A,
                 baseline_scope: crate::insight::health::HealthScope::TestsOnly,

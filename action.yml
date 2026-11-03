@@ -1,7 +1,7 @@
 name: 'Codelens Health Gate'
 description: >-
-  Code health gate for CI: fail a PR when the health score drops below a
-  threshold or regresses, with a sticky PR comment.
+  Block low health scores, regressions, or insufficient v2 measurements,
+  and post a sticky PR comment.
 author: 'Tiger <DropFan@Gmail.com>'
 branding:
   icon: 'activity'
@@ -17,8 +17,12 @@ inputs:
       codelens release tag to install (e.g. "v0.1.5-rust") or "latest".
     required: false
     default: 'latest'
+  health-model:
+    description: 'Scoring model override: "v1" or "v2"; empty uses config, then v1'
+    required: false
+    default: ''
   fail-under:
-    description: 'Fail if project health is below this grade (A/B/C/D) or score (0-100)'
+    description: 'Fail if health is below this grade/score or v2 data is insufficient'
     required: false
     default: ''
   baseline:
@@ -28,7 +32,7 @@ inputs:
     required: false
     default: ''
   fail-on-regression:
-    description: 'Fail when health regressed against the baseline'
+    description: 'Fail when health regressed or the v2 comparison data is insufficient'
     required: false
     default: 'false'
   summary:
@@ -47,6 +51,12 @@ outputs:
   grade:
     description: 'Project health grade (A-F)'
     value: ${{ steps.health.outputs.grade }}
+  assessment:
+    description: 'Assessment status: "scored", "insufficient-data", or "unknown"'
+    value: ${{ steps.health.outputs.assessment }}
+  model:
+    description: 'Effective scoring model reported by codelens'
+    value: ${{ steps.health.outputs.model }}
   gate:
     description: 'Gate result: "passed" or "failed"'
     value: ${{ steps.health.outputs.gate }}
@@ -109,12 +119,19 @@ runs:
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
+        INPUT_HEALTH_MODEL: ${{ inputs.health-model }}
         INPUT_FAIL_UNDER: ${{ inputs.fail-under }}
         INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
         INPUT_SUMMARY: ${{ inputs.summary }}
       run: |
         set -uo pipefail
+        ANALYSIS_ARGS=()
+        case "$INPUT_HEALTH_MODEL" in
+          '') ;;
+          v1|v2) ANALYSIS_ARGS+=(--health-model "$INPUT_HEALTH_MODEL") ;;
+          *) echo "::error::invalid health-model input: expected v1 or v2"; exit 1 ;;
+        esac
         GATE_ARGS=()
         [ -n "$INPUT_FAIL_UNDER" ] && GATE_ARGS+=(--fail-under "$INPUT_FAIL_UNDER")
         if [ -n "$INPUT_BASELINE" ]; then
@@ -131,20 +148,26 @@ runs:
         # never by interpolating the input into the command line.
         read -r -a PATHS <<<"$INPUT_PATH"
 
-        codelens health "${PATHS[@]}" ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} -f markdown -O codelens-health.md
+        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} -f markdown -O codelens-health.md
         GATE_CODE=$?
-        codelens health "${PATHS[@]}" -f json -O codelens-health.json || true
-        codelens health "${PATHS[@]}" -f badge -O codelens-badge.json || true
+        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f json -O codelens-health.json || true
+        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f badge -O codelens-badge.json || true
 
         SCORE=$(jq -r '.score // empty' codelens-health.json 2>/dev/null || true)
         GRADE=$(jq -r '.grade // empty' codelens-health.json 2>/dev/null || true)
-        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
-        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
-        if [ "$GATE_CODE" -eq 0 ]; then
-          echo "gate=passed" >> "$GITHUB_OUTPUT"
-        else
-          echo "gate=failed" >> "$GITHUB_OUTPUT"
-        fi
+        ASSESSMENT=$(jq -r '.assessment // "unknown"' codelens-health.json 2>/dev/null || true)
+        MODEL=$(jq -r '.model // "unknown"' codelens-health.json 2>/dev/null || true)
+        {
+          echo "score=$SCORE"
+          echo "grade=$GRADE"
+          echo "assessment=$ASSESSMENT"
+          echo "model=$MODEL"
+          if [ "$GATE_CODE" -eq 0 ]; then
+            echo "gate=passed"
+          else
+            echo "gate=failed"
+          fi
+        } >> "$GITHUB_OUTPUT"
 
         if [ "$INPUT_SUMMARY" = "true" ]; then
           cat codelens-health.md >> "$GITHUB_STEP_SUMMARY"

@@ -118,13 +118,16 @@ user-facing names `v1` and `v2`.
 
 `--fail-under` accepts a grade (`A`/`B`/`C`/`D`) or a numeric score
 (`75`), turning the health report into a CI quality gate — fail a PR
-when project health drops below your threshold.
+when project health drops below your threshold. A v2 `insufficient-data`
+assessment also fails the gate: its numeric score is an estimate, not evidence
+that the threshold was met.
 
 `--baseline` compares against a trend snapshot (`latest`, `latest~1`, a
 date) or any git ref (`main`, `HEAD~1`, a tag — analyzed via a temporary
 worktree). With `--fail-on-regression`, the gate fails when the project or
 an existing file drops a grade, when either drops at least 5 points within
-the same grade, or when a new file receives an F. Legacy debt stays visible
+the same grade, when a new file receives an F, or when the v2 comparison has
+insufficient measurement coverage. Legacy debt stays visible
 without blocking unrelated changes ("clean as you code"). The delta
 ("B 87.9 → C 77.2") renders in console, markdown (great for PR comments),
 HTML, and JSON. Comparisons use only measurements available on both sides
@@ -233,9 +236,9 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 | CSV | `-f csv` | Spreadsheet compatible |
 | Markdown | `-f markdown` | Documentation friendly |
 | HTML | `-f html` | Interactive report with charts |
-| OpenMetrics | `-f openmetrics` | Prometheus text format for scraping |
-| Badge | `-f badge` | shields.io endpoint JSON (`codelens health -f badge` → live code-health badge) |
-| SARIF | `-f sarif` | SARIF 2.1.0 for GitHub code scanning (`upload-sarif`) or `reviewdog -f=sarif` |
+| OpenMetrics | `-f openmetrics` | Prometheus text format, including health assessment labels |
+| Badge | `-f badge` | shields.io endpoint JSON; insufficient data renders as a neutral badge |
+| SARIF | `-f sarif` | SARIF 2.1.0 findings, including insufficient-data warnings |
 
 ## CI Integration
 

@@ -73,6 +73,13 @@ impl OutputFormat for OpenMetricsOutput {
                     escape_label(&report.health.model),
                     report.health.score_delta
                 )?;
+                writeln!(writer, "# TYPE codelens_diff_health_assessment_info gauge")?;
+                writeln!(
+                    writer,
+                    "codelens_diff_health_assessment_info{{model=\"{}\",assessment=\"{}\"}} 1",
+                    escape_label(&report.health.model),
+                    report.health.assessment
+                )?;
                 writeln!(writer, "# TYPE codelens_diff_regressed_files gauge")?;
                 writeln!(
                     writer,
@@ -159,6 +166,14 @@ fn write_health(
         report.scope,
         report.confidence.coverage
     )?;
+    writeln!(writer, "# TYPE codelens_health_assessment_info gauge")?;
+    writeln!(
+        writer,
+        "codelens_health_assessment_info{{model=\"{}\",scope=\"{}\",assessment=\"{}\"}} 1",
+        escape_label(&report.model),
+        report.scope,
+        report.assessment
+    )?;
     writeln!(writer, "# TYPE codelens_health_tail_score gauge")?;
     writeln!(
         writer,
@@ -188,6 +203,10 @@ fn write_health(
         writer,
         "# TYPE codelens_language_health_confidence_ratio gauge"
     )?;
+    writeln!(
+        writer,
+        "# TYPE codelens_language_health_assessment_info gauge"
+    )?;
     writeln!(writer, "# TYPE codelens_language_health_files gauge")?;
     for language in &report.by_language {
         let name = escape_label(&language.language);
@@ -204,6 +223,11 @@ fn write_health(
         )?;
         writeln!(
             writer,
+            "codelens_language_health_assessment_info{{model=\"{model}\",language=\"{name}\",assessment=\"{}\"}} 1",
+            language.assessment
+        )?;
+        writeln!(
+            writer,
             "codelens_language_health_files{{model=\"{model}\",language=\"{name}\"}} {}",
             language.file_count
         )?;
@@ -215,6 +239,13 @@ fn write_health(
             "codelens_test_health_score{{model=\"{}\"}} {}",
             escape_label(&report.model),
             test_health.score
+        )?;
+        writeln!(writer, "# TYPE codelens_test_health_assessment_info gauge")?;
+        writeln!(
+            writer,
+            "codelens_test_health_assessment_info{{model=\"{}\",assessment=\"{}\"}} 1",
+            escape_label(&report.model),
+            test_health.assessment
         )?;
     }
     Ok(())
@@ -298,6 +329,9 @@ mod tests {
 
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("codelens_health_score{model=\"default-v2-no-dup\"} 82.5"));
+        assert!(text.contains(
+            "codelens_health_assessment_info{model=\"default-v2-no-dup\",scope=\"production\",assessment=\"scored\"} 1"
+        ));
     }
 
     #[test]
@@ -337,6 +371,9 @@ mod tests {
 
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("codelens_diff_health_delta{model=\"default-v2-no-dup\"} 0.0"));
+        assert!(text.contains(
+            "codelens_diff_health_assessment_info{model=\"default-v2-no-dup\",assessment=\"insufficient-data\"} 1"
+        ));
         assert!(text.contains("codelens_diff_regressed_files{model=\"default-v2-no-dup\"} 0"));
     }
 }

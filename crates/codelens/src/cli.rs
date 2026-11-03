@@ -114,7 +114,7 @@ pub struct HealthArgs {
     pub paths: Vec<PathBuf>,
 
     /// Exit non-zero if the project health is below this grade (A/B/C/D)
-    /// or numeric score (0-100). Turns health into a CI quality gate.
+    /// or numeric score (0-100). V2 insufficient-data estimates also fail.
     #[arg(long, value_name = "GRADE|SCORE")]
     pub fail_under: Option<String>,
 
@@ -125,7 +125,7 @@ pub struct HealthArgs {
 
     /// Exit non-zero when health regressed against --baseline: the project
     /// or an existing file dropped a grade or at least 5 points, or a new
-    /// file received an F.
+    /// file received an F, or the comparison has insufficient v2 data.
     /// Only changes fail the gate, never pre-existing debt.
     #[arg(long, requires = "baseline")]
     pub fail_on_regression: bool,
@@ -207,7 +207,8 @@ pub struct DiffArgs {
     /// Target git ref (defaults to the working tree).
     pub to: Option<String>,
 
-    /// Exit non-zero when health regressed from FROM to TO.
+    /// Exit non-zero when health regressed from FROM to TO, or when the
+    /// comparison has insufficient v2 data.
     #[arg(long)]
     pub fail_on_regression: bool,
 
@@ -678,5 +679,18 @@ mod tests {
         assert!(help.contains("Other subcommands are unaffected"));
         assert!(help.contains("health . --health-model v2"));
         assert!(help.contains("diff main --health-model v2"));
+    }
+
+    #[test]
+    fn health_gate_help_explains_insufficient_data_behavior() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("health")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("insufficient-data estimates also fail"));
+        assert!(help.contains("comparison has insufficient v2 data"));
     }
 }

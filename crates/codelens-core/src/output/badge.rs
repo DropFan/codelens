@@ -8,6 +8,7 @@ use std::io::Write;
 use serde::Serialize;
 
 use crate::error::Result;
+use crate::insight::health::{HealthAssessment, HealthReport};
 use crate::insight::Grade;
 
 use super::format::{OutputFormat, OutputOptions, Report};
@@ -46,6 +47,24 @@ fn grade_color(grade: Grade) -> &'static str {
     }
 }
 
+fn health_badge(report: &HealthReport) -> ShieldsBadge {
+    if report.assessment == HealthAssessment::InsufficientData {
+        return ShieldsBadge {
+            schema_version: 1,
+            label: "code health".to_string(),
+            message: "insufficient data".to_string(),
+            color: "lightgrey".to_string(),
+        };
+    }
+
+    ShieldsBadge {
+        schema_version: 1,
+        label: "code health".to_string(),
+        message: format!("{} ({:.1})", report.grade, report.score),
+        color: grade_color(report.grade).to_string(),
+    }
+}
+
 fn format_thousands(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();
@@ -75,18 +94,8 @@ impl OutputFormat for BadgeOutput {
     ) -> Result<()> {
         let badge = match report {
             // The health grade is the badge with the most signal
-            Report::Health(r) => ShieldsBadge {
-                schema_version: 1,
-                label: "code health".to_string(),
-                message: format!("{} ({:.1})", r.grade, r.score),
-                color: grade_color(r.grade).to_string(),
-            },
-            Report::Combined(c) => ShieldsBadge {
-                schema_version: 1,
-                label: "code health".to_string(),
-                message: format!("{} ({:.1})", c.health.grade, c.health.score),
-                color: grade_color(c.health.grade).to_string(),
-            },
+            Report::Health(r) => health_badge(r),
+            Report::Combined(c) => health_badge(&c.health),
             Report::Analysis(r) => ShieldsBadge {
                 schema_version: 1,
                 label: "lines of code".to_string(),
@@ -115,22 +124,31 @@ impl OutputFormat for BadgeOutput {
                 }
                 .to_string(),
             },
-            Report::Diff(r) => ShieldsBadge {
-                schema_version: 1,
-                label: "health diff".to_string(),
-                message: format!(
-                    "{} ({:.1}) Δ {:+.1}",
-                    r.to_grade, r.to_score, r.health.score_delta
-                ),
-                color: if r.health.failed {
-                    "red"
-                } else if r.health.score_delta >= 0.0 {
-                    "brightgreen"
-                } else {
-                    "yellow"
+            Report::Diff(r) => {
+                let insufficient = r.health.assessment == HealthAssessment::InsufficientData;
+                ShieldsBadge {
+                    schema_version: 1,
+                    label: "health diff".to_string(),
+                    message: if insufficient {
+                        "insufficient data".to_string()
+                    } else {
+                        format!(
+                            "{} ({:.1}) Δ {:+.1}",
+                            r.to_grade, r.to_score, r.health.score_delta
+                        )
+                    },
+                    color: if insufficient {
+                        "lightgrey"
+                    } else if r.health.failed {
+                        "red"
+                    } else if r.health.score_delta >= 0.0 {
+                        "brightgreen"
+                    } else {
+                        "yellow"
+                    }
+                    .to_string(),
                 }
-                .to_string(),
-            },
+            }
             Report::Trend(r) => {
                 let delta = r.delta.code.signed_delta();
                 ShieldsBadge {
@@ -201,5 +219,33 @@ mod tests {
         assert_eq!(v["label"], "code health");
         assert_eq!(v["message"], "B (82.3)");
         assert_eq!(v["color"], "green");
+    }
+
+    #[test]
+    fn insufficient_health_badge_is_neutral() {
+        let report = HealthReport {
+            score: 100.0,
+            grade: Grade::A,
+            model: "default-v2".to_string(),
+            dimensions: vec![],
+            by_directory: vec![],
+            worst_files: vec![],
+            scope: crate::insight::health::HealthScope::Production,
+            confidence: crate::insight::health::Confidence::from_coverage(0.45),
+            assessment: HealthAssessment::InsufficientData,
+            tail_risk: Default::default(),
+            by_language: vec![],
+            test_health: None,
+            regression: None,
+        };
+
+        let mut buf = Vec::new();
+        BadgeOutput::new()
+            .write(&Report::Health(report), &OutputOptions::default(), &mut buf)
+            .unwrap();
+
+        let value: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(value["message"], "insufficient data");
+        assert_eq!(value["color"], "lightgrey");
     }
 }

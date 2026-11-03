@@ -19,6 +19,10 @@ use super::{
 };
 use crate::cli;
 
+mod gate;
+
+use gate::{failure_reason, parse_fail_under};
+
 pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -> Result<ExitCode> {
     // Validate the threshold BEFORE the (potentially long) analysis
     let threshold = args
@@ -90,29 +94,17 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let model = scoring_model_for(config.health_model, result.summary.dup_scanned);
     let mut report = health::score(&result, model.as_ref(), top_n);
     report.regression = regression;
-    let score = report.score;
-    let grade = report.grade;
-    let regression_failed = report.regression.as_ref().is_some_and(|r| r.failed);
+    let gate_failure = failure_reason(
+        &report,
+        threshold,
+        args.fail_under.as_deref(),
+        args.fail_on_regression,
+        args.baseline.as_deref(),
+    );
     write_report(Report::Health(report), &config.output)?;
 
-    if let Some(threshold) = threshold {
-        if score < threshold {
-            eprintln!(
-                "{}: health score {:.1} (grade {}) is below --fail-under threshold {}",
-                "gate failed".red().bold(),
-                score,
-                grade,
-                args.fail_under.as_deref().unwrap_or_default(),
-            );
-            return Ok(ExitCode::FAILURE);
-        }
-    }
-    if args.fail_on_regression && regression_failed {
-        eprintln!(
-            "{}: health regressed against baseline '{}'",
-            "gate failed".red().bold(),
-            args.baseline.as_deref().unwrap_or_default(),
-        );
+    if let Some(reason) = gate_failure {
+        eprintln!("{}: {reason}", "gate failed".red().bold());
         return Ok(ExitCode::FAILURE);
     }
     Ok(ExitCode::SUCCESS)
@@ -145,27 +137,6 @@ fn resolve_baseline(
     })?;
     let result = analyze_at_git_ref(&git_client, reference, paths, config)?;
     Ok((result, format!("git:{reference}")))
-}
-
-/// Parse a `--fail-under` threshold: a grade letter (A/B/C/D, using the
-/// scoring model's grade boundaries) or a numeric score (0-100).
-fn parse_fail_under(input: &str) -> Result<f64> {
-    match input.trim() {
-        "A" | "a" => Ok(90.0),
-        "B" | "b" => Ok(80.0),
-        "C" | "c" => Ok(70.0),
-        "D" | "d" => Ok(60.0),
-        other => {
-            if let Ok(score) = other.parse::<f64>() {
-                if (0.0..=100.0).contains(&score) {
-                    return Ok(score);
-                }
-            }
-            anyhow::bail!(
-                "invalid --fail-under value '{other}': expected a grade (A/B/C/D) or a score between 0 and 100"
-            )
-        }
-    }
 }
 
 #[cfg(test)]
@@ -286,6 +257,75 @@ mod tests {
             "measured duplication must keep failing the gate no matter \
              how the baseline snapshot was collected"
         );
+    }
+
+    #[test]
+    fn v2_insufficient_data_is_reportable_but_cannot_pass_fail_under() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("styles.css"), ".card { color: red; }\n").unwrap();
+
+        let report_only = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--health-model",
+            "v2",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &report_only.command else {
+            panic!("expected health subcommand");
+        };
+        let code = run_health(args, &report_only.advanced).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+
+        let gated = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--health-model",
+            "v2",
+            "--fail-under",
+            "A",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &gated.command else {
+            panic!("expected health subcommand");
+        };
+        let code = run_health(args, &gated.advanced).unwrap();
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    }
+
+    #[test]
+    fn v2_insufficient_comparison_cannot_pass_regression_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("styles.css"), ".card { color: red; }\n").unwrap();
+        let baseline = analyze(&[dir.path()], &Config::default()).unwrap();
+        trend::save_snapshot(dir.path(), baseline, None, None, None).unwrap();
+
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--health-model",
+            "v2",
+            "--baseline",
+            "latest",
+            "--fail-on-regression",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+
+        let code = run_health(args, &cli.advanced).unwrap();
+
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
     }
 
     #[test]

@@ -303,6 +303,12 @@ impl MarkdownOutput {
                     reg.baseline_scope, reg.current_scope
                 )?;
             }
+            if reg.assessment == HealthAssessment::InsufficientData {
+                writeln!(
+                    writer,
+                    "**Assessment:** insufficient data (score delta is an estimate)"
+                )?;
+            }
             writeln!(writer)?;
             if !reg.regressed_files.is_empty() {
                 writeln!(writer, "## Regressed Files")?;
@@ -330,7 +336,9 @@ impl MarkdownOutput {
             writeln!(
                 writer,
                 "**Verdict:** {}",
-                if reg.failed {
+                if reg.assessment == HealthAssessment::InsufficientData {
+                    "🟡 INSUFFICIENT DATA"
+                } else if reg.failed {
                     "🔴 REGRESSED"
                 } else {
                     "🟢 NO REGRESSION"
@@ -631,6 +639,12 @@ impl MarkdownOutput {
                 writer,
                 "**Scope changed:** {} → {} (project delta is informational and does not affect the gate)",
                 reg.baseline_scope, reg.current_scope
+            )?;
+        }
+        if reg.assessment == HealthAssessment::InsufficientData {
+            writeln!(
+                writer,
+                "**Assessment:** insufficient data (score delta is an estimate)"
             )?;
         }
         writeln!(writer)?;
@@ -1110,6 +1124,7 @@ mod tests {
             regression: Some(RegressionReport {
                 baseline: "snapshot old".to_string(),
                 model: "default-v2-no-dup".to_string(),
+                assessment: Default::default(),
                 baseline_score: 93.3,
                 baseline_grade: Grade::A,
                 baseline_scope: crate::insight::health::HealthScope::TestsOnly,

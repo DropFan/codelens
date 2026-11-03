@@ -22,6 +22,7 @@ jobs:
           fetch-depth: 0        # baseline 需要能解析到基线分支
       - uses: DropFan/codelens@rust
         with:
+          health-model: 'v2'                            # 可选；默认仍为 v1
           fail-under: 'C'                                # 绝对阈值门禁
           baseline: 'origin/${{ github.base_ref }}'      # 回归门禁基线
           fail-on-regression: 'true'
@@ -35,9 +36,10 @@ jobs:
 |------|------|------|
 | `path` | `.` | 要分析的路径（空格分隔多个） |
 | `version` | `latest` | codelens 版本（release tag）。`baseline` 回归门禁需要 v0.1.5-rust **之后**的版本；装到旧版时 Action 会明确报错而不是静默跳过门禁 |
-| `fail-under` | 空 | 绝对门禁：健康分低于该等级（A/B/C/D）或分数（0-100）时失败 |
+| `health-model` | 空 | 可选 `v1`/`v2`；留空时读取 `.codelens.toml`，未配置则使用兼容默认值 v1 |
+| `fail-under` | 空 | 绝对门禁：健康分低于该等级（A/B/C/D）或分数（0-100）时失败；v2 数据不足也会失败 |
 | `baseline` | 空 | 回归基线 git ref（推荐 `origin/${{ github.base_ref }}`） |
-| `fail-on-regression` | `false` | 相对基线出现回归时失败 |
+| `fail-on-regression` | `false` | 相对基线出现回归、或 v2 比较数据不足时失败 |
 | `summary` | `true` | 报告写入 step summary |
 | `comment` | `true` | 贴/更新 PR 置顶评论（仅 pull_request 事件） |
 
@@ -47,11 +49,13 @@ jobs:
 |------|------|
 | `score` | 项目健康分（0-100） |
 | `grade` | 项目健康等级（A-F） |
+| `assessment` | 评估状态：`scored`、`insufficient-data`，旧版本 CLI 无此字段时为 `unknown` |
+| `model` | 实际使用的评分模型（如 `default`、`default-v2`） |
 | `gate` | `passed` / `failed` |
 
 ## 健康分徽章
 
-Action 每次运行都会生成 `codelens-badge.json`（shields.io endpoint 格式）。把它发布到 gist 或 `gh-pages`，README 就能挂实时健康分徽章：
+Action 每次运行都会生成 `codelens-badge.json`（shields.io endpoint 格式）。v2 数据不足时徽章显示中性的 `insufficient data`，不会把估算等级显示成绿色通过。把它发布到 gist 或 `gh-pages`，README 就能挂实时健康分徽章：
 
 ```yaml
       - name: Update badge gist

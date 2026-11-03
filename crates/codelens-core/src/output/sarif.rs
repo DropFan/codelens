@@ -79,6 +79,11 @@ impl OutputFormat for SarifOutput {
 fn rules() -> Value {
     json!([
         {
+            "id": "codelens/health-insufficient-data",
+            "shortDescription": { "text": "Health score has insufficient measurement coverage" },
+            "helpUri": "https://github.com/DropFan/codelens#health-score",
+        },
+        {
             "id": "codelens/health-grade",
             "shortDescription": { "text": "File health grade is poor" },
             "helpUri": "https://github.com/DropFan/codelens#health-score",
@@ -115,6 +120,19 @@ fn location(uri: &str) -> Value {
 fn health_results(health: &crate::insight::health::HealthReport) -> Vec<Value> {
     let mut results = Vec::new();
 
+    if health.assessment == crate::insight::health::HealthAssessment::InsufficientData {
+        results.push(json!({
+            "ruleId": "codelens/health-insufficient-data",
+            "level": "warning",
+            "message": { "text": format!(
+                "Health measurement coverage is {:.0}% for model {}; score {:.1} is an estimate",
+                health.confidence.coverage * 100.0,
+                health.model,
+                health.score
+            )},
+        }));
+    }
+
     for file in &health.worst_files {
         let level = match file.grade {
             Grade::F => "error",
@@ -140,33 +158,37 @@ fn health_results(health: &crate::insight::health::HealthReport) -> Vec<Value> {
 }
 
 fn regression_results(regression: &crate::insight::health::RegressionReport) -> Vec<Value> {
-    regression
-        .regressed_files
-        .iter()
-        .map(|file| {
-            let message = if file.is_new {
-                format!(
-                    "New file fails the health gate against {}: {} ({:.1})",
-                    regression.baseline, file.to_grade, file.to_score
-                )
-            } else {
-                format!(
-                    "Health regressed against {}: {} ({:.1}) → {} ({:.1})",
-                    regression.baseline,
-                    file.from_grade,
-                    file.from_score,
-                    file.to_grade,
-                    file.to_score
-                )
-            };
-            json!({
-                "ruleId": "codelens/health-regression",
-                "level": "error",
-                "message": { "text": message },
-                "locations": [location(&file.path.display().to_string())],
-            })
+    let mut results = Vec::new();
+    if regression.assessment == crate::insight::health::HealthAssessment::InsufficientData {
+        results.push(json!({
+            "ruleId": "codelens/health-insufficient-data",
+            "level": "warning",
+            "message": { "text": format!(
+                "Health comparison against {} has insufficient measurement coverage; the score delta is an estimate",
+                regression.baseline
+            )},
+        }));
+    }
+    results.extend(regression.regressed_files.iter().map(|file| {
+        let message = if file.is_new {
+            format!(
+                "New file fails the health gate against {}: {} ({:.1})",
+                regression.baseline, file.to_grade, file.to_score
+            )
+        } else {
+            format!(
+                "Health regressed against {}: {} ({:.1}) → {} ({:.1})",
+                regression.baseline, file.from_grade, file.from_score, file.to_grade, file.to_score
+            )
+        };
+        json!({
+            "ruleId": "codelens/health-regression",
+            "level": "error",
+            "message": { "text": message },
+            "locations": [location(&file.path.display().to_string())],
         })
-        .collect()
+    }));
+    results
 }
 
 fn hotspot_results(report: &crate::insight::hotspot::HotspotReport) -> Vec<Value> {
@@ -255,6 +277,7 @@ mod tests {
             regression: Some(RegressionReport {
                 baseline: "git:main".to_string(),
                 model: "default-v2".to_string(),
+                assessment: Default::default(),
                 baseline_score: 80.0,
                 baseline_grade: Grade::B,
                 baseline_scope: crate::insight::health::HealthScope::Production,
@@ -305,6 +328,28 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("New file"));
+    }
+
+    #[test]
+    fn test_sarif_warns_when_health_data_is_insufficient() {
+        let mut report = make_health();
+        report.assessment = crate::insight::health::HealthAssessment::InsufficientData;
+        report.confidence = crate::insight::health::Confidence::from_coverage(0.45);
+        report.regression = None;
+        let mut buf = Vec::new();
+
+        SarifOutput::new()
+            .write(&Report::Health(report), &OutputOptions::default(), &mut buf)
+            .unwrap();
+
+        let doc: Value = serde_json::from_slice(&buf).unwrap();
+        let results = doc["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results[0]["ruleId"], "codelens/health-insufficient-data");
+        assert_eq!(results[0]["level"], "warning");
+        assert!(results[0]["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("45%"));
     }
 
     #[test]
