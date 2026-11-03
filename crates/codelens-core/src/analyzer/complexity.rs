@@ -670,7 +670,9 @@ mod tests {
             extensions: vec![".rs".to_string()],
             line_comments: vec!["//".to_string()],
             block_comments: vec![("/*".to_string(), "*/".to_string())],
-            function_pattern: Some(r"(?m)^\s*(pub\s+)?(async\s+)?fn\s+\w+".to_string()),
+            function_pattern: Some(
+                r"(?m)^\s*(pub(?:\([^)]*\))?\s+)?(async\s+)?fn\s+\w+".to_string(),
+            ),
             complexity_keywords: vec![
                 "if".to_string(),
                 "else".to_string(),
@@ -699,10 +701,14 @@ fn main() {
 pub fn helper() {}
 
 pub async fn async_fn() {}
+
+pub(crate) fn crate_visible() {}
+
+pub(super) async fn parent_visible() {}
 "#;
 
         let complexity = analyzer.analyze(content, &lang);
-        assert_eq!(complexity.functions, 3);
+        assert_eq!(complexity.functions, 5);
         assert!(complexity.functions_measured);
         assert!(complexity.control_flow_measured);
     }

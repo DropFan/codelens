@@ -21,7 +21,7 @@ name = "Rust"
 extensions = [".rs"]
 line_comments = ["//"]
 block_comments = [["/*", "*/"]]
-function_pattern = "(?m)^\\s*(pub\\s+)?(async\\s+)?fn\\s+\\w+"
+function_pattern = "(?m)^\\s*(pub(?:\\([^)]*\\))?\\s+)?(async\\s+)?fn\\s+\\w+"
 complexity_keywords = ["if", "else", "for", "while", "loop", "match", "?", "&&", "||"]
 inline_test_patterns = [
     "(?ms)^[ \\t]*#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)\\s*\\][ \\t]*(?:\\r?\\n[ \\t]*#\\s*\\[[^]\\r\\n]+\\][ \\t]*)*(?:\\r?\\n)?[ \\t]*(?:pub(?:\\([^)]*\\))?[ \\t]+)?mod[ \\t]+\\w+[ \\t]*\\{",
