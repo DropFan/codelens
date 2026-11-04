@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -148,6 +148,12 @@
         h2 {
             margin-bottom: 1rem;
         }
+        section { max-width: 100%; overflow-x: auto; }
+        @media print {
+            body { background: #fff; color: #111; }
+            .charts-section { display: none; }
+            table { color: #111; }
+        }
     </style>
 </head>
 <body>
@@ -187,11 +193,11 @@
         <section class="charts-section">
             <div class="chart-container">
                 <h3>Language Distribution</h3>
-                <canvas id="languageChart"></canvas>
+                <canvas id="languageChart" role="img" aria-label="Language distribution chart">Language distribution is available in the table below.</canvas>
             </div>
             <div class="chart-container">
                 <h3>Code vs Comments</h3>
-                <canvas id="codeCommentChart"></canvas>
+                <canvas id="codeCommentChart" role="img" aria-label="Code and comment line chart">Line counts are available in the report cards and table.</canvas>
             </div>
         </section>
 
@@ -241,6 +247,7 @@
             {% endfor %}
         ];
 
+        if (typeof Chart !== 'undefined') {
         new Chart(document.getElementById('languageChart'), {
             type: 'doughnut',
             data: {
@@ -283,6 +290,7 @@
                 }
             }
         });
+        }
     </script>
 </body>
 </html>

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codelens - Code Health Report</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -15,222 +15,172 @@
             --accent-blue: #58a6ff;
             --accent-green: #3fb950;
             --accent-yellow: #d29922;
-            --accent-purple: #a371f7;
             --accent-red: #f85149;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary); color: var(--text-primary); line-height: 1.6;
-        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
         .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
-        header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
-        header h1 {
-            font-size: 2.5rem;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-        }
-        .grade-badge {
-            display: inline-block; font-size: 4rem; font-weight: bold; width: 100px; height: 100px;
-            line-height: 100px; text-align: center; border-radius: 50%; margin: 1rem auto;
-        }
-        .grade-A { background: #1a3a1a; color: var(--accent-green); border: 3px solid var(--accent-green); }
-        .grade-B { background: #1a2a3a; color: var(--accent-blue); border: 3px solid var(--accent-blue); }
-        .grade-C { background: #2a2a1a; color: var(--accent-yellow); border: 3px solid var(--accent-yellow); }
-        .grade-D { background: #2a1a1a; color: #f0883e; border: 3px solid #f0883e; }
-        .grade-F { background: #2a1010; color: var(--accent-red); border: 3px solid var(--accent-red); }
-        .assessment-badge {
-            display: inline-block; font-size: 1.5rem; font-weight: bold; padding: 0.8rem 1.2rem;
-            border-radius: 12px; margin: 1rem auto; color: var(--accent-yellow);
-            background: #2a2a1a; border: 2px solid var(--accent-yellow);
-        }
-        .score-text { font-size: 1.2rem; color: var(--text-secondary); margin-top: 0.5rem; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
-        .stat-card {
-            background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; text-align: center;
-            border: 1px solid var(--bg-tertiary);
-        }
-        .stat-card .value { font-size: 1.8rem; font-weight: bold; }
-        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
-        .charts-section { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 3rem; }
-        .chart-container { background: var(--bg-secondary); border-radius: 12px; padding: 1.5rem; border: 1px solid var(--bg-tertiary); }
-        .chart-container h3 { margin-bottom: 1rem; color: var(--text-secondary); }
-        table { width: 100%; border-collapse: collapse; background: var(--bg-secondary); border-radius: 12px; overflow: hidden; margin-bottom: 2rem; }
+        header { text-align: center; margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
+        header h1 { margin: 0; font-size: 2.3rem; }
+        h2 { margin: 2.5rem 0 1rem; }
+        .muted { color: var(--text-secondary); }
+        .grade-badge { display: inline-grid; place-items: center; width: 96px; height: 96px; margin: 1rem auto 0.5rem; border: 3px solid currentColor; border-radius: 50%; font-size: 3.5rem; font-weight: 700; }
+        .grade-A { color: var(--accent-green); }
+        .grade-B { color: var(--accent-blue); }
+        .grade-C { color: var(--accent-yellow); }
+        .grade-D { color: #f0883e; }
+        .grade-F { color: var(--accent-red); }
+        .assessment-badge { display: inline-block; margin: 1rem auto; padding: 0.8rem 1.2rem; border: 2px solid var(--accent-yellow); border-radius: 12px; color: var(--accent-yellow); font-size: 1.4rem; font-weight: 700; }
+        .score-text { margin-top: 0.45rem; color: var(--text-secondary); }
+        .risk-alert { max-width: 900px; margin: 1rem auto 0; padding: 0.9rem 1rem; border: 1px solid var(--accent-red); border-radius: 10px; background: rgba(248,81,73,0.08); }
+        .risk-alert strong { color: var(--accent-red); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+        .stat-card, .chart-container, .next-steps { padding: 1.25rem; border: 1px solid var(--bg-tertiary); border-radius: 12px; background: var(--bg-secondary); }
+        .stat-card .value { font-size: 1.7rem; font-weight: 700; }
+        .stat-card .label { margin-top: 0.4rem; color: var(--text-secondary); }
+        .progress-bar { min-width: 70px; height: 8px; margin-top: 0.5rem; overflow: hidden; border-radius: 4px; background: var(--bg-tertiary); }
+        .fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
+        .chart-container { max-width: 480px; margin: 1.5rem auto; }
+        .chart-note { color: var(--text-secondary); font-size: 0.9rem; text-align: center; }
+        .table-scroll { max-width: 100%; overflow-x: auto; margin-bottom: 1.5rem; }
+        table { width: 100%; min-width: 680px; border-collapse: collapse; background: var(--bg-secondary); }
         th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
-        th { background: var(--bg-tertiary); font-weight: 600; color: var(--text-secondary); }
-        tr:hover { background: var(--bg-tertiary); }
-        .progress-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; min-width: 80px; }
-        .progress-bar .fill { height: 100%; border-radius: 4px; }
-        h2 { margin-bottom: 1rem; margin-top: 2rem; }
-        footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+        th { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .next-steps ol { margin: 0; padding-left: 1.25rem; }
+        code { color: #79c0ff; }
+        footer { margin-top: 3rem; padding: 1.5rem 0; text-align: center; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); }
+        a { color: var(--accent-blue); }
+        @media (max-width: 720px) { .container { padding: 1rem; } }
+        @media print {
+            :root { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #ddd; --text-primary: #111; --text-secondary: #444; }
+            body { background: #fff; color: #111; font-size: 10pt; }
+            .container { max-width: none; padding: 0; }
+            .chart-container { display: none; }
+            .stat-card, .next-steps { break-inside: avoid; }
+            table { min-width: 0; }
+            a { color: #111; text-decoration: none; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <main class="container">
         <header>
             <h1>Code Health Report</h1>
-            <p style="color: var(--text-secondary)">Generated: {{ generated_at }} | Model: {{ model }}</p>
+            <p class="muted">Generated {{ generated_at }} by Codelens {{ tool_version }}</p>
             {% if is_scored %}
-            <div class="grade-badge grade-{{ grade }}">{{ grade }}</div>
-            <div class="score-text">Score: {{ score }} / 100 | Scope: {{ scope }} | Confidence: {{ confidence }}</div>
+            <div class="grade-badge grade-{{ grade }}" aria-label="Overall grade {{ grade }}">{{ grade }}</div>
+            <div class="score-text"><strong>Score: {{ score }} / 100</strong> | Model: {{ model }}</div>
             {% else %}
             <div class="assessment-badge">Insufficient data</div>
-            <div class="score-text">Estimated score: {{ score }} / 100 | Scope: {{ scope }} | Confidence: {{ confidence }}</div>
+            <div class="score-text"><strong>Estimated score: {{ score }} / 100</strong> | Model: {{ model }}</div>
             {% endif %}
-            <div class="score-text">Tail 10%: {{ tail_score }} | F files: {{ failing_files }} ({{ failing_ratio }}%)</div>
-            {% if !test_health.is_empty() %}<div class="score-text">Test code: {{ test_health }}</div>{% endif %}
+            <div class="score-text">Health analysis scope: {{ scope }} | Measurement confidence: {{ confidence }}</div>
+            <div class="score-text">Worst 10% file average: {{ tail_score }} | F-grade files: {{ failing_files }} ({{ failing_ratio }})</div>
+            {% if !test_health.is_empty() %}<div class="score-text">Test code health: {{ test_health }}</div>{% endif %}
+            {% if failing_files > 0 %}<div class="risk-alert"><strong>Immediate attention:</strong> {{ failing_files }} file(s) are graded F and should not be hidden by the overall grade.</div>{% endif %}
         </header>
+
+        <section class="next-steps">
+            <h2 style="margin-top:0">Recommended Next Steps</h2>
+            <ol>
+                <li>Run <code>codelens hotspot . --functions</code> to locate the functions absorbing the most churn.</li>
+                <li>Run <code>codelens health &lt;directory&gt; --top 5</code> for a focused health report.</li>
+            </ol>
+        </section>
 
         {% if !baseline_comparison.is_empty() %}
         <section>
             <h2>Baseline Comparison</h2>
             <div class="stat-card">
-                <div class="value" style="font-size: 1.2rem">{{ comparison_verdict }}</div>
+                <div class="value">{{ comparison_verdict }}</div>
                 <div class="label">{{ baseline_comparison }}</div>
                 {% if !scope_change.is_empty() %}<div class="label">{{ scope_change }}</div>{% endif %}
             </div>
         </section>
         {% endif %}
 
-        <section class="stats-grid">
-            {% for dim in dimensions %}
-            <div class="stat-card">
-                <div class="value" style="color: {% match dim.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}">{{ dim.score_display }}</div>
-                <div class="label">{{ dim.dimension }}</div>
-                <div class="progress-bar" style="margin-top: 0.5rem">
-                    <div class="fill" style="width: {{ dim.score_display }}%; background: {% match dim.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div>
+        <section>
+            <h2>Health Dimensions</h2>
+            <div class="stats-grid">
+                {% for dim in dimensions %}
+                <div class="stat-card">
+                    <div class="value">{{ dim.score_display }}</div>
+                    <div class="label">{{ dim.dimension }} — grade {{ dim.grade }}</div>
+                    <div class="progress-bar"><div class="fill" style="width: {{ dim.score_display }}%"></div></div>
                 </div>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </section>
-
-        <section style="display: flex; justify-content: center; margin-bottom: 3rem;">
-            <div class="chart-container" style="max-width: 420px; width: 100%;">
+            <div class="chart-container">
                 <h3>Health Dimensions</h3>
-                <canvas id="radarChart"></canvas>
+                <canvas id="radarChart" role="img" aria-label="Health dimension radar chart">Health dimension scores are listed in the cards above.</canvas>
+                <p class="chart-note">The chart is optional; every score remains available as text.</p>
             </div>
         </section>
 
         {% if !by_language.is_empty() %}
         <section>
             <h2>By Language</h2>
-            <table>
-                <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code</th><th>Confidence</th><th>Tail 10%</th></tr></thead>
-                <tbody>
-                {% for language in by_language %}
-                <tr>
-                    <td><strong>{{ language.language }}</strong></td>
-                    <td>{{ language.score_display }}</td>
-                    <td>{{ language.grade }}</td>
-                    <td>{{ language.file_count }}</td>
-                    <td>{{ language.code_lines }}</td>
-                    <td>{{ language.confidence }}</td>
-                    <td>{{ language.tail_score }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-scroll"><table>
+                <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code</th><th>Measurement confidence</th><th>Worst 10%</th></tr></thead>
+                <tbody>{% for language in by_language %}<tr><td><strong>{{ language.language }}</strong></td><td>{{ language.score_display }}</td><td>{{ language.grade }}</td><td>{{ language.file_count }}</td><td>{{ language.code_lines }}</td><td>{{ language.confidence }}</td><td>{{ language.tail_score }}</td></tr>{% endfor %}</tbody>
+            </table></div>
         </section>
         {% endif %}
 
         {% if !language_changes.is_empty() %}
         <section>
             <h2>Language Health Changes</h2>
-            <table>
+            <div class="table-scroll"><table>
                 <thead><tr><th>Language</th><th>Status</th><th>Before</th><th>After</th><th>Delta</th></tr></thead>
-                <tbody>
-                {% for language in language_changes %}
-                <tr>
-                    <td><strong>{{ language.language }}</strong></td>
-                    <td>{{ language.status }}</td>
-                    <td>{{ language.before }}</td>
-                    <td>{{ language.after }}</td>
-                    <td>{{ language.delta }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                <tbody>{% for language in language_changes %}<tr><td><strong>{{ language.language }}</strong></td><td>{{ language.status }}</td><td>{{ language.before }}</td><td>{{ language.after }}</td><td>{{ language.delta }}</td></tr>{% endfor %}</tbody>
+            </table></div>
         </section>
         {% endif %}
 
         {% if !by_directory.is_empty() %}
         <section>
             <h2>By Directory (worst first)</h2>
-            <table>
-                <thead><tr><th>Directory</th><th>Score</th><th>Grade</th><th>Files</th><th></th></tr></thead>
-                <tbody>
-                {% for dir in by_directory %}
-                <tr>
-                    <td><strong>{{ dir.path }}</strong></td>
-                    <td>{{ dir.score_display }}</td>
-                    <td>{{ dir.grade }}</td>
-                    <td>{{ dir.file_count }}</td>
-                    <td><div class="progress-bar"><div class="fill" style="width: {{ dir.score_display }}%; background: {% match dir.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div></div></td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-scroll"><table>
+                <thead><tr><th>Directory</th><th>Score</th><th>Grade</th><th>Evaluated files</th></tr></thead>
+                <tbody>{% for dir in by_directory %}<tr><td><strong>{{ dir.path }}</strong></td><td>{{ dir.score_display }}</td><td>{{ dir.grade }}</td><td>{{ dir.file_count }}</td></tr>{% endfor %}</tbody>
+            </table></div>
         </section>
         {% endif %}
 
         {% if !worst_files.is_empty() %}
         <section>
             <h2>Worst Files</h2>
-            <table>
-                <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Top Issue</th><th></th></tr></thead>
-                <tbody>
-                {% for file in worst_files %}
-                <tr>
-                    <td><strong>{{ file.path }}</strong></td>
-                    <td>{{ file.score_display }}</td>
-                    <td>{{ file.grade }}</td>
-                    <td>{{ file.top_issue }}</td>
-                    <td><div class="progress-bar"><div class="fill" style="width: {{ file.score_display }}%; background: {% match file.grade %}{% when Grade::A %}var(--accent-green){% when Grade::B %}var(--accent-blue){% when Grade::C %}var(--accent-yellow){% when Grade::D %}#f0883e{% when Grade::F %}var(--accent-red){% endmatch %}"></div></div></td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-scroll"><table>
+                <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Main issue</th></tr></thead>
+                <tbody>{% for file in worst_files %}<tr><td><strong>{{ file.path }}</strong></td><td>{{ file.score_display }}</td><td>{{ file.grade }}</td><td>{{ file.top_issue }}</td></tr>{% endfor %}</tbody>
+            </table></div>
         </section>
         {% endif %}
 
         <footer>
-            <p>Generated by <a href="https://github.com/DropFan/codelens" style="color: var(--accent-blue)"><strong>Codelens</strong></a> by <a href="https://github.com/DropFan" style="color: var(--accent-blue)">Tiger</a> | High-performance code analysis tool powered by Rust</p>
+            Generated by <a href="https://github.com/DropFan/codelens"><strong>Codelens</strong></a> {{ tool_version }}.
         </footer>
-    </div>
-
+    </main>
     <script>
-        const dims = [
-            {% for dim in dimensions %}
-            { label: "{{ dim.dimension }}", value: {{ dim.score_display }} },
-            {% endfor %}
-        ];
-        new Chart(document.getElementById('radarChart'), {
-            type: 'radar',
-            data: {
-                labels: dims.map(d => d.label),
-                datasets: [{
-                    label: 'Score',
-                    data: dims.map(d => d.value),
-                    backgroundColor: 'rgba(88, 166, 255, 0.2)',
-                    borderColor: '#58a6ff',
-                    pointBackgroundColor: '#58a6ff',
-                    pointBorderColor: '#fff',
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    r: {
-                        beginAtZero: true, max: 100,
-                        ticks: { color: '#8b949e', backdropColor: 'transparent' },
-                        grid: { color: '#21262d' },
-                        pointLabels: { color: '#f0f6fc', font: { size: 13 } },
-                        angleLines: { color: '#21262d' }
-                    }
+        if (typeof Chart !== 'undefined') {
+            const dims = [
+                {% for dim in dimensions %}
+                { label: "{{ dim.dimension }}", value: {{ dim.score_display }} },
+                {% endfor %}
+            ];
+            new Chart(document.getElementById('radarChart'), {
+                type: 'radar',
+                data: {
+                    labels: dims.map(d => d.label),
+                    datasets: [{ label: 'Score', data: dims.map(d => d.value), backgroundColor: 'rgba(88, 166, 255, 0.2)', borderColor: '#58a6ff', pointBackgroundColor: '#58a6ff' }]
                 },
-                plugins: { legend: { display: false } }
-            }
-        });
+                options: {
+                    responsive: true,
+                    scales: { r: { beginAtZero: true, max: 100, ticks: { color: '#8b949e', backdropColor: 'transparent' }, grid: { color: '#21262d' }, pointLabels: { color: '#f0f6fc' }, angleLines: { color: '#21262d' } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
     </script>
 </body>
 </html>

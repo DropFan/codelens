@@ -71,7 +71,7 @@ codelens --list-languages
 
 ### Health Score
 
-Score code health across six dimensions (complexity, function size, comment ratio, file size, nesting depth, line duplication) with grades from A to F.
+Score code health across six dimensions (complexity, function size, comment ratio, file size, nesting depth, line duplication) with grades from A to F. Human-readable reports show one decimal place and lead with health, risk, and recommended next steps.
 
 The historical `v1` pipeline remains the default so existing dashboards and CI
 gates keep their established scores. It aggregates raw metrics across all
@@ -209,7 +209,7 @@ codelens trend --compare latest~2 latest  # Compare specific snapshots
 
 ### Cost Estimation
 
-Estimate development cost, schedule, and team size using four pluggable models. Default mode runs all models and shows a comparison table.
+Estimate development cost, schedule, and team size using four pluggable models. The default combined report keeps this section near the end; HTML collapses it and shows active assumptions. COCOMO/Putnam are salary-based workforce estimates, while LOCOMO covers LLM generation and review rather than total development cost. All counted SLOC is included, including tests and recognized documentation/configuration files.
 
 ```bash
 codelens estimate .                       # All models comparison (default)
@@ -235,7 +235,7 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 | JSON | `-f json` | Structured data for processing |
 | CSV | `-f csv` | Spreadsheet compatible |
 | Markdown | `-f markdown` | Documentation friendly |
-| HTML | `-f html` | Interactive report with charts |
+| HTML | `-f html` | Offline-readable report with optional charts, responsive tables, and print styles |
 | OpenMetrics | `-f openmetrics` | Prometheus text format, including health assessment labels |
 | Badge | `-f badge` | shields.io endpoint JSON; insufficient data renders as a neutral badge |
 | SARIF | `-f sarif` | SARIF 2.1.0 findings, including insufficient-data warnings |

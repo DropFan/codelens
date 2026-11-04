@@ -164,6 +164,24 @@ pub fn estimate(
     let people_required = model.estimate_people(effort_months, schedule_months);
     let estimated_cost = model.estimate_cost(effort_months, &global_metrics, cost_config);
 
+    let mut params = model.display_params();
+    if model.name() != "LOCOMO" {
+        params.insert(
+            0,
+            (
+                "Management and facilities multiplier".to_string(),
+                format!("{:.2}", cost_config.overhead),
+            ),
+        );
+        params.insert(
+            0,
+            (
+                "Average annual salary".to_string(),
+                format!("${:.2}", cost_config.average_wage),
+            ),
+        );
+    }
+
     EstimationReport {
         model: model.name().to_string(),
         total_sloc: summary.lines.code,
@@ -172,7 +190,7 @@ pub fn estimate(
         people_required,
         estimated_cost,
         by_language,
-        params: model.display_params(),
+        params,
     }
 }
 
@@ -905,5 +923,31 @@ mod tests {
         let c = CostConfig::default();
         assert!((c.average_wage - 56_286.0).abs() < f64::EPSILON);
         assert!((c.overhead - 2.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn salary_assumptions_follow_the_active_cost_config() {
+        let summary = make_summary(10_000, 200);
+        let config = CostConfig {
+            average_wage: 120_000.0,
+            overhead: 1.75,
+        };
+
+        let report = estimate(&summary, &CocomoBasicModel::default(), &config);
+
+        assert_eq!(
+            report.params[0],
+            (
+                "Average annual salary".to_string(),
+                "$120000.00".to_string()
+            )
+        );
+        assert_eq!(
+            report.params[1],
+            (
+                "Management and facilities multiplier".to_string(),
+                "1.75".to_string()
+            )
+        );
     }
 }

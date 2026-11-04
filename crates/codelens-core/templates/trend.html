@@ -38,6 +38,8 @@
         .status-removed { color: var(--accent-red); }
         .status-changed { color: var(--accent-blue); }
         footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+        section { max-width: 100%; overflow-x: auto; }
+        @media print { body { background: #fff; color: #111; } .chart-container { display: none; } table { color: #111; } }
     </style>
 </head>
 <body>
@@ -76,7 +78,7 @@
         <section class="charts-section" style="grid-template-columns: 1fr;">
             <div class="chart-container">
                 <h3>History ({{ history.len() }} snapshots)</h3>
-                <canvas id="historyChart"></canvas>
+                <canvas id="historyChart" role="img" aria-label="Project history chart">Historical data is available in the report tables.</canvas>
             </div>
         </section>
         {% endif %}
@@ -84,12 +86,12 @@
         <section class="charts-section">
             <div class="chart-container">
                 <h3>Before vs After</h3>
-                <canvas id="compareChart"></canvas>
+                <canvas id="compareChart" role="img" aria-label="Before and after metrics chart">Comparison values are available in the report table.</canvas>
             </div>
             {% if !by_language.is_empty() %}
             <div class="chart-container">
                 <h3>Language Changes</h3>
-                <canvas id="langChart"></canvas>
+                <canvas id="langChart" role="img" aria-label="Language comparison chart">Language values are available in the report table.</canvas>
             </div>
             {% endif %}
         </section>
@@ -140,6 +142,7 @@
     </div>
 
     <script>
+        if (typeof Chart !== 'undefined') {
         {% if !history.is_empty() %}
         const history = [
             {% for p in history %}
@@ -217,6 +220,7 @@
             }
         });
         {% endif %}
+        }
     </script>
 </body>
 </html>

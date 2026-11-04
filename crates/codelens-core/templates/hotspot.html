@@ -34,6 +34,8 @@
         .progress-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; min-width: 80px; }
         .progress-bar .fill { height: 100%; border-radius: 4px; }
         footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+        section { max-width: 100%; overflow-x: auto; }
+        @media print { body { background: #fff; color: #111; } .chart-container { display: none; } table { color: #111; } }
     </style>
 </head>
 <body>
@@ -62,7 +64,7 @@
         <section class="charts-section">
             <div class="chart-container">
                 <h3>Top Hotspots (Score)</h3>
-                <canvas id="hotspotChart"></canvas>
+                <canvas id="hotspotChart" role="img" aria-label="Top hotspot files chart">Hotspot values are available in the table below.</canvas>
             </div>
         </section>
 
@@ -108,6 +110,7 @@
             { name: "{{ h.path }}", score: {{ h.score_display }} },
             {% endfor %}
         ].slice(0, 15);
+        if (typeof Chart !== 'undefined') {
         new Chart(document.getElementById('hotspotChart'), {
             type: 'bar',
             data: {
@@ -128,6 +131,7 @@
                 plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => topN[items[0].dataIndex].name } } }
             }
         });
+        }
     </script>
     {% endif %}
 </body>

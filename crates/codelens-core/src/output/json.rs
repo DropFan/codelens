@@ -196,9 +196,40 @@ mod tests {
         // The whole output must parse as ONE JSON document with the
         // three sections as top-level keys.
         let parsed: serde_json::Value = serde_json::from_slice(&buffer).unwrap();
-        assert!(parsed.get("analysis").is_some());
-        assert!(parsed.get("health").is_some());
-        assert!(parsed.get("estimation").is_some());
+        let top_level_keys: std::collections::BTreeSet<_> = parsed
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            top_level_keys,
+            ["analysis", "estimation", "health"].into_iter().collect()
+        );
+        let health_keys: std::collections::BTreeSet<_> = parsed["health"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            health_keys,
+            [
+                "assessment",
+                "by_directory",
+                "by_language",
+                "confidence",
+                "dimensions",
+                "grade",
+                "model",
+                "scope",
+                "score",
+                "tail_risk",
+                "worst_files",
+            ]
+            .into_iter()
+            .collect()
+        );
         assert_eq!(parsed["health"]["assessment"], "scored");
     }
 

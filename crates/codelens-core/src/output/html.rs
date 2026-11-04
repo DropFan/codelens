@@ -9,7 +9,9 @@ use crate::error::Result;
 use crate::insight::health::HealthAssessment;
 use crate::insight::Grade;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{
+    health_model_display_name, HealthPresentation, OutputFormat, OutputOptions, Report,
+};
 
 // ── Analysis (existing) ──────────────────────────────────
 
@@ -27,20 +29,22 @@ struct AnalysisHtmlReport<'a> {
 
 struct HtmlDimensionScore {
     dimension: String,
-    score_display: u32,
+    score_display: String,
     grade: Grade,
 }
 
+#[derive(Clone)]
 struct HtmlDirectoryHealth {
     path: String,
-    score_display: u32,
+    score_display: String,
     grade: Grade,
     file_count: usize,
 }
 
+#[derive(Clone)]
 struct HtmlFileHealth {
     path: String,
-    score_display: u32,
+    score_display: String,
     grade: Grade,
     top_issue: String,
 }
@@ -52,7 +56,7 @@ struct HtmlLanguageHealth {
     file_count: usize,
     code_lines: usize,
     confidence: String,
-    tail_score: u32,
+    tail_score: String,
 }
 
 struct HtmlLanguageHealthChange {
@@ -67,15 +71,16 @@ struct HtmlLanguageHealthChange {
 #[template(path = "health.html")]
 struct HealthHtmlReport {
     generated_at: String,
+    tool_version: &'static str,
     model: String,
     grade: String,
-    score: u32,
+    score: String,
     is_scored: bool,
     scope: String,
     confidence: String,
-    tail_score: u32,
+    tail_score: String,
     failing_files: usize,
-    failing_ratio: u32,
+    failing_ratio: String,
     test_health: String,
     baseline_comparison: String,
     scope_change: String,
@@ -114,24 +119,14 @@ fn format_optional_delta(delta: Option<f64>) -> String {
     }
 }
 
-fn health_model_display_name(model: &str) -> String {
-    match model {
-        "default" => "v1".to_string(),
-        "default-no-dup" => "v1 (no duplication scan)".to_string(),
-        "default-v2" => "v2".to_string(),
-        "default-v2-no-dup" => "v2 (no duplication scan)".to_string(),
-        other => other.to_string(),
-    }
-}
-
 fn html_language_health(language: &crate::insight::health::LanguageHealth) -> HtmlLanguageHealth {
     let insufficient = language.assessment == HealthAssessment::InsufficientData;
     HtmlLanguageHealth {
         language: language.language.clone(),
         score_display: if insufficient {
-            format!("Estimated {}", language.score as u32)
+            format!("Estimated {:.1}", language.score)
         } else {
-            (language.score as u32).to_string()
+            format!("{:.1}", language.score)
         },
         grade: if insufficient {
             "Insufficient data".to_string()
@@ -145,7 +140,27 @@ fn html_language_health(language: &crate::insight::health::LanguageHealth) -> Ht
             language.confidence.level,
             language.confidence.coverage * 100.0
         ),
-        tail_score: language.tail_risk.tail_score as u32,
+        tail_score: format!("{:.1}", language.tail_risk.tail_score),
+    }
+}
+
+fn html_directory_health(
+    directory: &crate::insight::health::DirectoryHealth,
+) -> HtmlDirectoryHealth {
+    HtmlDirectoryHealth {
+        path: directory.path.display().to_string(),
+        score_display: format!("{:.1}", directory.score),
+        grade: directory.grade,
+        file_count: directory.file_count,
+    }
+}
+
+fn html_file_health(file: &crate::insight::health::FileHealth) -> HtmlFileHealth {
+    HtmlFileHealth {
+        path: file.path.display().to_string(),
+        score_display: format!("{:.1}", file.score),
+        grade: file.grade,
+        top_issue: file.top_issue.to_string(),
     }
 }
 
@@ -279,6 +294,15 @@ struct HtmlComparisonRow {
     cost_raw: f64,
 }
 
+struct HtmlCombinedEstimationRow {
+    model: String,
+    effort_months: String,
+    schedule_months: String,
+    people_required: String,
+    estimated_cost: String,
+    params: Vec<HtmlEstimationParam>,
+}
+
 #[derive(Template)]
 #[template(path = "estimation_comparison.html")]
 struct EstimationComparisonHtmlReport {
@@ -294,23 +318,29 @@ struct EstimationComparisonHtmlReport {
 struct CombinedHtmlReport<'a> {
     title: &'a str,
     generated_at: String,
+    tool_version: &'static str,
     summary: &'a Summary,
     by_language: Vec<(&'a str, &'a LanguageSummary)>,
     elapsed_secs: f64,
     health_grade: String,
-    health_score: u32,
+    health_score: String,
     health_is_scored: bool,
     health_model: String,
     health_scope: String,
     health_confidence: String,
-    health_tail_score: u32,
+    health_tail_score: String,
     health_failing_files: usize,
+    health_failing_ratio: String,
     health_test: String,
     dimensions: Vec<HtmlDimensionScore>,
     health_languages: Vec<HtmlLanguageHealth>,
+    worst_directories: Vec<HtmlDirectoryHealth>,
     worst_files: Vec<HtmlFileHealth>,
+    priority_files: Vec<HtmlFileHealth>,
     total_sloc: usize,
-    estimation_rows: Vec<HtmlComparisonRow>,
+    cost_scope: String,
+    traditional_estimation_rows: Vec<HtmlCombinedEstimationRow>,
+    locomo_estimation_rows: Vec<HtmlCombinedEstimationRow>,
 }
 
 // ── OutputFormat impl ────────────────────────────────────
@@ -410,47 +440,64 @@ impl HtmlOutput {
             by_language.truncate(n);
         }
 
+        let health_view = HealthPresentation::from_report(health);
+        let worst_files: Vec<_> = health.worst_files.iter().map(html_file_health).collect();
+        let priority_files = worst_files.iter().take(3).cloned().collect();
+        let mut traditional_estimation_rows = Vec::new();
+        let mut locomo_estimation_rows = Vec::new();
+        for report in &estimation.reports {
+            let row = HtmlCombinedEstimationRow {
+                model: report.model.clone(),
+                effort_months: format!("{:.2}", report.effort_months),
+                schedule_months: format!("{:.2}", report.schedule_months),
+                people_required: format!("{:.2}", report.people_required),
+                estimated_cost: format!("{:.2}", report.estimated_cost),
+                params: report
+                    .params
+                    .iter()
+                    .map(|(key, value)| HtmlEstimationParam {
+                        key: key.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+            };
+            if report.model == "LOCOMO" {
+                locomo_estimation_rows.push(row);
+            } else {
+                traditional_estimation_rows.push(row);
+            }
+        }
+        let counted_languages = result
+            .summary
+            .by_language
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+
         let html = CombinedHtmlReport {
             title: "Codelens - Code Analysis Report",
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            tool_version: env!("CARGO_PKG_VERSION"),
             summary: &result.summary,
             by_language,
             elapsed_secs: result.elapsed.as_secs_f64(),
             health_grade: health.grade.to_string(),
-            health_score: health.score as u32,
+            health_score: health_view.score,
             health_is_scored: health.assessment == HealthAssessment::Scored,
-            health_model: health_model_display_name(&health.model),
-            health_scope: health.scope.to_string(),
-            health_confidence: format!(
-                "{} ({:.0}%)",
-                health.confidence.level,
-                health.confidence.coverage * 100.0
-            ),
-            health_tail_score: health.tail_risk.tail_score as u32,
-            health_failing_files: health.tail_risk.failing_files,
-            health_test: health
-                .test_health
-                .as_ref()
-                .map(|test| {
-                    if test.assessment == HealthAssessment::InsufficientData {
-                        format!(
-                            "Insufficient data (estimated score: {:.1}, {} files)",
-                            test.score, test.file_count
-                        )
-                    } else {
-                        format!(
-                            "{} ({:.1}, {} files)",
-                            test.grade, test.score, test.file_count
-                        )
-                    }
-                })
-                .unwrap_or_default(),
+            health_model: health_view.model,
+            health_scope: health_view.scope,
+            health_confidence: health_view.confidence,
+            health_tail_score: health_view.tail_score,
+            health_failing_files: health_view.failing_files,
+            health_failing_ratio: health_view.failing_ratio,
+            health_test: health_view.test_health.unwrap_or_default(),
             dimensions: health
                 .dimensions
                 .iter()
                 .map(|d| HtmlDimensionScore {
                     dimension: d.dimension.to_string(),
-                    score_display: d.score as u32,
+                    score_display: format!("{:.1}", d.score),
                     grade: d.grade,
                 })
                 .collect(),
@@ -459,29 +506,20 @@ impl HtmlOutput {
                 .iter()
                 .map(html_language_health)
                 .collect(),
-            worst_files: health
-                .worst_files
+            worst_directories: health
+                .by_directory
                 .iter()
-                .map(|f| HtmlFileHealth {
-                    path: f.path.display().to_string(),
-                    score_display: f.score as u32,
-                    grade: f.grade,
-                    top_issue: f.top_issue.to_string(),
-                })
+                .map(html_directory_health)
                 .collect(),
+            worst_files,
+            priority_files,
             total_sloc: estimation.total_sloc,
-            estimation_rows: estimation
-                .reports
-                .iter()
-                .map(|r| HtmlComparisonRow {
-                    model: r.model.clone(),
-                    effort_months: format!("{:.2}", r.effort_months),
-                    schedule_months: format!("{:.2}", r.schedule_months),
-                    people_required: format!("{:.2}", r.people_required),
-                    estimated_cost: format!("{:.2}", r.estimated_cost),
-                    cost_raw: r.estimated_cost,
-                })
-                .collect(),
+            cost_scope: format!(
+                "All {} counted SLOC across recognized files, including tests and counted documentation or configuration formats. Counted languages: {}.",
+                estimation.total_sloc, counted_languages
+            ),
+            traditional_estimation_rows,
+            locomo_estimation_rows,
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
@@ -493,38 +531,20 @@ impl HtmlOutput {
         writer: &mut dyn Write,
     ) -> Result<()> {
         let regression = report.regression.as_ref();
+        let health_view = HealthPresentation::from_report(report);
         let html = HealthHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            model: health_model_display_name(&report.model),
+            tool_version: env!("CARGO_PKG_VERSION"),
+            model: health_view.model,
             grade: report.grade.to_string(),
-            score: report.score as u32,
+            score: health_view.score,
             is_scored: report.assessment == HealthAssessment::Scored,
-            scope: report.scope.to_string(),
-            confidence: format!(
-                "{} ({:.0}%)",
-                report.confidence.level,
-                report.confidence.coverage * 100.0
-            ),
-            tail_score: report.tail_risk.tail_score as u32,
-            failing_files: report.tail_risk.failing_files,
-            failing_ratio: (report.tail_risk.failing_ratio * 100.0).round() as u32,
-            test_health: report
-                .test_health
-                .as_ref()
-                .map(|test| {
-                    if test.assessment == HealthAssessment::InsufficientData {
-                        format!(
-                            "Insufficient data (estimated score: {:.1}, {} files)",
-                            test.score, test.file_count
-                        )
-                    } else {
-                        format!(
-                            "{} ({:.1}, {} files)",
-                            test.grade, test.score, test.file_count
-                        )
-                    }
-                })
-                .unwrap_or_default(),
+            scope: health_view.scope,
+            confidence: health_view.confidence,
+            tail_score: health_view.tail_score,
+            failing_files: health_view.failing_files,
+            failing_ratio: health_view.failing_ratio,
+            test_health: health_view.test_health.unwrap_or_default(),
             baseline_comparison: regression
                 .map(|comparison| {
                     let summary = format!(
@@ -578,7 +598,7 @@ impl HtmlOutput {
                 .iter()
                 .map(|d| HtmlDimensionScore {
                     dimension: d.dimension.to_string(),
-                    score_display: d.score as u32,
+                    score_display: format!("{:.1}", d.score),
                     grade: d.grade,
                 })
                 .collect(),
@@ -590,23 +610,9 @@ impl HtmlOutput {
             by_directory: report
                 .by_directory
                 .iter()
-                .map(|d| HtmlDirectoryHealth {
-                    path: d.path.display().to_string(),
-                    score_display: d.score as u32,
-                    grade: d.grade,
-                    file_count: d.file_count,
-                })
+                .map(html_directory_health)
                 .collect(),
-            worst_files: report
-                .worst_files
-                .iter()
-                .map(|f| HtmlFileHealth {
-                    path: f.path.display().to_string(),
-                    score_display: f.score as u32,
-                    grade: f.grade,
-                    top_issue: f.top_issue.to_string(),
-                })
-                .collect(),
+            worst_files: report.worst_files.iter().map(html_file_health).collect(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
@@ -917,14 +923,208 @@ impl HtmlOutput {
 mod tests {
     use super::*;
     use crate::analyzer::stats::{AnalysisResult, FileStats, LineStats, Summary};
+    use crate::insight::estimation::{EstimationComparison, EstimationReport};
     use crate::insight::health::{
-        Confidence, HealthReport, HealthScope, LanguageHealth, LanguageHealthChange,
-        LanguageHealthChangeStatus, RegressionReport, TailRisk,
+        Confidence, DirectoryHealth, FileHealth, HealthReport, HealthScope, LanguageHealth,
+        LanguageHealthChange, LanguageHealthChangeStatus, RegressionReport, TailRisk, TestHealth,
     };
     use crate::insight::scoring::default::DefaultModel;
+    use crate::insight::scoring::HealthDimension;
     use crate::output::{OutputFormat, OutputOptions, Report};
     use std::path::PathBuf;
     use std::time::Duration;
+
+    fn representative_combined_report() -> crate::output::format::CombinedReport {
+        let files = vec![FileStats {
+            path: PathBuf::from("src/lib.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats {
+                total: 120,
+                code: 100,
+                comment: 10,
+                blank: 10,
+            },
+            size: 2_000,
+            ..FileStats::default()
+        }];
+        let analysis = AnalysisResult {
+            summary: Summary::from_file_stats(&files),
+            files,
+            elapsed: Duration::from_millis(25),
+            scanned_files: 1,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        let health = HealthReport {
+            score: 87.44,
+            grade: Grade::B,
+            model: "default-v2".to_string(),
+            dimensions: vec![],
+            by_directory: vec![DirectoryHealth {
+                path: PathBuf::from("src/output"),
+                score: 67.64,
+                grade: Grade::D,
+                file_count: 4,
+            }],
+            worst_files: vec![
+                FileHealth {
+                    path: PathBuf::from("src/output/markdown.rs"),
+                    score: 43.13,
+                    grade: Grade::F,
+                    top_issue: HealthDimension::Complexity,
+                    dimensions: vec![],
+                },
+                FileHealth {
+                    path: PathBuf::from("src/output/console.rs"),
+                    score: 43.63,
+                    grade: Grade::F,
+                    top_issue: HealthDimension::FileSize,
+                    dimensions: vec![],
+                },
+                FileHealth {
+                    path: PathBuf::from("src/analyzer/counter.rs"),
+                    score: 68.85,
+                    grade: Grade::D,
+                    top_issue: HealthDimension::FuncSize,
+                    dimensions: vec![],
+                },
+            ],
+            scope: HealthScope::Production,
+            confidence: Confidence::from_coverage(0.997),
+            assessment: Default::default(),
+            tail_risk: TailRisk {
+                tail_score: 47.27,
+                failing_files: 2,
+                failing_ratio: 0.033,
+                worst_score: 43.13,
+            },
+            by_language: vec![],
+            test_health: Some(TestHealth {
+                score: 91.25,
+                grade: Grade::A,
+                file_count: 12,
+                code_lines: 800,
+                confidence: Confidence::from_coverage(0.95),
+                assessment: Default::default(),
+                tail_risk: TailRisk::default(),
+            }),
+            regression: None,
+        };
+        let estimation = EstimationComparison {
+            total_sloc: 100,
+            reports: vec![
+                EstimationReport {
+                    model: "COCOMO Basic".to_string(),
+                    total_sloc: 100,
+                    effort_months: 1.0,
+                    schedule_months: 1.0,
+                    people_required: 1.0,
+                    estimated_cost: 10_000.0,
+                    by_language: vec![],
+                    params: vec![
+                        (
+                            "Average annual salary".to_string(),
+                            "$56,286.00".to_string(),
+                        ),
+                        (
+                            "Management and facilities multiplier".to_string(),
+                            "2.40".to_string(),
+                        ),
+                        ("Project Type".to_string(), "organic".to_string()),
+                        ("EAF".to_string(), "1.00".to_string()),
+                    ],
+                },
+                EstimationReport {
+                    model: "LOCOMO".to_string(),
+                    total_sloc: 100,
+                    effort_months: 0.1,
+                    schedule_months: 0.01,
+                    people_required: 1.0,
+                    estimated_cost: 1.25,
+                    by_language: vec![],
+                    params: vec![
+                        (
+                            "LLM Pricing".to_string(),
+                            "In $3.00/Out $15.00 per 1M tokens".to_string(),
+                        ),
+                        ("TPS".to_string(), "50".to_string()),
+                        ("Review".to_string(), "0.10 min/line".to_string()),
+                    ],
+                },
+            ],
+        };
+        crate::output::format::CombinedReport {
+            analysis,
+            health,
+            estimation,
+        }
+    }
+
+    fn render_combined(combined: crate::output::format::CombinedReport) -> String {
+        let mut output = Vec::new();
+        HtmlOutput::new()
+            .write(
+                &Report::Combined(Box::new(combined)),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        String::from_utf8(output).unwrap()
+    }
+
+    #[test]
+    fn combined_html_is_one_complete_document() {
+        let html = render_combined(representative_combined_report());
+
+        assert_eq!(html.matches("<!DOCTYPE html>").count(), 1);
+        assert_eq!(html.matches("<html lang=\"en\">").count(), 1);
+        assert_eq!(html.matches("<head>").count(), 1);
+        assert_eq!(html.matches("<body>").count(), 1);
+        assert_eq!(html.matches("</html>").count(), 1);
+    }
+
+    #[test]
+    fn combined_html_leads_with_health_scope_and_risk() {
+        let html = render_combined(representative_combined_report());
+
+        assert!(html.contains("Score: 87.4 / 100"));
+        assert!(html.contains("Health model"));
+        assert!(html.contains("Production code"));
+        assert!(html.contains("Measurement confidence"));
+        assert!(html.contains("F-grade files"));
+        assert!(html.contains("Worst 10% file average"));
+        assert!(html.contains("Worst directory"));
+        assert!(html.contains("src/output"));
+        assert!(html.contains("src/output/markdown.rs"));
+        assert!(html.contains("src/output/console.rs"));
+        assert!(html.contains("src/analyzer/counter.rs"));
+        assert!(html.contains("Test code health"));
+
+        let health = html.find("Health and Risk Summary").unwrap();
+        let scale = html.find("Project Scale and Languages").unwrap();
+        let cost = html.find("Cost Estimation").unwrap();
+        assert!(health < scale);
+        assert!(scale < cost);
+    }
+
+    #[test]
+    fn combined_html_explains_cost_assumptions_and_survives_without_charts() {
+        let html = render_combined(representative_combined_report());
+
+        assert!(html.contains("Traditional workforce models"));
+        assert!(html.contains("Average annual salary"));
+        assert!(html.contains("Management and facilities multiplier"));
+        assert!(html.contains("Project Type"));
+        assert!(html.contains("EAF"));
+        assert!(html.contains("LOCOMO estimates LLM generation cost"));
+        assert!(html.contains("LLM Pricing"));
+        assert!(html.contains("TPS"));
+        assert!(html.contains("Review"));
+        assert!(html.contains("typeof Chart"));
+        assert!(
+            html.contains("Charts are optional; all report data is available in text and tables.")
+        );
+    }
 
     #[test]
     fn health_model_display_name_is_user_facing() {

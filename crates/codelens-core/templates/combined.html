@@ -18,386 +18,355 @@
             --accent-purple: #a371f7;
             --accent-red: #f85149;
         }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
+        * { box-sizing: border-box; }
         body {
+            margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             line-height: 1.6;
         }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        header {
-            text-align: center;
-            margin-bottom: 3rem;
-            padding-bottom: 2rem;
-            border-bottom: 1px solid var(--bg-tertiary);
-        }
-
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        header { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--bg-tertiary); }
         header h1 {
-            font-size: 2.5rem;
+            margin: 0;
+            font-size: 2.25rem;
             background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-
-        .stats-grid {
+        h2 { margin: 0 0 1rem; }
+        h3 { margin: 1.5rem 0 0.75rem; }
+        .muted, .scope-note { color: var(--text-secondary); }
+        .report-block { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--bg-tertiary); }
+        .health-hero {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: minmax(160px, 0.35fr) minmax(280px, 1fr);
             gap: 1.5rem;
-            margin-bottom: 3rem;
+            align-items: stretch;
+            margin-bottom: 1.5rem;
         }
-
-        .stat-card {
+        .grade-panel, .panel, .stat-card, details {
             background: var(--bg-secondary);
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-align: center;
             border: 1px solid var(--bg-tertiary);
-            transition: transform 0.2s, box-shadow 0.2s;
+            border-radius: 12px;
         }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        .grade-panel { display: grid; place-items: center; padding: 1.5rem; text-align: center; }
+        .grade-badge {
+            display: inline-grid;
+            place-items: center;
+            min-width: 88px;
+            min-height: 88px;
+            padding: 0.5rem;
+            border: 3px solid currentColor;
+            border-radius: 50%;
+            font-size: 3rem;
+            font-weight: 700;
         }
-
-        .stat-card .value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: var(--accent-green);
+        .grade-A { color: var(--accent-green); }
+        .grade-B { color: var(--accent-blue); }
+        .grade-C { color: var(--accent-yellow); }
+        .grade-D { color: #f0883e; }
+        .grade-F { color: var(--accent-red); }
+        .score { margin-top: 0.75rem; font-size: 1.15rem; font-weight: 600; }
+        .panel { padding: 1.25rem; }
+        .summary-grid, .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 1rem;
         }
-
-        .stat-card .label {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            margin-top: 0.5rem;
+        .summary-item { padding: 0.8rem; border-left: 3px solid var(--accent-blue); }
+        .summary-item strong { display: block; font-size: 1.1rem; }
+        .summary-item span { color: var(--text-secondary); font-size: 0.9rem; }
+        .risk-alert {
+            margin: 1rem 0 0;
+            padding: 1rem 1.25rem;
+            border: 1px solid var(--accent-red);
+            border-radius: 10px;
+            background: rgba(248, 81, 73, 0.08);
         }
-
+        .risk-alert strong { color: var(--accent-red); }
+        .priority-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+        .priority-list li { margin: 0.35rem 0; overflow-wrap: anywhere; }
+        .next-steps { margin: 0; padding-left: 1.25rem; }
+        .next-steps li { margin: 0.6rem 0; }
+        code { color: #79c0ff; overflow-wrap: anywhere; }
+        .stat-card { padding: 1.2rem; text-align: center; }
+        .stat-card .value { font-size: 1.7rem; font-weight: 700; color: var(--accent-green); }
+        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.35rem; }
+        .progress-bar { min-width: 70px; height: 8px; overflow: hidden; border-radius: 4px; background: var(--bg-tertiary); }
+        .progress-bar .fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
+        .table-scroll { max-width: 100%; overflow-x: auto; margin-bottom: 1.5rem; }
+        table { width: 100%; min-width: 680px; border-collapse: collapse; background: var(--bg-secondary); }
+        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
+        th { background: var(--bg-tertiary); color: var(--text-secondary); }
+        tr:hover { background: var(--bg-tertiary); }
         .charts-section {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 2rem;
-            margin-bottom: 3rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 1.5rem 0;
         }
-
-        .chart-container {
-            background: var(--bg-secondary);
-            border-radius: 12px;
-            padding: 1.5rem;
-            border: 1px solid var(--bg-tertiary);
+        .chart-container { min-width: 0; padding: 1.25rem; border: 1px solid var(--bg-tertiary); border-radius: 12px; background: var(--bg-secondary); }
+        .chart-note { margin: 0.75rem 0 0; color: var(--text-secondary); font-size: 0.9rem; }
+        details { padding: 1rem 1.25rem; }
+        summary { cursor: pointer; font-weight: 700; }
+        .assumptions { margin: 0; padding-left: 1.1rem; color: var(--text-secondary); }
+        footer { margin-top: 3rem; padding: 1.5rem 0; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); }
+        a { color: var(--accent-blue); }
+        @media (max-width: 720px) {
+            .container { padding: 1rem; }
+            .health-hero { grid-template-columns: 1fr; }
+            header h1 { font-size: 1.75rem; }
         }
-
-        .chart-container h3 {
-            margin-bottom: 1rem;
-            color: var(--text-secondary);
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--bg-secondary);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        th, td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid var(--bg-tertiary);
-        }
-
-        th {
-            background: var(--bg-tertiary);
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-
-        tr:hover {
-            background: var(--bg-tertiary);
-        }
-
-        .progress-bar {
-            height: 8px;
-            background: var(--bg-tertiary);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-bar .fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
-            border-radius: 4px;
-        }
-
-        .grade-badge {
-            display: inline-block;
-            font-size: 1.6rem;
-            font-weight: bold;
-            padding: 0.3rem 1.2rem;
-            border-radius: 10px;
-            margin-top: 0.6rem;
-        }
-        .grade-A { background: rgba(63,185,80,0.15); color: var(--accent-green); }
-        .grade-B { background: rgba(88,166,255,0.15); color: var(--accent-blue); }
-        .grade-C { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
-        .grade-D { background: rgba(240,136,62,0.15); color: #f0883e; }
-        .grade-F { background: rgba(248,81,73,0.15); color: var(--accent-red); }
-
-        section.report-block {
-            margin-top: 4rem;
-            padding-top: 2rem;
-            border-top: 1px solid var(--bg-tertiary);
-        }
-
-        footer {
-            text-align: center;
-            padding: 2rem;
-            color: var(--text-secondary);
-            border-top: 1px solid var(--bg-tertiary);
-            margin-top: 3rem;
-        }
-
-        h2 {
-            margin-bottom: 1rem;
+        @media print {
+            :root { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #ddd; --text-primary: #111; --text-secondary: #444; }
+            body { background: #fff; color: #111; font-size: 10pt; }
+            .container { max-width: none; padding: 0; }
+            header h1 { background: none; -webkit-text-fill-color: #111; color: #111; }
+            .report-block { break-before: auto; }
+            .panel, .stat-card, .grade-panel, details { break-inside: avoid; }
+            details { display: block; }
+            details > * { display: block; }
+            .charts-section { display: none; }
+            table { min-width: 0; }
+            a { color: #111; text-decoration: none; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <main class="container">
         <header>
             <h1>{{ title }}</h1>
-            <p>Generated: {{ generated_at }}</p>
+            <p class="muted">Generated {{ generated_at }} by Codelens {{ tool_version }}</p>
         </header>
 
-        <!-- ── Statistics ─────────────────────────────── -->
-        <section class="stats-grid">
-            <div class="stat-card">
-                <div class="value">{{ summary.total_files }}</div>
-                <div class="label">Code Files</div>
+        <section aria-labelledby="health-summary">
+            <h2 id="health-summary">Health and Risk Summary</h2>
+            <div class="health-hero">
+                <div class="grade-panel">
+                    {% if health_is_scored %}
+                    <div class="grade-badge grade-{{ health_grade }}" aria-label="Overall grade {{ health_grade }}">{{ health_grade }}</div>
+                    <div class="score">Score: {{ health_score }} / 100</div>
+                    {% else %}
+                    <strong>Insufficient data</strong>
+                    <div class="score">Estimated score: {{ health_score }} / 100</div>
+                    {% endif %}
+                </div>
+                <div class="panel">
+                    <div class="summary-grid">
+                        <div class="summary-item"><strong>{{ health_model }}</strong><span>Health model</span></div>
+                        <div class="summary-item"><strong>{{ health_scope }}</strong><span>Health analysis scope</span></div>
+                        <div class="summary-item"><strong>{{ health_confidence }}</strong><span>Measurement confidence</span></div>
+                        <div class="summary-item"><strong>{{ health_failing_files }} ({{ health_failing_ratio }})</strong><span>F-grade files</span></div>
+                        <div class="summary-item"><strong>{{ health_tail_score }}</strong><span>Worst 10% file average</span></div>
+                        {% if !worst_directories.is_empty() %}
+                        <div class="summary-item"><strong>{{ worst_directories[0].grade }} ({{ worst_directories[0].score_display }})</strong><span>Worst directory: {{ worst_directories[0].path }}</span></div>
+                        {% endif %}
+                        {% if !health_test.is_empty() %}
+                        <div class="summary-item"><strong>{{ health_test }}</strong><span>Test code health</span></div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="value">{{ summary.lines.code }}</div>
-                <div class="label">Code Lines</div>
-            </div>
-            <div class="stat-card">
-                <div class="value">{{ summary.lines.comment }}</div>
-                <div class="label">Comment Lines</div>
-            </div>
-            <div class="stat-card">
-                <div class="value">{{ summary.lines.blank }}</div>
-                <div class="label">Blank Lines</div>
-            </div>
-            <div class="stat-card">
-                <div class="value">{{ by_language.len() }}</div>
-                <div class="label">Languages</div>
-            </div>
-            <div class="stat-card">
-                <div class="value">{{ summary.complexity.functions }}</div>
-                <div class="label">Functions</div>
-            </div>
-        </section>
-
-        <section class="charts-section">
-            <div class="chart-container">
-                <h3>Language Distribution</h3>
-                <canvas id="languageChart"></canvas>
-            </div>
-            <div class="chart-container">
-                <h3>Code vs Comments</h3>
-                <canvas id="codeCommentChart"></canvas>
-            </div>
-        </section>
-
-        <section>
-            <h2>By Language</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Language</th>
-                        <th>Files</th>
-                        <th>Code</th>
-                        <th>Comment</th>
-                        <th>Blank</th>
-                        <th>Share</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for (name, stats) in by_language %}
-                    <tr>
-                        <td><strong>{{ name }}</strong></td>
-                        <td>{{ stats.files }}</td>
-                        <td>{{ stats.lines.code }}</td>
-                        <td>{{ stats.lines.comment }}</td>
-                        <td>{{ stats.lines.blank }}</td>
-                        <td>
-                            <div class="progress-bar">
-                                {% if summary.lines.code > 0 %}
-                                <div class="fill" style="width: {{ stats.lines.code * 100 / summary.lines.code }}%"></div>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </section>
-
-        <!-- ── Health ─────────────────────────────────── -->
-        <section class="report-block">
-            <h2 style="text-align:center">Code Health</h2>
-            <div style="text-align:center; margin-bottom: 2rem;">
-                {% if health_is_scored %}
-                <div class="grade-badge grade-{{ health_grade }}">{{ health_grade }}</div>
-                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Score: {{ health_score }} / 100 | Model: {{ health_model }} | Scope: {{ health_scope }}</div>
-                {% else %}
-                <div class="grade-badge" style="width:auto; padding:0 1rem; border-radius:12px; color:var(--accent-yellow); border:3px solid var(--accent-yellow);">Insufficient data</div>
-                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Estimated score: {{ health_score }} / 100 | Model: {{ health_model }} | Scope: {{ health_scope }}</div>
+            {% if health_failing_files > 0 %}
+            <div class="risk-alert">
+                <strong>Immediate attention:</strong> {{ health_failing_files }} file(s) are graded F even though the overall project grade is {{ health_grade }}.
+                {% if !priority_files.is_empty() %}
+                <ol class="priority-list">
+                    {% for file in priority_files %}
+                    <li><strong>{{ file.path }}</strong> — {{ file.grade }} {{ file.score_display }}, main issue: {{ file.top_issue }}</li>
+                    {% endfor %}
+                </ol>
                 {% endif %}
-                <div style="color: var(--text-secondary); margin-top: 0.4rem;">Confidence: {{ health_confidence }} | Tail 10%: {{ health_tail_score }} | F files: {{ health_failing_files }}</div>
-                {% if !health_test.is_empty() %}<div style="color: var(--text-secondary); margin-top: 0.4rem;">Test code: {{ health_test }}</div>{% endif %}
             </div>
+            {% endif %}
+        </section>
 
+        <section class="report-block panel" aria-labelledby="next-steps">
+            <h2 id="next-steps">Recommended Next Steps</h2>
+            <ol class="next-steps">
+                <li>Run <code>codelens hotspot . --functions</code> to locate the functions absorbing the most churn.</li>
+                <li>Run <code>codelens health &lt;directory&gt; --top 5</code> for a focused health report.</li>
+                <li>Start with the F-grade files and the worst directory listed above; keep the same health model when comparing results.</li>
+            </ol>
+        </section>
+
+        <section class="report-block" aria-labelledby="dimensions">
+            <h2 id="dimensions">Health Dimensions</h2>
             <div class="stats-grid">
                 {% for dim in dimensions %}
                 <div class="stat-card">
                     <div class="value">{{ dim.score_display }}</div>
-                    <div class="label">{{ dim.dimension }} ({{ dim.grade }})</div>
-                    <div class="progress-bar" style="margin-top: 0.5rem">
-                        <div class="fill" style="width: {{ dim.score_display }}%"></div>
-                    </div>
+                    <div class="label">{{ dim.dimension }} — grade {{ dim.grade }}</div>
+                    <div class="progress-bar" style="margin-top: 0.5rem"><div class="fill" style="width: {{ dim.score_display }}%"></div></div>
                 </div>
                 {% endfor %}
             </div>
-
             {% if !health_languages.is_empty() %}
-            <h2>Health by Language</h2>
-            <table>
-                <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code</th><th>Confidence</th><th>Tail 10%</th></tr></thead>
-                <tbody>
-                {% for language in health_languages %}
-                <tr>
-                    <td><strong>{{ language.language }}</strong></td>
-                    <td>{{ language.score_display }}</td>
-                    <td>{{ language.grade }}</td>
-                    <td>{{ language.file_count }}</td>
-                    <td>{{ language.code_lines }}</td>
-                    <td>{{ language.confidence }}</td>
-                    <td>{{ language.tail_score }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if !worst_files.is_empty() %}
-            <h2>Worst Files</h2>
-            <table>
-                <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Top Issue</th></tr></thead>
-                <tbody>
-                {% for file in worst_files %}
-                <tr>
-                    <td><strong>{{ file.path }}</strong></td>
-                    <td>{{ file.score_display }}</td>
-                    <td>{{ file.grade }}</td>
-                    <td>{{ file.top_issue }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <h3>Health by Language</h3>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Language</th><th>Score</th><th>Grade</th><th>Files</th><th>Code lines</th><th>Measurement confidence</th><th>Worst 10%</th></tr></thead>
+                    <tbody>
+                    {% for language in health_languages %}
+                    <tr><td><strong>{{ language.language }}</strong></td><td>{{ language.score_display }}</td><td>{{ language.grade }}</td><td>{{ language.file_count }}</td><td>{{ language.code_lines }}</td><td>{{ language.confidence }}</td><td>{{ language.tail_score }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
             {% endif %}
         </section>
 
-        <!-- ── Cost Estimation ────────────────────────── -->
-        <section class="report-block">
-            <h2 style="text-align:center">Cost Estimation Comparison</h2>
-            <p style="text-align:center; color: var(--text-secondary); margin-bottom: 2rem;">Total SLOC: {{ total_sloc }}</p>
-            <table>
-                <thead>
+        {% if !worst_directories.is_empty() %}
+        <section class="report-block" aria-labelledby="worst-directories">
+            <h2 id="worst-directories">Worst Directories</h2>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Directory</th><th>Score</th><th>Grade</th><th>Evaluated files</th></tr></thead>
+                    <tbody>
+                    {% for dir in worst_directories %}
+                    <tr><td><strong>{{ dir.path }}</strong></td><td>{{ dir.score_display }}</td><td>{{ dir.grade }}</td><td>{{ dir.file_count }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if !worst_files.is_empty() %}
+        <section class="report-block" aria-labelledby="worst-files">
+            <h2 id="worst-files">Worst Files</h2>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Main issue</th></tr></thead>
+                    <tbody>
+                    {% for file in worst_files %}
+                    <tr><td><strong>{{ file.path }}</strong></td><td>{{ file.score_display }}</td><td>{{ file.grade }}</td><td>{{ file.top_issue }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="report-block" aria-labelledby="project-scale">
+            <h2 id="project-scale">Project Scale and Languages</h2>
+            <p class="scope-note">Scope: all recognized and counted files. This is broader than the health scope shown above.</p>
+            <div class="stats-grid">
+                <div class="stat-card"><div class="value">{{ summary.total_files }}</div><div class="label">Counted files</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.code }}</div><div class="label">Code lines</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.comment }}</div><div class="label">Comment lines</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.blank }}</div><div class="label">Blank lines</div></div>
+                <div class="stat-card"><div class="value">{{ by_language.len() }}</div><div class="label">Counted languages</div></div>
+                <div class="stat-card"><div class="value">{{ summary.complexity.functions }}</div><div class="label">Measured functions</div></div>
+            </div>
+            <div class="charts-section">
+                <div class="chart-container">
+                    <h3>Language Distribution</h3>
+                    <canvas id="languageChart" role="img" aria-label="Language distribution chart">Language distribution is listed in the table below.</canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Code, Comments, and Blank Lines</h3>
+                    <canvas id="codeCommentChart" role="img" aria-label="Code, comments, and blank lines chart">Line counts are listed in the report cards and table.</canvas>
+                </div>
+            </div>
+            <p class="chart-note">Charts are optional; all report data is available in text and tables.</p>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Language</th><th>Files</th><th>Code</th><th>Comments</th><th>Blank</th><th>Share</th></tr></thead>
+                    <tbody>
+                    {% for (name, stats) in by_language %}
                     <tr>
-                        <th>Model</th>
-                        <th>Effort (PM)</th>
-                        <th>Schedule (M)</th>
-                        <th>People</th>
-                        <th>Cost ($)</th>
+                        <td><strong>{{ name }}</strong></td><td>{{ stats.files }}</td><td>{{ stats.lines.code }}</td><td>{{ stats.lines.comment }}</td><td>{{ stats.lines.blank }}</td>
+                        <td><div class="progress-bar">{% if summary.lines.code > 0 %}<div class="fill" style="width: {{ stats.lines.code * 100 / summary.lines.code }}%"></div>{% endif %}</div></td>
                     </tr>
-                </thead>
-                <tbody>
-                {% for row in estimation_rows %}
-                    <tr>
-                        <td><strong>{{ row.model }}</strong></td>
-                        <td>{{ row.effort_months }}</td>
-                        <td>{{ row.schedule_months }}</td>
-                        <td>{{ row.people_required }}</td>
-                        <td>{{ row.estimated_cost }}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="report-block" aria-labelledby="cost-estimation">
+            <h2 id="cost-estimation">Cost Estimation</h2>
+            <p class="scope-note">Total counted SLOC: {{ total_sloc }}. {{ cost_scope }}</p>
+            <details>
+                <summary>Show estimates and calculation assumptions</summary>
+                {% if !traditional_estimation_rows.is_empty() %}
+                <h3>Traditional workforce models</h3>
+                <p class="scope-note">These models estimate software-development effort using salary-based labor cost. They are directional estimates, not budgets or delivery commitments.</p>
+                <div class="table-scroll">
+                    <table>
+                        <thead><tr><th>Model</th><th>Effort (person-months)</th><th>Schedule (months)</th><th>People</th><th>Estimated labor cost (USD)</th><th>Assumptions</th></tr></thead>
+                        <tbody>
+                        {% for row in traditional_estimation_rows %}
+                        <tr>
+                            <td><strong>{{ row.model }}</strong></td><td>{{ row.effort_months }}</td><td>{{ row.schedule_months }}</td><td>{{ row.people_required }}</td><td>{{ row.estimated_cost }}</td>
+                            <td><ul class="assumptions">{% for param in row.params %}<li>{{ param.key }}: {{ param.value }}</li>{% endfor %}</ul></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                {% if !locomo_estimation_rows.is_empty() %}
+                <h3>LOCOMO — LLM generation estimate</h3>
+                <p class="scope-note">LOCOMO estimates LLM generation cost and review effort. It is not a complete software-development cost estimate.</p>
+                <div class="table-scroll">
+                    <table>
+                        <thead><tr><th>Model</th><th>Human review (person-months)</th><th>Generation time (months)</th><th>Parallelism ratio</th><th>LLM API cost (USD)</th><th>Assumptions</th></tr></thead>
+                        <tbody>
+                        {% for row in locomo_estimation_rows %}
+                        <tr>
+                            <td><strong>{{ row.model }}</strong></td><td>{{ row.effort_months }}</td><td>{{ row.schedule_months }}</td><td>{{ row.people_required }}</td><td>{{ row.estimated_cost }}</td>
+                            <td><ul class="assumptions">{% for param in row.params %}<li>{{ param.key }}: {{ param.value }}</li>{% endfor %}</ul></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </details>
         </section>
 
         <footer>
-            <p>Generated by <a href="https://github.com/DropFan/codelens" style="color: var(--accent-blue)"><strong>Codelens</strong></a> by <a href="https://github.com/DropFan" style="color: var(--accent-blue)">Tiger</a> in {{ elapsed_secs }}s | High-performance code analysis tool powered by Rust</p>
+            <strong>Generation Information</strong>
+            <p>Generated {{ generated_at }} by Codelens {{ tool_version }} in {{ elapsed_secs }}s. Health model: {{ health_model }}. Health scope: {{ health_scope }}.</p>
         </footer>
-    </div>
+    </main>
 
     <script>
-        const langData = [
-            {% for (name, stats) in by_language %}
-            { name: "{{ name }}", code: {{ stats.lines.code }} },
-            {% endfor %}
-        ];
-
-        new Chart(document.getElementById('languageChart'), {
-            type: 'doughnut',
-            data: {
-                labels: langData.map(d => d.name),
-                datasets: [{
-                    data: langData.map(d => d.code),
-                    backgroundColor: [
-                        '#58a6ff', '#3fb950', '#d29922', '#a371f7',
-                        '#f85149', '#79c0ff', '#56d364', '#e3b341',
-                        '#ff7b72', '#7ee787', '#ffa657', '#d2a8ff'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: { color: '#f0f6fc' }
+        if (typeof Chart !== 'undefined') {
+            const langData = [
+                {% for (name, stats) in by_language %}
+                { name: "{{ name }}", code: {{ stats.lines.code }} },
+                {% endfor %}
+            ];
+            new Chart(document.getElementById('languageChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: langData.map(d => d.name),
+                    datasets: [{ data: langData.map(d => d.code), backgroundColor: ['#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f85149', '#79c0ff', '#56d364', '#e3b341', '#ff7b72', '#7ee787', '#ffa657', '#d2a8ff'] }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'right', labels: { color: '#f0f6fc' } } } }
+            });
+            new Chart(document.getElementById('codeCommentChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['Code', 'Comments', 'Blank'],
+                    datasets: [{ data: [{{ summary.lines.code }}, {{ summary.lines.comment }}, {{ summary.lines.blank }}], backgroundColor: ['#3fb950', '#d29922', '#8b949e'] }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+                        x: { ticks: { color: '#8b949e' }, grid: { display: false } }
                     }
                 }
-            }
-        });
-
-        new Chart(document.getElementById('codeCommentChart'), {
-            type: 'bar',
-            data: {
-                labels: ['Code', 'Comment', 'Blank'],
-                datasets: [{
-                    data: [{{ summary.lines.code }}, {{ summary.lines.comment }}, {{ summary.lines.blank }}],
-                    backgroundColor: ['#3fb950', '#d29922', '#8b949e']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
-                    x: { ticks: { color: '#8b949e' }, grid: { display: false } }
-                }
-            }
-        });
+            });
+        }
     </script>
 </body>
 </html>

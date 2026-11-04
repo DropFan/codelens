@@ -6,7 +6,7 @@ use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{HealthPresentation, OutputFormat, OutputOptions, Report};
 
 /// Markdown output formatter.
 pub struct MarkdownOutput;
@@ -229,56 +229,75 @@ impl MarkdownOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let presentation = HealthPresentation::from_report(report);
+        self.write_health_summary(report, &presentation, writer)?;
+        self.write_health_regression(report, writer)?;
+        self.write_health_dimensions(report, writer)?;
+        self.write_health_languages(report, writer)?;
+        if !options.summary_only {
+            self.write_health_directories(report, writer)?;
+            self.write_health_files(&presentation, writer)?;
+        }
+        Ok(())
+    }
+
+    fn write_health_summary(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        presentation: &HealthPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         writeln!(writer, "# Code Health Report")?;
         writeln!(writer)?;
         if report.assessment == HealthAssessment::InsufficientData {
             writeln!(
                 writer,
-                "**Project Assessment:** Insufficient data | **Estimated score:** {:.1} | **Model:** {}",
-                report.score, report.model
+                "**Project Assessment:** Insufficient data | **Estimated score:** {} | **Model:** {}",
+                presentation.score, presentation.model
             )?;
         } else {
             writeln!(
                 writer,
-                "**Project Score:** {:.1} | **Grade:** {} | **Model:** {}",
-                report.score, report.grade, report.model
+                "**Project Score:** {} | **Grade:** {} | **Model:** {}",
+                presentation.score, report.grade, presentation.model
             )?;
         }
         writeln!(
             writer,
-            "**Scope:** {} | **Confidence:** {} ({:.0}%) | **Tail 10%:** {:.1} | **F files:** {} ({:.1}%)",
-            report.scope,
-            report.confidence.level,
-            report.confidence.coverage * 100.0,
-            report.tail_risk.tail_score,
-            report.tail_risk.failing_files,
-            report.tail_risk.failing_ratio * 100.0,
+            "**Health analysis scope:** {} | **Measurement confidence:** {}",
+            presentation.scope, presentation.confidence,
         )?;
-        if let Some(test_health) = &report.test_health {
-            if test_health.assessment == HealthAssessment::InsufficientData {
-                writeln!(
-                    writer,
-                    "**Test Code:** Insufficient data (estimated score: {:.1}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
-                    test_health.score,
-                    test_health.file_count,
-                    test_health.confidence.level,
-                    test_health.confidence.coverage * 100.0,
-                )?;
-            } else {
-                writeln!(
-                    writer,
-                    "**Test Code:** {:.1} ({}) | **Files:** {} | **Confidence:** {} ({:.0}%)",
-                    test_health.score,
-                    test_health.grade,
-                    test_health.file_count,
-                    test_health.confidence.level,
-                    test_health.confidence.coverage * 100.0,
-                )?;
-            }
+        writeln!(
+            writer,
+            "**Worst 10% file average:** {} | **F-grade files:** {} ({})",
+            presentation.tail_score, presentation.failing_files, presentation.failing_ratio,
+        )?;
+        if let Some(directory) = &presentation.worst_directory {
+            writeln!(
+                writer,
+                "**Worst directory:** {} — {} ({}) | {}",
+                directory.path, directory.grade, directory.score, directory.detail,
+            )?;
+        }
+        if let Some(test_health) = &presentation.test_health {
+            writeln!(writer, "**Test code health:** {test_health}")?;
+        }
+        if presentation.failing_files > 0 {
+            writeln!(
+                writer,
+                "> **Risk:** {} file(s) are graded F despite the overall {} grade.",
+                presentation.failing_files, report.grade,
+            )?;
         }
         writeln!(writer)?;
+        Ok(())
+    }
 
-        // Baseline comparison (--baseline)
+    fn write_health_regression(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         if let Some(reg) = &report.regression {
             let delta = if reg.score_delta >= 0.0 {
                 format!("+{:.1}", reg.score_delta)
@@ -346,8 +365,14 @@ impl MarkdownOutput {
             )?;
             writeln!(writer)?;
         }
+        Ok(())
+    }
 
-        // Dimensions
+    fn write_health_dimensions(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         writeln!(writer, "## Dimensions")?;
         writeln!(writer)?;
         writeln!(writer, "| Dimension | Score | Grade |")?;
@@ -360,7 +385,14 @@ impl MarkdownOutput {
             )?;
         }
         writeln!(writer)?;
+        Ok(())
+    }
 
+    fn write_health_languages(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         if !report.by_language.is_empty() {
             writeln!(writer, "## By Language")?;
             writeln!(writer)?;
@@ -396,45 +428,53 @@ impl MarkdownOutput {
             }
             writeln!(writer)?;
         }
+        Ok(())
+    }
 
-        if !options.summary_only {
-            if !report.by_directory.is_empty() {
-                writeln!(writer, "## By Directory")?;
-                writeln!(writer)?;
-                writeln!(writer, "| Directory | Score | Grade | Files |")?;
-                writeln!(writer, "|-----------|-------|-------|-------|")?;
-                for dir in &report.by_directory {
-                    writeln!(
-                        writer,
-                        "| {} | {:.1} | {} | {} |",
-                        dir.path.display(),
-                        dir.score,
-                        dir.grade,
-                        dir.file_count
-                    )?;
-                }
-                writeln!(writer)?;
+    fn write_health_directories(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if !report.by_directory.is_empty() {
+            writeln!(writer, "## By Directory")?;
+            writeln!(writer)?;
+            writeln!(writer, "| Directory | Score | Grade | Files |")?;
+            writeln!(writer, "|-----------|-------|-------|-------|")?;
+            for dir in &report.by_directory {
+                writeln!(
+                    writer,
+                    "| {} | {:.1} | {} | {} |",
+                    dir.path.display(),
+                    dir.score,
+                    dir.grade,
+                    dir.file_count
+                )?;
             }
-
-            if !report.worst_files.is_empty() {
-                writeln!(writer, "## Worst Files")?;
-                writeln!(writer)?;
-                writeln!(writer, "| File | Score | Grade | Top Issue |")?;
-                writeln!(writer, "|------|-------|-------|-----------|")?;
-                for file in &report.worst_files {
-                    writeln!(
-                        writer,
-                        "| {} | {:.1} | {} | {} |",
-                        file.path.display(),
-                        file.score,
-                        file.grade,
-                        file.top_issue
-                    )?;
-                }
-                writeln!(writer)?;
-            }
+            writeln!(writer)?;
         }
+        Ok(())
+    }
 
+    fn write_health_files(
+        &self,
+        presentation: &HealthPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if !presentation.worst_files.is_empty() {
+            writeln!(writer, "## Worst Files")?;
+            writeln!(writer)?;
+            writeln!(writer, "| File | Score | Grade | Top Issue |")?;
+            writeln!(writer, "|------|-------|-------|-----------|")?;
+            for file in &presentation.worst_files {
+                writeln!(
+                    writer,
+                    "| {} | {} | {} | {} |",
+                    file.path, file.score, file.grade, file.detail,
+                )?;
+            }
+            writeln!(writer)?;
+        }
         Ok(())
     }
 
@@ -848,6 +888,14 @@ impl MarkdownOutput {
         writeln!(writer, "# Cost Estimation Comparison")?;
         writeln!(writer)?;
         writeln!(writer, "**Total SLOC:** {}", report.total_sloc)?;
+        writeln!(
+            writer,
+            "**Scope:** all counted SLOC, including tests and recognized documentation/configuration files."
+        )?;
+        writeln!(
+            writer,
+            "> LOCOMO estimates LLM generation cost and review effort, not total software development cost."
+        )?;
         writeln!(writer)?;
         writeln!(
             writer,
@@ -863,6 +911,18 @@ impl MarkdownOutput {
                 "| {} | {:.2} | {:.2} | {:.2} | ${:.2} |",
                 r.model, r.effort_months, r.schedule_months, r.people_required, r.estimated_cost,
             )?;
+        }
+        writeln!(writer)?;
+        writeln!(writer, "## Calculation Assumptions")?;
+        writeln!(writer)?;
+        for report in &report.reports {
+            let params = report
+                .params
+                .iter()
+                .map(|(key, value)| format!("{key}: {value}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            writeln!(writer, "- **{}:** {}", report.model, params)?;
         }
         Ok(())
     }

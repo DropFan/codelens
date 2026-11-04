@@ -59,6 +59,8 @@
         tr:hover { background: var(--bg-tertiary); }
         h2 { margin-bottom: 1rem; margin-top: 2rem; }
         footer { text-align: center; padding: 2rem; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); margin-top: 3rem; }
+        section { max-width: 100%; overflow-x: auto; }
+        @media print { body { background: #fff; color: #111; } .charts { display: none; } table { color: #111; } }
     </style>
 </head>
 <body>
@@ -71,11 +73,11 @@
         <section class="charts-section">
             <div class="chart-container">
                 <h3>Estimated Cost by Model</h3>
-                <canvas id="costChart"></canvas>
+                <canvas id="costChart" role="img" aria-label="Cost comparison chart">Cost values are available in the table below.</canvas>
             </div>
             <div class="chart-container">
                 <h3>Effort &amp; Schedule by Model</h3>
-                <canvas id="effortChart"></canvas>
+                <canvas id="effortChart" role="img" aria-label="Effort and schedule comparison chart">Effort and schedule values are available in the table below.</canvas>
             </div>
         </section>
 
@@ -118,6 +120,7 @@
         ];
         const colors = ['#58a6ff', '#3fb950', '#d29922', '#a371f7'];
 
+        if (typeof Chart !== 'undefined') {
         new Chart(document.getElementById('costChart'), {
             type: 'bar',
             data: {
@@ -138,7 +141,6 @@
                 }
             }
         });
-
         new Chart(document.getElementById('effortChart'), {
             type: 'bar',
             data: {
@@ -157,6 +159,7 @@
                 plugins: { legend: { labels: { color: '#f0f6fc' } } }
             }
         });
+        }
     </script>
 </body>
 </html>

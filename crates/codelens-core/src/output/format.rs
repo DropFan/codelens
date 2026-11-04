@@ -8,9 +8,10 @@ use crate::error::Result;
 use crate::insight::coupling::CouplingReport;
 use crate::insight::diff::DiffReport;
 use crate::insight::estimation::{EstimationComparison, EstimationReport};
-use crate::insight::health::HealthReport;
+use crate::insight::health::{HealthAssessment, HealthReport, HealthScope};
 use crate::insight::hotspot::HotspotReport;
 use crate::insight::trend::TrendReport;
+use crate::insight::Grade;
 
 /// Unified report type for all output formatters.
 #[derive(Debug, Clone)]
@@ -34,6 +35,108 @@ pub struct CombinedReport {
     pub analysis: AnalysisResult,
     pub health: HealthReport,
     pub estimation: EstimationComparison,
+}
+
+/// Formatter-neutral health summary used by human-readable outputs.
+///
+/// Machine-readable formats serialize `HealthReport` directly and never use
+/// this view, which keeps their schema stable while console, Markdown, and
+/// HTML share the same wording and precision.
+#[derive(Debug, Clone)]
+pub(crate) struct HealthPresentation {
+    pub score: String,
+    pub model: String,
+    pub scope: String,
+    pub confidence: String,
+    pub tail_score: String,
+    pub failing_files: usize,
+    pub failing_ratio: String,
+    pub test_health: Option<String>,
+    pub worst_directory: Option<HealthRiskItem>,
+    pub worst_files: Vec<HealthRiskItem>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HealthRiskItem {
+    pub path: String,
+    pub score: String,
+    pub grade: Grade,
+    pub detail: String,
+}
+
+impl HealthPresentation {
+    pub(crate) fn from_report(report: &HealthReport) -> Self {
+        Self {
+            score: format_score(report.score),
+            model: health_model_display_name(&report.model),
+            scope: health_scope_display_name(report.scope).to_string(),
+            confidence: format_confidence(report.confidence.level, report.confidence.coverage),
+            tail_score: format_score(report.tail_risk.tail_score),
+            failing_files: report.tail_risk.failing_files,
+            failing_ratio: format!("{:.1}%", report.tail_risk.failing_ratio * 100.0),
+            test_health: report.test_health.as_ref().map(|test| {
+                let score = format_score(test.score);
+                let confidence = format_confidence(test.confidence.level, test.confidence.coverage);
+                if test.assessment == HealthAssessment::InsufficientData {
+                    format!(
+                        "Insufficient data (estimated score {score}); {} files; {confidence}",
+                        test.file_count
+                    )
+                } else {
+                    format!(
+                        "{} ({score}); {} files; {confidence}",
+                        test.grade, test.file_count
+                    )
+                }
+            }),
+            worst_directory: report.by_directory.first().map(|directory| HealthRiskItem {
+                path: directory.path.display().to_string(),
+                score: format_score(directory.score),
+                grade: directory.grade,
+                detail: format!("{} files", directory.file_count),
+            }),
+            worst_files: report
+                .worst_files
+                .iter()
+                .map(|file| HealthRiskItem {
+                    path: file.path.display().to_string(),
+                    score: format_score(file.score),
+                    grade: file.grade,
+                    detail: file.top_issue.to_string(),
+                })
+                .collect(),
+        }
+    }
+}
+
+pub(crate) fn format_score(score: f64) -> String {
+    format!("{score:.1}")
+}
+
+pub(crate) fn format_confidence(
+    level: crate::insight::health::ConfidenceLevel,
+    coverage: f64,
+) -> String {
+    format!("{level} ({:.1}% measured)", coverage * 100.0)
+}
+
+pub(crate) fn health_model_display_name(model: &str) -> String {
+    match model {
+        "default" => "v1".to_string(),
+        "default-no-dup" => "v1 (no duplication scan)".to_string(),
+        "default-v2" => "v2".to_string(),
+        "default-v2-no-dup" => "v2 (no duplication scan)".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn health_scope_display_name(scope: HealthScope) -> &'static str {
+    match scope {
+        HealthScope::Production => "Production code",
+        HealthScope::TestsOnly => "Test code only",
+        HealthScope::LegacyAll => "All analyzed files (legacy v1 scope)",
+        HealthScope::Empty => "No health-supported files",
+    }
 }
 
 /// Sort file stats by the given key (descending for numeric keys,

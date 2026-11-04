@@ -9,7 +9,7 @@ use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{HealthPresentation, OutputFormat, OutputOptions, Report};
 
 /// Console output formatter.
 pub struct ConsoleOutput;
@@ -434,7 +434,24 @@ impl ConsoleOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        // Header
+        let presentation = HealthPresentation::from_report(report);
+        self.write_health_summary(report, &presentation, writer)?;
+        self.write_health_regression(report, writer)?;
+        self.write_health_dimensions(report, writer)?;
+        self.write_health_languages(report, writer)?;
+        if !options.summary_only {
+            self.write_health_directories(report, writer)?;
+            self.write_health_files(&presentation, writer)?;
+        }
+        Ok(())
+    }
+
+    fn write_health_summary(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        presentation: &HealthPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(
@@ -451,8 +468,8 @@ impl ConsoleOutput {
                 writer,
                 "  Project Assessment: {}  Estimated Score: {}  Model: {}",
                 "INSUFFICIENT DATA".yellow().bold(),
-                format!("{:.1}", report.score).bold(),
-                report.model,
+                presentation.score.bold(),
+                presentation.model,
             )?;
         } else {
             let grade_color = Self::grade_color(report.grade);
@@ -468,46 +485,47 @@ impl ConsoleOutput {
             writeln!(
                 writer,
                 "  Project Score: {}  Grade: {}  Model: {}",
-                format!("{:.1}", report.score).bold(),
+                presentation.score.bold(),
                 colored_grade,
-                report.model,
+                presentation.model,
             )?;
         }
         writeln!(
             writer,
-            "  Scope: {}  Confidence: {} ({:.0}%)  Tail 10%: {:.1}  F files: {} ({:.1}%)",
-            report.scope,
-            report.confidence.level,
-            report.confidence.coverage * 100.0,
-            report.tail_risk.tail_score,
-            report.tail_risk.failing_files,
-            report.tail_risk.failing_ratio * 100.0,
+            "  Health Scope: {}  Measurement Confidence: {}",
+            presentation.scope, presentation.confidence,
         )?;
-        if let Some(test_health) = &report.test_health {
-            if test_health.assessment == HealthAssessment::InsufficientData {
-                writeln!(
-                    writer,
-                    "  Test Code: Insufficient data (estimated score: {:.1})  Files: {}  Confidence: {} ({:.0}%)",
-                    test_health.score,
-                    test_health.file_count,
-                    test_health.confidence.level,
-                    test_health.confidence.coverage * 100.0,
-                )?;
-            } else {
-                writeln!(
-                    writer,
-                    "  Test Code: {:.1} ({})  Files: {}  Confidence: {} ({:.0}%)",
-                    test_health.score,
-                    test_health.grade,
-                    test_health.file_count,
-                    test_health.confidence.level,
-                    test_health.confidence.coverage * 100.0,
-                )?;
-            }
+        writeln!(
+            writer,
+            "  Worst 10% File Average: {}  F-grade Files: {} ({})",
+            presentation.tail_score, presentation.failing_files, presentation.failing_ratio,
+        )?;
+        if let Some(directory) = &presentation.worst_directory {
+            writeln!(
+                writer,
+                "  Worst Directory: {}  {} ({})  {}",
+                directory.path, directory.grade, directory.score, directory.detail,
+            )?;
+        }
+        if let Some(test_health) = &presentation.test_health {
+            writeln!(writer, "  Test Code Health: {test_health}")?;
+        }
+        if presentation.failing_files > 0 {
+            writeln!(
+                writer,
+                "  Risk: {} file(s) are graded F despite the overall {} grade.",
+                presentation.failing_files, report.grade,
+            )?;
         }
         writeln!(writer)?;
+        Ok(())
+    }
 
-        // Baseline comparison (--baseline)
+    fn write_health_regression(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         if let Some(reg) = &report.regression {
             let arrow = format!(
                 "{} ({:.1}) → {} ({:.1})",
@@ -614,8 +632,14 @@ impl ConsoleOutput {
             writeln!(writer, "  Verdict: {verdict}")?;
             writeln!(writer)?;
         }
+        Ok(())
+    }
 
-        // Dimensions table
+    fn write_health_dimensions(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         let mut dim_table = Table::new();
         dim_table
             .load_preset(UTF8_FULL)
@@ -634,7 +658,14 @@ impl ConsoleOutput {
         }
         writeln!(writer, "{dim_table}")?;
         writeln!(writer)?;
+        Ok(())
+    }
 
+    fn write_health_languages(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         if !report.by_language.is_empty() {
             writeln!(writer, "{}", "By Language".bold())?;
             writeln!(writer)?;
@@ -678,61 +709,70 @@ impl ConsoleOutput {
             writeln!(writer, "{language_table}")?;
             writeln!(writer)?;
         }
+        Ok(())
+    }
 
-        if !options.summary_only {
-            // By Directory table
-            if !report.by_directory.is_empty() {
-                writeln!(writer, "{}", "By Directory".bold())?;
-                writeln!(writer)?;
-                let mut dir_table = Table::new();
-                dir_table
-                    .load_preset(UTF8_FULL)
-                    .set_content_arrangement(ContentArrangement::Dynamic);
-                dir_table.set_header(vec![
-                    Cell::new("Directory").add_attribute(Attribute::Bold),
-                    Cell::new("Score").add_attribute(Attribute::Bold),
-                    Cell::new("Grade").add_attribute(Attribute::Bold),
-                    Cell::new("Files").add_attribute(Attribute::Bold),
+    fn write_health_directories(
+        &self,
+        report: &crate::insight::health::HealthReport,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if !report.by_directory.is_empty() {
+            writeln!(writer, "{}", "By Directory".bold())?;
+            writeln!(writer)?;
+            let mut dir_table = Table::new();
+            dir_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            dir_table.set_header(vec![
+                Cell::new("Directory").add_attribute(Attribute::Bold),
+                Cell::new("Score").add_attribute(Attribute::Bold),
+                Cell::new("Grade").add_attribute(Attribute::Bold),
+                Cell::new("Files").add_attribute(Attribute::Bold),
+            ]);
+            for dir in &report.by_directory {
+                dir_table.add_row(vec![
+                    Cell::new(dir.path.display().to_string()).fg(Color::Cyan),
+                    Cell::new(format!("{:.1}", dir.score)),
+                    Cell::new(dir.grade.to_string()).fg(Self::grade_color(dir.grade)),
+                    Cell::new(Self::format_number(dir.file_count)),
                 ]);
-                for dir in &report.by_directory {
-                    dir_table.add_row(vec![
-                        Cell::new(dir.path.display().to_string()).fg(Color::Cyan),
-                        Cell::new(format!("{:.1}", dir.score)),
-                        Cell::new(dir.grade.to_string()).fg(Self::grade_color(dir.grade)),
-                        Cell::new(Self::format_number(dir.file_count)),
-                    ]);
-                }
-                writeln!(writer, "{dir_table}")?;
-                writeln!(writer)?;
             }
-
-            // Worst Files table
-            if !report.worst_files.is_empty() {
-                writeln!(writer, "{}", "Worst Files".bold())?;
-                writeln!(writer)?;
-                let mut file_table = Table::new();
-                file_table
-                    .load_preset(UTF8_FULL)
-                    .set_content_arrangement(ContentArrangement::Dynamic);
-                file_table.set_header(vec![
-                    Cell::new("File").add_attribute(Attribute::Bold),
-                    Cell::new("Score").add_attribute(Attribute::Bold),
-                    Cell::new("Grade").add_attribute(Attribute::Bold),
-                    Cell::new("Top Issue").add_attribute(Attribute::Bold),
-                ]);
-                for file in &report.worst_files {
-                    file_table.add_row(vec![
-                        Cell::new(file.path.display().to_string()).fg(Color::Cyan),
-                        Cell::new(format!("{:.1}", file.score)),
-                        Cell::new(file.grade.to_string()).fg(Self::grade_color(file.grade)),
-                        Cell::new(file.top_issue.to_string()).fg(Color::Yellow),
-                    ]);
-                }
-                writeln!(writer, "{file_table}")?;
-                writeln!(writer)?;
-            }
+            writeln!(writer, "{dir_table}")?;
+            writeln!(writer)?;
         }
+        Ok(())
+    }
 
+    fn write_health_files(
+        &self,
+        presentation: &HealthPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if !presentation.worst_files.is_empty() {
+            writeln!(writer, "{}", "Worst Files".bold())?;
+            writeln!(writer)?;
+            let mut file_table = Table::new();
+            file_table
+                .load_preset(UTF8_FULL)
+                .set_content_arrangement(ContentArrangement::Dynamic);
+            file_table.set_header(vec![
+                Cell::new("File").add_attribute(Attribute::Bold),
+                Cell::new("Score").add_attribute(Attribute::Bold),
+                Cell::new("Grade").add_attribute(Attribute::Bold),
+                Cell::new("Top Issue").add_attribute(Attribute::Bold),
+            ]);
+            for file in &presentation.worst_files {
+                file_table.add_row(vec![
+                    Cell::new(&file.path).fg(Color::Cyan),
+                    Cell::new(&file.score),
+                    Cell::new(file.grade.to_string()).fg(Self::grade_color(file.grade)),
+                    Cell::new(&file.detail).fg(Color::Yellow),
+                ]);
+            }
+            writeln!(writer, "{file_table}")?;
+            writeln!(writer)?;
+        }
         Ok(())
     }
 
@@ -1343,6 +1383,14 @@ impl ConsoleOutput {
             writer,
             "  Total SLOC: {}",
             Self::format_number(report.total_sloc).bold()
+        )?;
+        writeln!(
+            writer,
+            "  Scope: all counted SLOC, including tests and recognized documentation/configuration files"
+        )?;
+        writeln!(
+            writer,
+            "  Note: LOCOMO estimates LLM generation cost and review effort, not total software development cost"
         )?;
         writeln!(writer)?;
 
