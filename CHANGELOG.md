@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-18
+
 ### Added
 - Human-readable health reports now surface analysis scope, measurement
   confidence, the worst directory, F-grade file risk, and recommended next
