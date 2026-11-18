@@ -228,6 +228,88 @@ fn main() {
     }
 
     #[test]
+    fn test_analyze_include_all_only_bypasses_default_exclusions() {
+        let dir = TempDir::new().unwrap();
+
+        let git_init = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(git_init.status.success());
+
+        create_test_file(dir.path(), ".gitignore", "gitignored/\n");
+        create_test_file(dir.path(), ".codelensignore", "project-ignored/\n");
+        create_test_file(
+            dir.path(),
+            ".gitattributes",
+            "generated.custom linguist-language=Rust linguist-generated\n",
+        );
+        create_test_file(dir.path(), "src/main.rs", "fn main() {}\n");
+        create_test_file(
+            dir.path(),
+            "node_modules/dependency.js",
+            "export const dependency = true;\n",
+        );
+        create_test_file(dir.path(), "generated.custom", "pub fn generated() {}\n");
+        create_test_file(dir.path(), "gitignored/skip.rs", "fn skip() {}\n");
+        create_test_file(dir.path(), "project-ignored/skip.rs", "fn skip() {}\n");
+        create_test_file(dir.path(), "explicit.rs", "fn explicit() {}\n");
+        create_test_file(
+            dir.path(),
+            ".git/objects/metadata.rs",
+            "fn git_metadata() {}\n",
+        );
+
+        let mut config = Config::default();
+        config.filter.smart_exclude = true;
+        config.filter.excludes = vec!["explicit.rs".to_string()];
+
+        let default_result = analyze(&[dir.path()], &config).unwrap();
+        assert_eq!(default_result.summary.total_files, 1);
+        assert!(default_result
+            .files
+            .iter()
+            .any(|stats| stats.path.ends_with("src/main.rs")));
+
+        config.filter.include_all = true;
+        let all_result = analyze(&[dir.path()], &config).unwrap();
+
+        for expected in [
+            "src/main.rs",
+            "node_modules/dependency.js",
+            "generated.custom",
+        ] {
+            assert!(
+                all_result
+                    .files
+                    .iter()
+                    .any(|stats| stats.path.ends_with(expected)),
+                "expected --all to include {expected}"
+            );
+        }
+        for excluded in [
+            "gitignored/skip.rs",
+            "project-ignored/skip.rs",
+            "explicit.rs",
+            ".git/objects/metadata.rs",
+        ] {
+            assert!(
+                !all_result
+                    .files
+                    .iter()
+                    .any(|stats| stats.path.ends_with(excluded)),
+                "expected --all to keep excluding {excluded}"
+            );
+        }
+        assert_eq!(all_result.summary.total_files, 3);
+
+        let vcs_entry = dir.path().join(".git/objects/metadata.rs");
+        let direct_vcs_result = analyze(&[vcs_entry], &config).unwrap();
+        assert_eq!(direct_vcs_result.summary.total_files, 0);
+    }
+
+    #[test]
     fn test_analyze_result_contains_elapsed_time() {
         let dir = TempDir::new().unwrap();
         create_test_file(dir.path(), "main.rs", "fn main() {}\n");

@@ -716,6 +716,16 @@ mod tests {
     }
 
     #[test]
+    fn all_flag_enables_include_all_without_disabling_ignore_files() {
+        let cli = parse(&["codelens", "--all"]);
+        let config = resolve_config(&cli.filter, &cli.output, &cli.advanced, None);
+
+        assert!(config.filter.include_all);
+        assert!(config.filter.smart_exclude);
+        assert!(config.walker.use_gitignore);
+    }
+
+    #[test]
     fn health_model_cli_overrides_config_file() {
         let partial = partial("health_model = \"v2\"");
         let cli = parse(&["codelens"]);

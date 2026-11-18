@@ -282,8 +282,11 @@ codelens --count-as jsp:html        # Count .jsp files as HTML
 codelens --no-duplicates            # Skip files with identical content
 codelens --no-min-gen               # Skip minified/generated files
 codelens --no-dup-scan              # Skip line-duplication analysis (saves memory on huge repos)
+codelens --all                      # Include dependency/build and Linguist-vendored/generated files
 ```
 
+- `--all` keeps `.gitignore`, `.codelensignore`, explicit filters, binary
+  detection, and version-control metadata exclusions in effect.
 - Extensionless scripts are detected via shebang (`#!/usr/bin/env python`).
 - Drop a `.codelensignore` file (gitignore syntax) anywhere in the tree to
   exclude paths, like scc's `.sccignore` / tokei's `.tokeignore`.

@@ -376,7 +376,8 @@ pub struct FilterArgs {
     #[arg(long, value_name = "EXT:LANG,...")]
     pub count_as: Option<String>,
 
-    /// Include all files (including dependencies).
+    /// Include dependency/build files and Linguist-vendored/generated code;
+    /// ignore files and explicit filters still apply.
     #[arg(short, long)]
     pub all: bool,
 

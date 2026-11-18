@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::error::Result;
 
 use super::pattern::PatternFilter;
-use super::smart::SmartExclude;
+use super::smart::{SmartExclude, VcsExclude};
 use super::Filter;
 
 /// Chain of filters applied in sequence.
@@ -24,8 +24,12 @@ impl FilterChain {
             filters.push(Box::new(PatternFilter::new(&config.filter)?));
         }
 
-        // Add smart exclude filter if enabled
-        if config.filter.smart_exclude {
+        // --all bypasses default dependency/build exclusions, but VCS
+        // metadata is never project source. Explicit pattern filters above
+        // still apply.
+        if config.filter.include_all {
+            filters.push(Box::new(VcsExclude));
+        } else if config.filter.smart_exclude {
             filters.push(Box::new(SmartExclude::new()));
         }
 

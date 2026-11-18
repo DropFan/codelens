@@ -53,7 +53,8 @@ pub struct FilterConfig {
     pub max_lines: Option<usize>,
     /// Use smart directory exclusion.
     pub smart_exclude: bool,
-    /// Include all files (including dependencies).
+    /// Include dependency/build files and Linguist-vendored/generated code;
+    /// ignore files and explicit filters still apply.
     pub include_all: bool,
     /// Skip files whose content duplicates an already-seen file.
     pub no_duplicates: bool,

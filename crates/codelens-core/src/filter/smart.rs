@@ -1,8 +1,11 @@
 //! Smart directory exclusion based on project type.
 
-use std::path::Path;
+use std::path::{Component, Path};
 
 use super::Filter;
+
+/// Version-control metadata must never be treated as project source.
+const VCS_EXCLUDE: &[&str] = &[".git", ".svn", ".hg", ".bzr", "_darcs"];
 
 /// Common directories to always exclude.
 const ALWAYS_EXCLUDE: &[&str] = &[
@@ -38,6 +41,21 @@ const ALWAYS_EXCLUDE: &[&str] = &[
     "DerivedData",
     "Pods",
 ];
+
+/// Minimal hard exclusion used by `--all`.
+pub(super) struct VcsExclude;
+
+impl Filter for VcsExclude {
+    fn should_include(&self, path: &Path, _is_dir: bool) -> bool {
+        !path.components().any(|component| {
+            let Component::Normal(name) = component else {
+                return false;
+            };
+            name.to_str()
+                .is_some_and(|name| VCS_EXCLUDE.contains(&name))
+        })
+    }
+}
 
 /// Smart exclusion filter that detects project types.
 pub struct SmartExclude {
@@ -150,5 +168,14 @@ mod tests {
         let filter = SmartExclude::new();
         assert!(filter.should_include(Path::new("main.rs"), false));
         assert!(filter.should_include(Path::new("node_modules.txt"), false));
+    }
+
+    #[test]
+    fn test_vcs_exclude_only_rejects_vcs_directories() {
+        let filter = VcsExclude;
+        assert!(!filter.should_include(Path::new(".git"), true));
+        assert!(!filter.should_include(Path::new("project/.git/objects/metadata.rs"), false));
+        assert!(filter.should_include(Path::new("node_modules"), true));
+        assert!(filter.should_include(Path::new("src/metadata.rs"), false));
     }
 }
