@@ -9,7 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Human-readable health reports now surface analysis scope, measurement
+  confidence, the worst directory, F-grade file risk, and recommended next
+  steps
+- HTML reports include chart-independent text and table summaries, responsive
+  tables, and print-friendly layouts
+
+### Changed
+- Console, Markdown, and HTML health reports now share one-decimal score
+  formatting and user-facing model/scope labels; combined reports lead with
+  health and risk before project scale and cost
+- Cost-estimation reports now explain their counted-SLOC scope, distinguish
+  LOCOMO generation/review estimates from workforce models, and show active
+  salary, overhead, and model assumptions
+
 ### Fixed
+- HTML health scores retain decimal precision instead of being truncated to
+  whole numbers
 - `-a` / `--all` now includes dependency/build files and
   Linguist-vendored/generated code while retaining `.gitignore`,
   `.codelensignore`, explicit filters, binary detection, and version-control
