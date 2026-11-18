@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::Deserialize;
 
@@ -210,8 +210,8 @@ impl CodelensServer {
 
 #[tool_handler]
 impl ServerHandler for CodelensServer {
-    fn get_info(&self) -> ServerInfo {
-        let mut info = ServerInfo::default();
+    fn get_info(&self) -> ServerConfig {
+        let mut info = ServerConfig::default();
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.instructions = Some(
             "codelens analyzes a code repository: statistics (repo_overview), \

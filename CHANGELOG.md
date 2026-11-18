@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.codelensignore`, explicit filters, binary detection, and version-control
   metadata exclusions
 
+### Security
+- Updated the optional MCP runtime dependencies to `rmcp 3.9.0` and
+  `tokio 1.53.3`, replacing versions flagged by dependency security checks
+
 ## [0.3.0] - 2026-11-03
 
 ### Added
