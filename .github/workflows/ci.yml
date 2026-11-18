@@ -75,6 +75,9 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Informational-only advisories with no patched versions. Keep the
+          # vulnerability gate active for every other current or future ID.
+          ignore: RUSTSEC-2026-0374,RUSTSEC-2026-0543,RUSTSEC-2025-0119
 
   docs:
     name: Documentation
