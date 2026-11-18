@@ -167,7 +167,10 @@ git commit -m "chore: bump version to 0.1.0"
 # 创建带注释的 tag（Rust 版本使用 -rust 后缀）
 git tag -a v0.1.0-rust -m "Release v0.1.0 (Rust)"
 
-# 推送 tag（触发自动发布）
+# 先推送版本提交，并等待 rust 分支 CI 全部通过
+git push origin rust
+
+# CI 通过后再推送 tag（触发不可逆的自动发布）
 git push origin v0.1.0-rust
 ```
 
@@ -179,18 +182,21 @@ cargo release 会按 release.toml 的配置（workspace 级在仓库根，tag �
 `.pre-commit-hooks.yaml` 中的 `rev:`、提交并创建 tag：
 
 ```bash
-# 预览发布（不实际执行）
-cargo release patch --dry-run
+# 预览发布（不实际执行，也不推送）
+cargo release patch --dry-run --no-push --no-confirm
 
-# 执行发布
-cargo release patch --execute
+# 在本地执行版本提交与 tag，不自动推送
+cargo release patch --execute --no-push --no-confirm
 
 # 发布 minor 版本
-cargo release minor --execute
+cargo release minor --execute --no-push --no-confirm
 
 # 发布 major 版本
-cargo release major --execute
+cargo release major --execute --no-push --no-confirm
 ```
+
+执行后先推送 `rust` 分支并等待普通 CI 全部通过，再单独推送新 tag 触发发布流程。
+不要在分支 CI 未完成时同时推送版本提交和 tag。
 
 ---
 
@@ -210,17 +216,19 @@ cargo release major --execute
 
 ### Release 流程 (release.yml)
 
-1. **Create Release** - 创建 GitHub Draft Release
-2. **Build** - 构建多平台二进制并上传到 Draft Release
+1. **Verify Release Source** - 校验 tag 与版本号，并运行格式、编译、Clippy、测试、
+   文档、安全审计和 Rust 1.88 检查
+2. **Create Release** - 创建 GitHub Draft Release
+3. **Build** - 构建多平台二进制并上传到 Draft Release
    - `x86_64-unknown-linux-gnu`
    - `x86_64-unknown-linux-musl`
    - `aarch64-unknown-linux-gnu`
    - `x86_64-apple-darwin`
    - `aarch64-apple-darwin`
    - `x86_64-pc-windows-msvc`
-3. **Publish Release** - Build 全部完成后自动将 Draft Release 转正（正式发布）
-4. **Publish crates** - 发布到 crates.io
-5. **Homebrew** - 更新 Homebrew formula（依赖已转正的 Release：Draft 状态的资产
+4. **Publish crates** - 六个平台构建完成后，先发布 `codelens-core`，再发布 `codelens`
+5. **Publish Release** - Build 和 crates.io 发布全部完成后，将 Draft Release 转正
+6. **Homebrew** - 更新 Homebrew formula（依赖已转正的 Release：Draft 状态的资产
    无法通过公开链接下载，转正后才能下载资产并计算校验和）
 
 > 兜底：若 publish-release job 失败，Release 会停留在 Draft 状态，Homebrew formula
