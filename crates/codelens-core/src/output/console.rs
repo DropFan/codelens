@@ -11,8 +11,8 @@ use colored::Colorize;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table};
 
 use super::format::{
-    OutputFormat, OutputOptions, Report, TrendLanguagePresentation, TrendMetricPresentation,
-    TrendPresentation,
+    CouplingFilterPresentation, CouplingPairPresentation, CouplingPresentation, OutputFormat,
+    OutputOptions, Report, TrendLanguagePresentation, TrendMetricPresentation, TrendPresentation,
 };
 use crate::error::Result;
 
@@ -151,6 +151,8 @@ impl ConsoleOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let coupling = CouplingPresentation::from_report(report);
+
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer, "{}", " CODELENS - Change Coupling ".bold().cyan())?;
@@ -160,29 +162,26 @@ impl ConsoleOutput {
         writeln!(
             writer,
             "  Period: {}  Total Commits: {}",
-            report.since.bold(),
-            Self::format_number(report.total_commits).bold()
+            coupling.period.bold(),
+            Self::format_number(coupling.total_commits).bold()
         )?;
-        if let Some(focus) = &report.focus {
-            writeln!(writer, "  Focus: {}", focus.display().to_string().bold())?;
+        if let Some(focus) = coupling.focus {
+            writeln!(writer, "  Focus: {}", focus.bold())?;
         }
-        if report.skipped_large_commits > 0 {
-            writeln!(
-                writer,
-                "  {} bulk commit(s) excluded from pairing",
-                report.skipped_large_commits
-            )?;
-        }
-        if report.excluded_test_files > 0 {
-            writeln!(
-                writer,
-                "  {} test file(s) excluded (--include-tests to include)",
-                report.excluded_test_files
-            )?;
+        for note in coupling.filter_notes {
+            let note = match note {
+                CouplingFilterPresentation::BulkCommits(count) => {
+                    format!("{count} bulk commit(s) excluded from pairing")
+                }
+                CouplingFilterPresentation::TestFiles(count) => {
+                    format!("{count} test file(s) excluded (--include-tests to include)")
+                }
+            };
+            writeln!(writer, "  {note}")?;
         }
         writeln!(writer)?;
 
-        if report.pairs.is_empty() {
+        if coupling.rows.is_empty() {
             writeln!(writer, "  No coupled file pairs found.")?;
             writeln!(
                 writer,
@@ -191,6 +190,20 @@ impl ConsoleOutput {
             return Ok(());
         }
 
+        let table = Self::coupling_table(&coupling.rows);
+        writeln!(writer, "{table}")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "  {} Files changing together share a dependency the module\n  structure does not express — review the strongest pairs first.",
+            "hint:".dimmed()
+        )?;
+        writeln!(writer)?;
+
+        Ok(())
+    }
+
+    fn coupling_table(rows: &[CouplingPairPresentation]) -> Table {
         let mut table = Table::new();
         table
             .load_preset(UTF8_FULL)
@@ -202,35 +215,26 @@ impl ConsoleOutput {
             Cell::new("Coupling").add_attribute(Attribute::Bold),
         ]);
 
-        for pair in &report.pairs {
-            let color = if pair.degree >= 70.0 {
-                Color::Red
-            } else if pair.degree >= 50.0 {
-                Color::Yellow
-            } else {
-                Color::Green
-            };
+        for row in rows {
             table.add_row(vec![
-                Cell::new(pair.file_a.display().to_string()).fg(Color::Cyan),
-                Cell::new(pair.file_b.display().to_string()).fg(Color::Cyan),
-                Cell::new(format!(
-                    "{} ({}/{})",
-                    pair.shared_commits, pair.commits_a, pair.commits_b
-                )),
-                Cell::new(format!("{:.0}%", pair.degree)).fg(color),
+                Cell::new(&row.file_a).fg(Color::Cyan),
+                Cell::new(&row.file_b).fg(Color::Cyan),
+                Cell::new(&row.shared),
+                Cell::new(&row.degree_text).fg(Self::coupling_degree_color(row.degree)),
             ]);
         }
 
-        writeln!(writer, "{table}")?;
-        writeln!(writer)?;
-        writeln!(
-            writer,
-            "  {} Files changing together share a dependency the module\n  structure does not express — review the strongest pairs first.",
-            "hint:".dimmed()
-        )?;
-        writeln!(writer)?;
+        table
+    }
 
-        Ok(())
+    fn coupling_degree_color(degree: f64) -> Color {
+        if degree >= 70.0 {
+            Color::Red
+        } else if degree >= 50.0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        }
     }
 
     fn write_trend(
@@ -552,6 +556,20 @@ mod tests {
         assert_eq!(ConsoleOutput::trend_delta_color(1), Color::Green);
         assert_eq!(ConsoleOutput::trend_delta_color(-1), Color::Red);
         assert_eq!(ConsoleOutput::trend_delta_color(0), Color::White);
+    }
+
+    #[test]
+    fn coupling_degree_colors_preserve_threshold_boundaries() {
+        assert_eq!(ConsoleOutput::coupling_degree_color(70.0), Color::Red);
+        assert_eq!(
+            ConsoleOutput::coupling_degree_color(69.999_999),
+            Color::Yellow
+        );
+        assert_eq!(ConsoleOutput::coupling_degree_color(50.0), Color::Yellow);
+        assert_eq!(
+            ConsoleOutput::coupling_degree_color(49.999_999),
+            Color::Green
+        );
     }
 
     #[test]

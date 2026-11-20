@@ -7,7 +7,10 @@ mod hotspot;
 
 use std::io::Write;
 
-use super::format::{OutputFormat, OutputOptions, Report, TrendPresentation};
+use super::format::{
+    CouplingFilterPresentation, CouplingPresentation, OutputFormat, OutputOptions, Report,
+    TrendPresentation,
+};
 use crate::error::Result;
 
 /// Markdown output formatter.
@@ -78,52 +81,45 @@ impl MarkdownOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let coupling = CouplingPresentation::from_report(report);
+
         writeln!(writer, "# Change Coupling")?;
         writeln!(writer)?;
         writeln!(
             writer,
             "**Period:** {} | **Total Commits:** {}",
-            report.since, report.total_commits
+            coupling.period, coupling.total_commits
         )?;
-        if let Some(focus) = &report.focus {
+        if let Some(focus) = &coupling.focus {
             writeln!(writer)?;
-            writeln!(writer, "**Focus:** {}", focus.display())?;
+            writeln!(writer, "**Focus:** {focus}")?;
         }
-        if report.skipped_large_commits > 0 {
+        for note in &coupling.filter_notes {
             writeln!(writer)?;
-            writeln!(
-                writer,
-                "_{} bulk commit(s) excluded from pairing._",
-                report.skipped_large_commits
-            )?;
-        }
-        if report.excluded_test_files > 0 {
-            writeln!(writer)?;
-            writeln!(
-                writer,
-                "_{} test file(s) excluded (`--include-tests` to include)._",
-                report.excluded_test_files
-            )?;
+            let note = match note {
+                CouplingFilterPresentation::BulkCommits(count) => {
+                    format!("{count} bulk commit(s) excluded from pairing")
+                }
+                CouplingFilterPresentation::TestFiles(count) => {
+                    format!("{count} test file(s) excluded (`--include-tests` to include)")
+                }
+            };
+            writeln!(writer, "_{note}._")?;
         }
         writeln!(writer)?;
 
-        if report.pairs.is_empty() {
+        if coupling.rows.is_empty() {
             writeln!(writer, "No coupled file pairs found.")?;
             return Ok(());
         }
 
         writeln!(writer, "| File A | File B | Shared | Coupling |")?;
         writeln!(writer, "|--------|--------|--------|----------|")?;
-        for pair in &report.pairs {
+        for row in coupling.rows {
             writeln!(
                 writer,
-                "| {} | {} | {} ({}/{}) | {:.0}% |",
-                pair.file_a.display(),
-                pair.file_b.display(),
-                pair.shared_commits,
-                pair.commits_a,
-                pair.commits_b,
-                pair.degree,
+                "| {} | {} | {} | {} |",
+                row.file_a, row.file_b, row.shared, row.degree_text,
             )?;
         }
         writeln!(writer)?;

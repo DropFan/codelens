@@ -13,11 +13,15 @@ use crate::insight::hotspot::HotspotReport;
 use crate::insight::trend::TrendReport;
 use crate::insight::Grade;
 
+mod coupling;
 mod diff;
 mod health_regression;
 mod hotspot;
 mod trend;
 
+pub(crate) use coupling::{
+    CouplingFilterPresentation, CouplingPairPresentation, CouplingPresentation,
+};
 pub(crate) use diff::{DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation};
 pub(crate) use health_regression::{
     health_model_display_name, HealthLanguageChangePresentation, HealthRegressedFilePresentation,
