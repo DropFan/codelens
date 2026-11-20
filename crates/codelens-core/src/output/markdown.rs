@@ -1,16 +1,13 @@
 //! Markdown output format.
 
 mod analysis;
+mod diff;
 mod health;
 
 use std::io::Write;
 
+use super::format::{OutputFormat, OutputOptions, Report};
 use crate::error::Result;
-use crate::insight::health::HealthAssessment;
-
-use super::format::{
-    format_optional_delta, format_optional_health, OutputFormat, OutputOptions, Report,
-};
 
 /// Markdown output formatter.
 pub struct MarkdownOutput;
@@ -48,7 +45,7 @@ impl OutputFormat for MarkdownOutput {
             Report::Health(report) => self.write_health(report, options, writer),
             Report::Hotspot(report) => self.write_hotspot(report, options, writer),
             Report::Coupling(report) => self.write_coupling(report, options, writer),
-            Report::Diff(report) => self.write_diff(report, options, writer),
+            Report::Diff(report) => self.write_diff(report, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             // Concatenated sections are valid Markdown
             Report::Combined(combined) => {
@@ -232,119 +229,6 @@ impl MarkdownOutput {
         Ok(())
     }
 
-    fn write_diff(
-        &self,
-        report: &crate::insight::diff::DiffReport,
-        _options: &OutputOptions,
-        writer: &mut dyn Write,
-    ) -> Result<()> {
-        let reg = &report.health;
-        writeln!(writer, "# Diff Report: {} → {}", report.from, report.to)?;
-        writeln!(writer)?;
-        let delta_str = if reg.score_delta >= 0.0 {
-            format!("+{:.1}", reg.score_delta)
-        } else {
-            format!("{:.1}", reg.score_delta)
-        };
-        writeln!(
-            writer,
-            "**Health [{}]:** {} ({:.1}) → {} ({:.1}), Δ {} — {}",
-            reg.model,
-            reg.baseline_grade,
-            reg.baseline_score,
-            reg.current_grade,
-            reg.current_score,
-            delta_str,
-            if reg.failed {
-                "🔴 REGRESSED"
-            } else {
-                "🟢 NO REGRESSION"
-            }
-        )?;
-        if reg.scope_changed {
-            writeln!(
-                writer,
-                "**Scope changed:** {} → {} (project delta is informational and does not affect the gate)",
-                reg.baseline_scope, reg.current_scope
-            )?;
-        }
-        if reg.assessment == HealthAssessment::InsufficientData {
-            writeln!(
-                writer,
-                "**Assessment:** insufficient data (score delta is an estimate)"
-            )?;
-        }
-        writeln!(writer)?;
-
-        if !reg.regressed_files.is_empty() {
-            writeln!(writer, "## Regressed Files")?;
-            writeln!(writer)?;
-            writeln!(writer, "| File | Before | After |")?;
-            writeln!(writer, "|------|--------|-------|")?;
-            for f in &reg.regressed_files {
-                let before = if f.is_new {
-                    "NEW".to_string()
-                } else {
-                    format!("{} ({:.1})", f.from_grade, f.from_score)
-                };
-                writeln!(
-                    writer,
-                    "| {} | {} | {} ({:.1}) |",
-                    f.path.display(),
-                    before,
-                    f.to_grade,
-                    f.to_score
-                )?;
-            }
-            writeln!(writer)?;
-        }
-
-        write_language_health_changes(writer, &reg.by_language)?;
-
-        writeln!(writer, "## Metrics")?;
-        writeln!(writer)?;
-        writeln!(writer, "| Metric | Before | After | Delta |")?;
-        writeln!(writer, "|--------|--------|-------|-------|")?;
-        let d = &report.delta;
-        for (label, dv) in [
-            ("Files", &d.files),
-            ("Code", &d.code),
-            ("Comments", &d.comment),
-            ("Complexity", &d.complexity),
-            ("Functions", &d.functions),
-        ] {
-            writeln!(
-                writer,
-                "| {} | {} | {} | {:+} |",
-                label,
-                dv.from,
-                dv.to,
-                dv.signed_delta()
-            )?;
-        }
-        writeln!(writer)?;
-
-        if !report.by_language.is_empty() {
-            writeln!(writer, "## By Language")?;
-            writeln!(writer)?;
-            writeln!(writer, "| Language | Code Before | Code After | Delta |")?;
-            writeln!(writer, "|----------|-------------|------------|-------|")?;
-            for lt in &report.by_language {
-                writeln!(
-                    writer,
-                    "| {} | {} | {} | {:+} |",
-                    lt.language,
-                    lt.code.from,
-                    lt.code.to,
-                    lt.code.signed_delta()
-                )?;
-            }
-            writeln!(writer)?;
-        }
-
-        Ok(())
-    }
-
     fn write_trend(
         &self,
         report: &crate::insight::trend::TrendReport,
@@ -513,32 +397,6 @@ impl MarkdownOutput {
         }
         Ok(())
     }
-}
-
-fn write_language_health_changes(
-    writer: &mut dyn Write,
-    languages: &[crate::insight::health::LanguageHealthChange],
-) -> Result<()> {
-    if languages.is_empty() {
-        return Ok(());
-    }
-    writeln!(writer, "## Language Health Changes")?;
-    writeln!(writer)?;
-    writeln!(writer, "| Language | Status | Before | After | Delta |")?;
-    writeln!(writer, "|----------|--------|--------|-------|-------|")?;
-    for language in languages {
-        writeln!(
-            writer,
-            "| {} | {} | {} | {} | {} |",
-            language.language,
-            language.status,
-            format_optional_health(language.from_grade, language.from_score),
-            format_optional_health(language.to_grade, language.to_score),
-            format_optional_delta(language.score_delta),
-        )?;
-    }
-    writeln!(writer)?;
-    Ok(())
 }
 
 #[cfg(test)]

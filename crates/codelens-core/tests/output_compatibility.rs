@@ -2,12 +2,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use codelens_core::analyzer::stats::{AnalysisResult, Complexity, FileStats, LineStats, Summary};
+use codelens_core::insight::diff::DiffReport;
 use codelens_core::insight::health::{
-    Confidence, DimensionScore, DirectoryHealth, FileHealth, HealthReport, HealthScope,
-    LanguageHealth, TailRisk,
+    Confidence, DimensionScore, DirectoryHealth, FileHealth, FileRegression, HealthAssessment,
+    HealthReport, HealthScope, LanguageHealth, LanguageHealthChange, LanguageHealthChangeStatus,
+    RegressionReport, TailRisk,
 };
 use codelens_core::insight::scoring::HealthDimension;
-use codelens_core::insight::Grade;
+use codelens_core::insight::trend::{LangStatus, LanguageTrend, TrendDelta};
+use codelens_core::insight::{DeltaValue, Grade};
 use codelens_core::output::{
     ConsoleOutput, CsvOutput, HtmlOutput, MarkdownOutput, OutputFormat, OutputOptions, Report,
 };
@@ -114,6 +117,92 @@ fn health_fixture() -> HealthReport {
         }],
         test_health: None,
         regression: None,
+    }
+}
+
+fn diff_fixture() -> DiffReport {
+    DiffReport {
+        from: "main".to_string(),
+        to: "worktree".to_string(),
+        to_score: 73.0,
+        to_grade: Grade::C,
+        health: RegressionReport {
+            baseline: "main".to_string(),
+            model: "default-v2".to_string(),
+            assessment: HealthAssessment::Scored,
+            baseline_score: 80.0,
+            baseline_grade: Grade::B,
+            baseline_scope: HealthScope::TestsOnly,
+            current_score: 73.0,
+            current_grade: Grade::C,
+            current_scope: HealthScope::Production,
+            scope_changed: true,
+            score_delta: -7.0,
+            project_regressed: true,
+            regressed_files: vec![
+                FileRegression {
+                    path: PathBuf::from("src/lib.rs"),
+                    is_new: false,
+                    from_score: 80.0,
+                    from_grade: Grade::B,
+                    to_score: 60.0,
+                    to_grade: Grade::D,
+                },
+                FileRegression {
+                    path: PathBuf::from("src/new.rs"),
+                    is_new: true,
+                    from_score: 100.0,
+                    from_grade: Grade::A,
+                    to_score: 40.0,
+                    to_grade: Grade::F,
+                },
+            ],
+            improved_files: 2,
+            by_language: vec![
+                LanguageHealthChange {
+                    language: "Rust".to_string(),
+                    status: LanguageHealthChangeStatus::Changed,
+                    from_score: Some(80.0),
+                    from_grade: Some(Grade::B),
+                    to_score: Some(73.0),
+                    to_grade: Some(Grade::C),
+                    score_delta: Some(-7.0),
+                },
+                LanguageHealthChange {
+                    language: "TypeScript".to_string(),
+                    status: LanguageHealthChangeStatus::Added,
+                    from_score: None,
+                    from_grade: None,
+                    to_score: Some(90.0),
+                    to_grade: Some(Grade::A),
+                    score_delta: None,
+                },
+            ],
+            failed: true,
+        },
+        delta: TrendDelta {
+            files: DeltaValue::new(10, 12),
+            lines: DeltaValue::new(1_500, 1_610),
+            code: DeltaValue::new(1_200, 1_325),
+            comment: DeltaValue::new(150, 140),
+            blank: DeltaValue::new(150, 145),
+            complexity: DeltaValue::new(80, 75),
+            functions: DeltaValue::new(60, 60),
+        },
+        by_language: vec![
+            LanguageTrend {
+                language: "Rust".to_string(),
+                status: LangStatus::Changed,
+                files: DeltaValue::new(8, 9),
+                code: DeltaValue::new(1_000, 1_150),
+            },
+            LanguageTrend {
+                language: "Python".to_string(),
+                status: LangStatus::Changed,
+                files: DeltaValue::new(2, 2),
+                code: DeltaValue::new(200, 175),
+            },
+        ],
     }
 }
 
@@ -352,4 +441,133 @@ fn health_csv_schema_is_unchanged() {
         String::from_utf8(buffer).unwrap(),
         "File,Score,Grade,TopIssue\nsrc/lib.rs,43.6,F,Complexity\n"
     );
+}
+
+#[test]
+fn diff_console_and_markdown_keep_content_order_and_formatting() {
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+
+    let console = render(
+        &ConsoleOutput::new(),
+        Report::Diff(Box::new(diff_fixture())),
+        &options,
+    );
+    assert_in_order(
+        &console,
+        &[
+            "CODELENS - Diff Report",
+            "main → worktree",
+            "Health [default-v2]: B (80.0) → C (73.0)  Δ -7.0",
+            "Scope changed: tests-only → production (project delta is informational)",
+            "Improved files: 2",
+            "Regressed Files",
+            "src/lib.rs",
+            "src/new.rs",
+            "Language Health Changes",
+            "Rust",
+            "TypeScript",
+            "Metric",
+            "Files",
+            "Code",
+            "Comments",
+            "Complexity",
+            "Functions",
+            "Verdict: REGRESSED",
+        ],
+    );
+    assert!(console.contains("1,200"));
+    assert!(console.contains("1,325"));
+    assert!(!console.contains('\u{1b}'));
+
+    let markdown = render(
+        &MarkdownOutput::new(),
+        Report::Diff(Box::new(diff_fixture())),
+        &options,
+    );
+    assert_eq!(
+        markdown,
+        concat!(
+            "# Diff Report: main → worktree\n",
+            "\n",
+            "**Health [default-v2]:** B (80.0) → C (73.0), Δ -7.0 — 🔴 REGRESSED\n",
+            "**Scope changed:** tests-only → production (project delta is informational and does not affect the gate)\n",
+            "\n",
+            "## Regressed Files\n",
+            "\n",
+            "| File | Before | After |\n",
+            "|------|--------|-------|\n",
+            "| src/lib.rs | B (80.0) | D (60.0) |\n",
+            "| src/new.rs | NEW | F (40.0) |\n",
+            "\n",
+            "## Language Health Changes\n",
+            "\n",
+            "| Language | Status | Before | After | Delta |\n",
+            "|----------|--------|--------|-------|-------|\n",
+            "| Rust | changed | B (80.0) | C (73.0) | -7.0 |\n",
+            "| TypeScript | added | - | A (90.0) | - |\n",
+            "\n",
+            "## Metrics\n",
+            "\n",
+            "| Metric | Before | After | Delta |\n",
+            "|--------|--------|-------|-------|\n",
+            "| Files | 10 | 12 | +2 |\n",
+            "| Code | 1200 | 1325 | +125 |\n",
+            "| Comments | 150 | 140 | -10 |\n",
+            "| Complexity | 80 | 75 | -5 |\n",
+            "| Functions | 60 | 60 | +0 |\n",
+            "\n",
+            "## By Language\n",
+            "\n",
+            "| Language | Code Before | Code After | Delta |\n",
+            "|----------|-------------|------------|-------|\n",
+            "| Rust | 1000 | 1150 | +150 |\n",
+            "| Python | 200 | 175 | -25 |\n",
+            "\n",
+        )
+    );
+}
+
+#[test]
+fn diff_optional_groups_stay_absent_and_estimates_keep_the_existing_verdict() {
+    let mut report = diff_fixture();
+    report.health.assessment = HealthAssessment::InsufficientData;
+    report.health.baseline_score = 73.0;
+    report.health.baseline_grade = Grade::C;
+    report.health.current_score = 74.5;
+    report.health.current_grade = Grade::C;
+    report.health.scope_changed = false;
+    report.health.score_delta = 1.5;
+    report.health.project_regressed = false;
+    report.health.regressed_files.clear();
+    report.health.improved_files = 0;
+    report.health.by_language.clear();
+    report.health.failed = false;
+    report.by_language.clear();
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+
+    for output in [
+        render(
+            &ConsoleOutput::new(),
+            Report::Diff(Box::new(report.clone())),
+            &options,
+        ),
+        render(
+            &MarkdownOutput::new(),
+            Report::Diff(Box::new(report)),
+            &options,
+        ),
+    ] {
+        assert!(output.contains("insufficient data (score delta is an estimate)"));
+        assert!(output.contains("NO REGRESSION"));
+        assert!(!output.contains("Regressed Files"));
+        assert!(!output.contains("Language Health Changes"));
+        assert!(!output.contains("By Language"));
+        assert!(!output.contains("Improved files"));
+    }
 }

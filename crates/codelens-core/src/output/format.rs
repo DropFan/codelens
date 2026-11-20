@@ -13,11 +13,12 @@ use crate::insight::hotspot::HotspotReport;
 use crate::insight::trend::TrendReport;
 use crate::insight::Grade;
 
+mod diff;
 mod health_regression;
 
+pub(crate) use diff::{DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation};
 pub(crate) use health_regression::{
-    format_optional_delta, format_optional_health, health_model_display_name,
-    HealthLanguageChangePresentation, HealthRegressedFilePresentation,
+    health_model_display_name, HealthLanguageChangePresentation, HealthRegressedFilePresentation,
     HealthRegressionPresentation, HealthRegressionVerdict,
 };
 
