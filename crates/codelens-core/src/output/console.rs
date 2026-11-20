@@ -3,6 +3,7 @@
 mod analysis;
 mod diff;
 mod health;
+mod hotspot;
 
 use std::io::Write;
 
@@ -138,136 +139,7 @@ impl ConsoleOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        use crate::insight::hotspot::RiskLevel;
-
-        // Header
-        writeln!(writer)?;
-        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
-        writeln!(writer, "{}", " CODELENS - Hotspot Analysis ".bold().cyan())?;
-        writeln!(writer, "{}", "═".repeat(60).dimmed())?;
-        writeln!(writer)?;
-
-        writeln!(
-            writer,
-            "  Period: {}  Total Commits: {}",
-            report.since.bold(),
-            Self::format_number(report.total_commits).bold()
-        )?;
-        writeln!(writer)?;
-
-        if report.files.is_empty() {
-            writeln!(writer, "  No hotspots found.")?;
-            return Ok(());
-        }
-
-        let mut table = Table::new();
-        table
-            .load_preset(UTF8_FULL)
-            .set_content_arrangement(ContentArrangement::Dynamic);
-        table.set_header(vec![
-            Cell::new("File").add_attribute(Attribute::Bold),
-            Cell::new("Chg").add_attribute(Attribute::Bold),
-            Cell::new("+/-").add_attribute(Attribute::Bold),
-            Cell::new("CC").add_attribute(Attribute::Bold),
-            Cell::new("Age").add_attribute(Attribute::Bold),
-            Cell::new("Auth").add_attribute(Attribute::Bold),
-            Cell::new("Score").add_attribute(Attribute::Bold),
-            Cell::new("Risk").add_attribute(Attribute::Bold),
-        ]);
-
-        for file in &report.files {
-            let risk_color = match file.risk {
-                RiskLevel::High => Color::Red,
-                RiskLevel::Medium => Color::Yellow,
-                RiskLevel::Low => Color::Green,
-            };
-            let age = file
-                .age_days
-                .map(crate::insight::hotspot::format_age)
-                .unwrap_or_else(|| "-".to_string());
-            let auth = match &file.knowledge {
-                Some(k) if k.knowledge_island => format!("{} ★", k.authors),
-                Some(k) => k.authors.to_string(),
-                None => "-".to_string(),
-            };
-            table.add_row(vec![
-                Cell::new(file.path.display().to_string()).fg(Color::Cyan),
-                Cell::new(Self::format_number(file.churn.commits)),
-                Cell::new(format!(
-                    "+{}/-{}",
-                    file.churn.lines_added, file.churn.lines_deleted
-                )),
-                Cell::new(file.complexity.cyclomatic.to_string()),
-                Cell::new(age),
-                Cell::new(auth),
-                Cell::new(format!("{:.2}", file.hotspot_score)),
-                Cell::new(file.risk.to_string()).fg(risk_color),
-            ]);
-        }
-
-        writeln!(writer, "{table}")?;
-        writeln!(writer)?;
-
-        // Knowledge islands: risky files that effectively one person knows.
-        let islands: Vec<_> = report
-            .files
-            .iter()
-            .filter_map(|f| {
-                f.knowledge
-                    .as_ref()
-                    .filter(|k| k.knowledge_island)
-                    .map(|k| (f, k))
-            })
-            .collect();
-        if !islands.is_empty() {
-            writeln!(
-                writer,
-                "{} {}",
-                "★ Knowledge Islands".bold().red(),
-                "(risky files effectively one person knows)".dimmed()
-            )?;
-            for (file, k) in islands {
-                writeln!(
-                    writer,
-                    "    {}  {:.0}% by {}",
-                    file.path.display().to_string().cyan(),
-                    k.ownership * 100.0,
-                    k.main_author
-                )?;
-            }
-            writeln!(writer)?;
-        }
-
-        // Function-level breakdown (--functions)
-        if report.files.iter().any(|f| f.functions.is_some()) {
-            writeln!(
-                writer,
-                "{} {}",
-                "Function Hotspots".bold(),
-                "(approximate spans)".dimmed()
-            )?;
-            writeln!(writer)?;
-            for file in report.files.iter().filter(|f| f.functions.is_some()) {
-                writeln!(
-                    writer,
-                    "  {}",
-                    file.path.display().to_string().cyan().bold()
-                )?;
-                for func in file.functions.as_deref().unwrap_or_default() {
-                    writeln!(
-                        writer,
-                        "    {:<32} L{:<9} {} commits  CC {}",
-                        func.name,
-                        format!("{}-{}", func.start_line, func.end_line),
-                        func.commits,
-                        func.cyclomatic,
-                    )?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        Ok(())
+        hotspot::write(report, writer)
     }
 
     fn write_coupling(

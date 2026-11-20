@@ -15,11 +15,16 @@ use crate::insight::Grade;
 
 mod diff;
 mod health_regression;
+mod hotspot;
 
 pub(crate) use diff::{DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation};
 pub(crate) use health_regression::{
     health_model_display_name, HealthLanguageChangePresentation, HealthRegressedFilePresentation,
     HealthRegressionPresentation, HealthRegressionVerdict,
+};
+pub(crate) use hotspot::{
+    HotspotFilePresentation, HotspotFunctionFilePresentation, HotspotKnowledgeIslandPresentation,
+    HotspotPresentation,
 };
 
 /// Unified report type for all output formatters.

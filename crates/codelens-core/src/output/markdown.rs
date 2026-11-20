@@ -3,6 +3,7 @@
 mod analysis;
 mod diff;
 mod health;
+mod hotspot;
 
 use std::io::Write;
 
@@ -68,106 +69,7 @@ impl MarkdownOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "# Hotspot Analysis")?;
-        writeln!(writer)?;
-        writeln!(
-            writer,
-            "**Period:** {} | **Total Commits:** {}",
-            report.since, report.total_commits
-        )?;
-        writeln!(writer)?;
-
-        if report.files.is_empty() {
-            writeln!(writer, "No hotspots found.")?;
-            return Ok(());
-        }
-
-        writeln!(
-            writer,
-            "| File | Chg | +/- | CC | Age | Authors | Score | Risk |"
-        )?;
-        writeln!(
-            writer,
-            "|------|-----|-----|----|-----|---------|-------|------|"
-        )?;
-        for file in &report.files {
-            let age = file
-                .age_days
-                .map(crate::insight::hotspot::format_age)
-                .unwrap_or_else(|| "-".to_string());
-            let auth = match &file.knowledge {
-                Some(k) if k.knowledge_island => format!("{} ★", k.authors),
-                Some(k) => k.authors.to_string(),
-                None => "-".to_string(),
-            };
-            writeln!(
-                writer,
-                "| {} | {} | +{}/-{} | {} | {} | {} | {:.2} | {} |",
-                file.path.display(),
-                file.churn.commits,
-                file.churn.lines_added,
-                file.churn.lines_deleted,
-                file.complexity.cyclomatic,
-                age,
-                auth,
-                file.hotspot_score,
-                file.risk,
-            )?;
-        }
-        writeln!(writer)?;
-
-        let islands: Vec<_> = report
-            .files
-            .iter()
-            .filter_map(|f| {
-                f.knowledge
-                    .as_ref()
-                    .filter(|k| k.knowledge_island)
-                    .map(|k| (f, k))
-            })
-            .collect();
-        if !islands.is_empty() {
-            writeln!(
-                writer,
-                "**★ Knowledge Islands** (risky files effectively one person knows):"
-            )?;
-            writeln!(writer)?;
-            for (file, k) in islands {
-                writeln!(
-                    writer,
-                    "- {} — {:.0}% by {}",
-                    file.path.display(),
-                    k.ownership * 100.0,
-                    k.main_author
-                )?;
-            }
-            writeln!(writer)?;
-        }
-
-        // Function-level breakdown (--functions)
-        if report.files.iter().any(|f| f.functions.is_some()) {
-            writeln!(writer, "## Function Hotspots (approximate spans)")?;
-            writeln!(writer)?;
-            writeln!(writer, "| File | Function | Lines | Commits | CC |")?;
-            writeln!(writer, "|------|----------|-------|---------|-----|")?;
-            for file in report.files.iter().filter(|f| f.functions.is_some()) {
-                for func in file.functions.as_deref().unwrap_or_default() {
-                    writeln!(
-                        writer,
-                        "| {} | {} | {}-{} | {} | {} |",
-                        file.path.display(),
-                        func.name,
-                        func.start_line,
-                        func.end_line,
-                        func.commits,
-                        func.cyclomatic,
-                    )?;
-                }
-            }
-            writeln!(writer)?;
-        }
-
-        Ok(())
+        hotspot::write(report, writer)
     }
 
     fn write_coupling(
