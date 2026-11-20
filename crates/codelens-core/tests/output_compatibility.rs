@@ -1,9 +1,319 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
-use codelens_core::insight::health::{FileHealth, HealthReport, HealthScope};
+use codelens_core::analyzer::stats::{AnalysisResult, Complexity, FileStats, LineStats, Summary};
+use codelens_core::insight::health::{
+    Confidence, DimensionScore, DirectoryHealth, FileHealth, HealthReport, HealthScope,
+    LanguageHealth, TailRisk,
+};
 use codelens_core::insight::scoring::HealthDimension;
 use codelens_core::insight::Grade;
-use codelens_core::output::{CsvOutput, OutputFormat, OutputOptions, Report};
+use codelens_core::output::{
+    ConsoleOutput, CsvOutput, HtmlOutput, MarkdownOutput, OutputFormat, OutputOptions, Report,
+};
+
+fn analysis_fixture() -> AnalysisResult {
+    let files = vec![
+        FileStats {
+            path: PathBuf::from("src/lib.rs"),
+            language: "Rust".to_string(),
+            lines: LineStats {
+                total: 1_500,
+                code: 1_234,
+                comment: 123,
+                blank: 143,
+            },
+            size: 2_048,
+            complexity: Complexity {
+                functions: 12,
+                cyclomatic: 34,
+                cognitive: 56,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        FileStats {
+            path: PathBuf::from("tests/check.py"),
+            language: "Python".to_string(),
+            lines: LineStats {
+                total: 20,
+                code: 12,
+                comment: 3,
+                blank: 5,
+            },
+            size: 512,
+            complexity: Complexity {
+                functions: 2,
+                cyclomatic: 3,
+                cognitive: 4,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    let mut summary = Summary::from_file_stats(&files);
+    summary.uloc = 1_200;
+    summary.dup_scanned = true;
+
+    AnalysisResult {
+        summary,
+        files,
+        elapsed: Duration::from_millis(1250),
+        scanned_files: 3,
+        skipped_files: 1,
+        error_files: 0,
+    }
+}
+
+fn health_fixture() -> HealthReport {
+    HealthReport {
+        score: 82.14,
+        grade: Grade::B,
+        model: "default-v2".to_string(),
+        dimensions: vec![DimensionScore {
+            dimension: HealthDimension::Complexity,
+            score: 64.66,
+            grade: Grade::D,
+            weight: 0.3,
+        }],
+        by_directory: vec![DirectoryHealth {
+            path: PathBuf::from("src/output"),
+            score: 61.26,
+            grade: Grade::D,
+            file_count: 4,
+        }],
+        worst_files: vec![FileHealth {
+            path: PathBuf::from("src/output/console.rs"),
+            score: 45.64,
+            grade: Grade::F,
+            top_issue: HealthDimension::Complexity,
+            dimensions: vec![],
+        }],
+        scope: HealthScope::Production,
+        confidence: Confidence::from_coverage(0.876),
+        assessment: Default::default(),
+        tail_risk: TailRisk {
+            tail_score: 43.26,
+            failing_files: 1,
+            failing_ratio: 0.25,
+            worst_score: 40.0,
+        },
+        by_language: vec![LanguageHealth {
+            language: "Rust".to_string(),
+            score: 71.24,
+            grade: Grade::C,
+            file_count: 4,
+            code_lines: 1_234,
+            confidence: Confidence::from_coverage(0.876),
+            assessment: Default::default(),
+            dimensions: vec![],
+            tail_risk: TailRisk {
+                tail_score: 45.64,
+                ..Default::default()
+            },
+        }],
+        test_health: None,
+        regression: None,
+    }
+}
+
+fn render(output: &dyn OutputFormat, report: Report, options: &OutputOptions) -> String {
+    let mut buffer = Vec::new();
+    output.write(&report, options, &mut buffer).unwrap();
+    String::from_utf8(buffer).unwrap()
+}
+
+fn assert_in_order(haystack: &str, needles: &[&str]) {
+    let mut offset = 0;
+    for needle in needles {
+        let relative = haystack[offset..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing output fragment: {needle:?}"));
+        offset += relative + needle.len();
+    }
+}
+
+#[test]
+fn analysis_human_outputs_keep_key_fields_in_order() {
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+
+    let console = render(
+        &ConsoleOutput::new(),
+        Report::Analysis(analysis_fixture()),
+        &options,
+    );
+    assert_in_order(
+        &console,
+        &[
+            "Total Files",
+            "Code Lines",
+            "Comment Lines",
+            "Blank Lines",
+            "Total Lines",
+            "Total Size",
+            "Languages",
+            "Functions",
+            "Complexity (CC / Cognitive)",
+            "Test Files",
+            "Test Code Lines",
+            "Test/Code Ratio",
+            "ULOC / DRYness",
+            "By Language",
+            "Rust",
+            "Python",
+        ],
+    );
+    assert!(console.contains("1,234"));
+    assert!(console.contains("37 / 60"));
+    assert!(console.contains("1,200 / 87%"));
+    assert!(console.contains("Scanned 3 files in 1.25s (1 skipped)"));
+
+    let markdown = render(
+        &MarkdownOutput::new(),
+        Report::Analysis(analysis_fixture()),
+        &options,
+    );
+    assert!(markdown.contains(
+        "| Total Files | 2 |\n| Code Lines | 1246 |\n| Comment Lines | 126 |\n| Blank Lines | 148 |\n| Total Lines | 1520 |\n| Languages | 2 |"
+    ));
+    assert!(markdown
+        .contains("| Test Files | 1 |\n| Test Code Lines | 12 |\n| Test/Code Ratio | 0.01 |"));
+    assert_in_order(&markdown, &["## By Language", "| Rust |", "| Python |"]);
+    assert!(markdown.ends_with("*Generated by codelens in 1.25s*\n"));
+
+    let html = render(
+        &HtmlOutput::new(),
+        Report::Analysis(analysis_fixture()),
+        &options,
+    );
+    assert_in_order(
+        &html,
+        &[
+            ">2</div>\n                <div class=\"label\">Code Files",
+            ">1246</div>\n                <div class=\"label\">Code Lines",
+            ">126</div>\n                <div class=\"label\">Comment Lines",
+            ">148</div>\n                <div class=\"label\">Blank Lines",
+            ">2</div>\n                <div class=\"label\">Languages",
+            ">14</div>\n                <div class=\"label\">Functions",
+            "<td><strong>Rust</strong></td>",
+            "<td><strong>Python</strong></td>",
+            "in 1.25s",
+        ],
+    );
+}
+
+#[test]
+fn analysis_optional_fields_stay_absent_for_default_values() {
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+    let empty = AnalysisResult {
+        summary: Summary::default(),
+        files: vec![],
+        elapsed: Duration::ZERO,
+        scanned_files: 0,
+        skipped_files: 0,
+        error_files: 0,
+    };
+
+    let console = render(
+        &ConsoleOutput::new(),
+        Report::Analysis(empty.clone()),
+        &options,
+    );
+    let markdown = render(
+        &MarkdownOutput::new(),
+        Report::Analysis(empty.clone()),
+        &options,
+    );
+    let html = render(&HtmlOutput::new(), Report::Analysis(empty), &options);
+
+    for output in [&console, &markdown] {
+        assert!(!output.contains("Test Files"));
+        assert!(!output.contains("Test/Code Ratio"));
+        assert!(!output.contains("ULOC / DRYness"));
+        assert!(!output.contains("By Language"));
+    }
+    assert!(!html.contains("<td><strong>"));
+}
+
+#[test]
+fn health_human_outputs_keep_fields_precision_and_defaults() {
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+
+    let console = render(
+        &ConsoleOutput::new(),
+        Report::Health(health_fixture()),
+        &options,
+    );
+    assert_in_order(
+        &console,
+        &[
+            "Project Score: 82.1  Grade: B  Model: v2",
+            "Health Scope: Production code  Measurement Confidence: high (87.6% measured)",
+            "Worst 10% File Average: 43.3  F-grade Files: 1 (25.0%)",
+            "Worst Directory: src/output  D (61.3)  4 files",
+            "Risk: 1 file(s) are graded F despite the overall B grade.",
+            "Complexity",
+            "64.7",
+            "By Language",
+            "Rust",
+            "71.2",
+            "By Directory",
+            "src/output",
+            "61.3",
+            "Worst Files",
+            "src/output/console.rs",
+            "45.6",
+        ],
+    );
+    assert!(!console.contains("Test Code Health:"));
+
+    let markdown = render(
+        &MarkdownOutput::new(),
+        Report::Health(health_fixture()),
+        &options,
+    );
+    assert!(markdown.contains(
+        "**Project Score:** 82.1 | **Grade:** B | **Model:** v2\n**Health analysis scope:** Production code | **Measurement confidence:** high (87.6% measured)\n**Worst 10% file average:** 43.3 | **F-grade files:** 1 (25.0%)"
+    ));
+    assert_in_order(
+        &markdown,
+        &[
+            "| Complexity | 64.7 | D |",
+            "| Rust | 71.2 | C | 4 | 1234 | high (88%) | 45.6 |",
+            "| src/output | 61.3 | D | 4 |",
+            "| src/output/console.rs | 45.6 | F | Complexity |",
+        ],
+    );
+    assert!(!markdown.contains("**Test code health:**"));
+
+    let html = render(
+        &HtmlOutput::new(),
+        Report::Health(health_fixture()),
+        &options,
+    );
+    assert_in_order(
+        &html,
+        &[
+            "<strong>Score: 82.1 / 100</strong> | Model: v2",
+            "Health analysis scope: Production code | Measurement confidence: high (87.6% measured)",
+            "Worst 10% file average: 43.3 | F-grade files: 1 (25.0%)",
+            ">64.7</div>",
+            "<strong>Rust</strong></td><td>71.2</td><td>C</td><td>4</td><td>1234</td><td>high (88%)</td><td>45.6</td>",
+            "<strong>src/output</strong></td><td>61.3</td><td>D</td><td>4</td>",
+            "<strong>src/output/console.rs</strong></td><td>45.6</td><td>F</td><td>Complexity</td>",
+        ],
+    );
+    assert!(!html.contains("Test code health:"));
+}
 
 #[test]
 fn health_csv_schema_is_unchanged() {

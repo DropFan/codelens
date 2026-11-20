@@ -11,19 +11,19 @@ use crate::insight::scoring::HealthDimension;
 use crate::insight::Grade;
 
 use super::format::{
-    health_model_display_name, HealthPresentation, OutputFormat, OutputOptions, Report,
+    health_model_display_name, AnalysisPresentation, HealthDirectoryPresentation,
+    HealthFilePresentation, HealthLanguagePresentation, HealthPresentation, OutputFormat,
+    OutputOptions, Report,
 };
 
 // ── Analysis (existing) ──────────────────────────────────
 
 #[derive(Template)]
 #[template(path = "report.html")]
-struct AnalysisHtmlReport<'a> {
-    title: &'a str,
+struct AnalysisHtmlReport {
+    title: &'static str,
     generated_at: String,
-    summary: &'a Summary,
-    by_language: Vec<(&'a str, &'a LanguageSummary)>,
-    elapsed_secs: f64,
+    view: AnalysisPresentation,
 }
 
 // ── Health ───────────────────────────────────────────────
@@ -124,47 +124,35 @@ fn format_optional_delta(delta: Option<f64>) -> String {
     }
 }
 
-fn html_language_health(language: &crate::insight::health::LanguageHealth) -> HtmlLanguageHealth {
-    let insufficient = language.assessment == HealthAssessment::InsufficientData;
+fn html_language_health(language: &HealthLanguagePresentation) -> HtmlLanguageHealth {
     HtmlLanguageHealth {
         language: language.language.clone(),
-        score_display: if insufficient {
-            format!("Estimated {:.1}", language.score)
+        score_display: if language.estimated {
+            format!("Estimated {}", language.score_display)
         } else {
-            format!("{:.1}", language.score)
+            language.score_display.clone()
         },
-        grade: if insufficient {
-            "Insufficient data".to_string()
-        } else {
-            language.grade.to_string()
-        },
+        grade: language.grade_display.clone(),
         file_count: language.file_count,
         code_lines: language.code_lines,
-        confidence: format!(
-            "{} ({:.0}%)",
-            language.confidence.level,
-            language.confidence.coverage * 100.0
-        ),
-        tail_score: format!("{:.1}", language.tail_risk.tail_score),
+        confidence: language.confidence.clone(),
+        tail_score: language.tail_score.clone(),
     }
 }
 
-fn html_directory_health(
-    directory: &crate::insight::health::DirectoryHealth,
-) -> HtmlDirectoryHealth {
+fn html_directory_health(directory: &HealthDirectoryPresentation) -> HtmlDirectoryHealth {
     HtmlDirectoryHealth {
-        path: directory.path.display().to_string(),
-        score_display: format!("{:.1}", directory.score),
+        path: directory.path.clone(),
+        score_display: directory.score_display.clone(),
         grade: directory.grade,
         file_count: directory.file_count,
     }
 }
 
-fn html_file_health(file: &crate::insight::health::FileHealth) -> HtmlFileHealth {
-    let path = file.path.display().to_string();
-    let score_display = format!("{:.1}", file.score);
-    let parent = file
-        .path
+fn html_file_health(file: &HealthFilePresentation) -> HtmlFileHealth {
+    let path = file.path.clone();
+    let score_display = file.score_display.clone();
+    let parent = std::path::Path::new(&file.path)
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .map(|path| path.display().to_string())
@@ -583,23 +571,10 @@ impl HtmlOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        let mut by_language: Vec<_> = result
-            .summary
-            .by_language
-            .iter()
-            .map(|(k, v)| (k.as_str(), v))
-            .collect();
-
-        if let Some(n) = options.top_n {
-            by_language.truncate(n);
-        }
-
         let report = AnalysisHtmlReport {
             title: "Codelens - Code Statistics Report",
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            summary: &result.summary,
-            by_language,
-            elapsed_secs: result.elapsed.as_secs_f64(),
+            view: AnalysisPresentation::from_result(result, options.top_n),
         };
 
         write!(writer, "{}", report.render()?)?;
@@ -644,7 +619,11 @@ impl HtmlOutput {
 
         let health_view = HealthPresentation::from_report(health);
         let health_decision = combined_health_decision(health, &health_view);
-        let worst_files: Vec<_> = health.worst_files.iter().map(html_file_health).collect();
+        let worst_files: Vec<_> = health_view
+            .worst_files
+            .iter()
+            .map(html_file_health)
+            .collect();
         let priority_files = worst_files.iter().take(3).cloned().collect();
         let mut traditional_estimation_rows = Vec::new();
         let mut locomo_estimation_rows = Vec::new();
@@ -818,23 +797,23 @@ impl HtmlOutput {
             health_decision_label: health_decision.label,
             health_decision_tone: health_decision.tone,
             health_decision_summary: health_decision.summary,
-            dimensions: health
+            dimensions: health_view
                 .dimensions
                 .iter()
                 .map(|d| HtmlDimensionScore {
                     dimension: d.dimension.to_string(),
-                    score_display: format!("{:.1}", d.score),
+                    score_display: d.score_display.clone(),
                     grade: d.grade,
                     explanation: health_dimension_explanation(d.dimension).to_string(),
                 })
                 .collect(),
-            health_languages: health
-                .by_language
+            health_languages: health_view
+                .languages
                 .iter()
                 .map(html_language_health)
                 .collect(),
-            worst_directories: health
-                .by_directory
+            worst_directories: health_view
+                .directories
                 .iter()
                 .map(html_directory_health)
                 .collect(),
@@ -945,27 +924,31 @@ impl HtmlOutput {
                         .collect()
                 })
                 .unwrap_or_default(),
-            dimensions: report
+            dimensions: health_view
                 .dimensions
                 .iter()
                 .map(|d| HtmlDimensionScore {
                     dimension: d.dimension.to_string(),
-                    score_display: format!("{:.1}", d.score),
+                    score_display: d.score_display.clone(),
                     grade: d.grade,
                     explanation: health_dimension_explanation(d.dimension).to_string(),
                 })
                 .collect(),
-            by_language: report
-                .by_language
+            by_language: health_view
+                .languages
                 .iter()
                 .map(html_language_health)
                 .collect(),
-            by_directory: report
-                .by_directory
+            by_directory: health_view
+                .directories
                 .iter()
                 .map(html_directory_health)
                 .collect(),
-            worst_files: report.worst_files.iter().map(html_file_health).collect(),
+            worst_files: health_view
+                .worst_files
+                .iter()
+                .map(html_file_health)
+                .collect(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
