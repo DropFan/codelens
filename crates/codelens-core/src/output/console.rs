@@ -10,7 +10,10 @@ use std::io::Write;
 use colored::Colorize;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table};
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{
+    OutputFormat, OutputOptions, Report, TrendLanguagePresentation, TrendMetricPresentation,
+    TrendPresentation,
+};
 use crate::error::Result;
 
 /// Console output formatter.
@@ -236,112 +239,99 @@ impl ConsoleOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        // Header
+        let trend = TrendPresentation::from_report(report);
+
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer, "{}", " CODELENS - Trend Report ".bold().cyan())?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer)?;
 
-        let from_label = report.from.label.as_deref().unwrap_or_default();
-        let to_label = report.to.label.as_deref().unwrap_or_default();
         writeln!(
             writer,
             "  {} {} {}  {} {} {}",
             "From:".bold(),
-            report.from.timestamp.format("%Y-%m-%d"),
-            from_label,
+            trend.from_date,
+            trend.from_label,
             "To:".bold(),
-            report.to.timestamp.format("%Y-%m-%d"),
-            to_label,
+            trend.to_date,
+            trend.to_label,
         )?;
         writeln!(writer)?;
 
-        // Delta table
-        let mut delta_table = Table::new();
-        delta_table
+        let delta_table = Self::trend_delta_table(&trend.metric_rows);
+        writeln!(writer, "{delta_table}")?;
+        writeln!(writer)?;
+
+        if !trend.language_rows.is_empty() {
+            writeln!(writer, "{}", "By Language".bold())?;
+            writeln!(writer)?;
+            let lang_table = Self::trend_language_table(&trend.language_rows);
+            writeln!(writer, "{lang_table}")?;
+            writeln!(writer)?;
+        }
+
+        Ok(())
+    }
+
+    fn trend_delta_table(metrics: &[TrendMetricPresentation]) -> Table {
+        let mut table = Table::new();
+        table
             .load_preset(UTF8_FULL)
             .set_content_arrangement(ContentArrangement::Dynamic);
-        delta_table.set_header(vec![
+        table.set_header(vec![
             Cell::new("Metric").add_attribute(Attribute::Bold),
             Cell::new("Before").add_attribute(Attribute::Bold),
             Cell::new("After").add_attribute(Attribute::Bold),
             Cell::new("Delta").add_attribute(Attribute::Bold),
             Cell::new("Change").add_attribute(Attribute::Bold),
         ]);
-
-        let deltas = [
-            ("Files", &report.delta.files),
-            ("Lines", &report.delta.lines),
-            ("Code", &report.delta.code),
-            ("Comments", &report.delta.comment),
-            ("Blank", &report.delta.blank),
-            ("Complexity", &report.delta.complexity),
-            ("Functions", &report.delta.functions),
-        ];
-
-        for (name, dv) in &deltas {
-            let signed = dv.signed_delta();
-            let delta_color = if signed > 0 {
-                Color::Green
-            } else if signed < 0 {
-                Color::Red
-            } else {
-                Color::White
-            };
-            let sign = if signed > 0 { "+" } else { "" };
-            delta_table.add_row(vec![
-                Cell::new(*name),
-                Cell::new(Self::format_number(dv.from)),
-                Cell::new(Self::format_number(dv.to)),
-                Cell::new(format!("{sign}{signed}")).fg(delta_color),
-                Cell::new(format!("{:+.1}%", dv.percent)).fg(delta_color),
+        for metric in metrics {
+            let color = Self::trend_delta_color(metric.signed_change);
+            table.add_row(vec![
+                Cell::new(metric.name),
+                Cell::new(Self::format_number(metric.start)),
+                Cell::new(Self::format_number(metric.end)),
+                Cell::new(&metric.signed_change_text).fg(color),
+                Cell::new(&metric.percent_change_text).fg(color),
             ]);
         }
+        table
+    }
 
-        writeln!(writer, "{delta_table}")?;
-        writeln!(writer)?;
-
-        // By Language table
-        if !report.by_language.is_empty() {
-            writeln!(writer, "{}", "By Language".bold())?;
-            writeln!(writer)?;
-            let mut lang_table = Table::new();
-            lang_table
-                .load_preset(UTF8_FULL)
-                .set_content_arrangement(ContentArrangement::Dynamic);
-            lang_table.set_header(vec![
-                Cell::new("Language").add_attribute(Attribute::Bold),
-                Cell::new("Status").add_attribute(Attribute::Bold),
-                Cell::new("Before").add_attribute(Attribute::Bold),
-                Cell::new("After").add_attribute(Attribute::Bold),
-                Cell::new("Delta").add_attribute(Attribute::Bold),
+    fn trend_language_table(languages: &[TrendLanguagePresentation]) -> Table {
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("Language").add_attribute(Attribute::Bold),
+            Cell::new("Status").add_attribute(Attribute::Bold),
+            Cell::new("Before").add_attribute(Attribute::Bold),
+            Cell::new("After").add_attribute(Attribute::Bold),
+            Cell::new("Delta").add_attribute(Attribute::Bold),
+        ]);
+        for language in languages {
+            table.add_row(vec![
+                Cell::new(&language.name).fg(Color::Cyan),
+                Cell::new(&language.marker),
+                Cell::new(Self::format_number(language.code_start)),
+                Cell::new(Self::format_number(language.code_end)),
+                Cell::new(&language.signed_code_change_text)
+                    .fg(Self::trend_delta_color(language.signed_code_change)),
             ]);
-
-            for lang in &report.by_language {
-                let signed = lang.code.signed_delta();
-                let delta_color = if signed > 0 {
-                    Color::Green
-                } else if signed < 0 {
-                    Color::Red
-                } else {
-                    Color::White
-                };
-                let sign = if signed > 0 { "+" } else { "" };
-                lang_table.add_row(vec![
-                    Cell::new(&lang.language).fg(Color::Cyan),
-                    Cell::new(lang.status.to_string()),
-                    Cell::new(Self::format_number(lang.code.from)),
-                    Cell::new(Self::format_number(lang.code.to)),
-                    Cell::new(format!("{sign}{signed}")).fg(delta_color),
-                ]);
-            }
-
-            writeln!(writer, "{lang_table}")?;
-            writeln!(writer)?;
         }
+        table
+    }
 
-        Ok(())
+    fn trend_delta_color(delta: i64) -> Color {
+        if delta > 0 {
+            Color::Green
+        } else if delta < 0 {
+            Color::Red
+        } else {
+            Color::White
+        }
     }
 
     fn format_cost(cost: f64) -> String {
@@ -555,6 +545,13 @@ mod tests {
     fn test_strip_ansi_removes_csi_sequences() {
         let input = b"\x1b[1;32mgreen\x1b[0m plain";
         assert_eq!(strip_ansi(input), b"green plain");
+    }
+
+    #[test]
+    fn trend_delta_colors_preserve_existing_mapping() {
+        assert_eq!(ConsoleOutput::trend_delta_color(1), Color::Green);
+        assert_eq!(ConsoleOutput::trend_delta_color(-1), Color::Red);
+        assert_eq!(ConsoleOutput::trend_delta_color(0), Color::White);
     }
 
     #[test]

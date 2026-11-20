@@ -16,6 +16,7 @@ use crate::insight::Grade;
 mod diff;
 mod health_regression;
 mod hotspot;
+mod trend;
 
 pub(crate) use diff::{DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation};
 pub(crate) use health_regression::{
@@ -26,6 +27,7 @@ pub(crate) use hotspot::{
     HotspotFilePresentation, HotspotFunctionFilePresentation, HotspotKnowledgeIslandPresentation,
     HotspotPresentation,
 };
+pub(crate) use trend::{TrendLanguagePresentation, TrendMetricPresentation, TrendPresentation};
 
 /// Unified report type for all output formatters.
 #[derive(Debug, Clone)]

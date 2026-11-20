@@ -7,7 +7,7 @@ mod hotspot;
 
 use std::io::Write;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{OutputFormat, OutputOptions, Report, TrendPresentation};
 use crate::error::Result;
 
 /// Markdown output formatter.
@@ -137,59 +137,48 @@ impl MarkdownOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        let from_label = report.from.label.as_deref().unwrap_or("");
-        let to_label = report.to.label.as_deref().unwrap_or("");
+        let trend = TrendPresentation::from_report(report);
 
         writeln!(writer, "# Trend Report")?;
         writeln!(writer)?;
         writeln!(
             writer,
             "**From:** {} {} | **To:** {} {}",
-            report.from.timestamp.format("%Y-%m-%d"),
-            from_label,
-            report.to.timestamp.format("%Y-%m-%d"),
-            to_label,
+            trend.from_date, trend.from_label, trend.to_date, trend.to_label,
         )?;
         writeln!(writer)?;
 
-        // Delta table
         writeln!(writer, "## Delta")?;
         writeln!(writer)?;
         writeln!(writer, "| Metric | Before | After | Delta | Change |")?;
         writeln!(writer, "|--------|--------|-------|-------|--------|")?;
-        let deltas = [
-            ("Files", &report.delta.files),
-            ("Lines", &report.delta.lines),
-            ("Code", &report.delta.code),
-            ("Comments", &report.delta.comment),
-            ("Blank", &report.delta.blank),
-            ("Complexity", &report.delta.complexity),
-            ("Functions", &report.delta.functions),
-        ];
-        for (name, dv) in &deltas {
-            let signed = dv.signed_delta();
-            let sign = if signed > 0 { "+" } else { "" };
+        for metric in &trend.metric_rows {
             writeln!(
                 writer,
-                "| {} | {} | {} | {}{} | {:+.1}% |",
-                name, dv.from, dv.to, sign, signed, dv.percent,
+                "| {} | {} | {} | {} | {} |",
+                metric.name,
+                metric.start,
+                metric.end,
+                metric.signed_change_text,
+                metric.percent_change_text,
             )?;
         }
         writeln!(writer)?;
 
-        // By Language
-        if !report.by_language.is_empty() {
+        if !trend.language_rows.is_empty() {
             writeln!(writer, "## By Language")?;
             writeln!(writer)?;
             writeln!(writer, "| Language | Status | Before | After | Delta |")?;
             writeln!(writer, "|----------|--------|--------|-------|-------|")?;
-            for lang in &report.by_language {
-                let signed = lang.code.signed_delta();
-                let sign = if signed > 0 { "+" } else { "" };
+            for language in &trend.language_rows {
                 writeln!(
                     writer,
-                    "| {} | {} | {} | {} | {}{} |",
-                    lang.language, lang.status, lang.code.from, lang.code.to, sign, signed,
+                    "| {} | {} | {} | {} | {} |",
+                    language.name,
+                    language.marker,
+                    language.code_start,
+                    language.code_end,
+                    language.signed_code_change_text,
                 )?;
             }
             writeln!(writer)?;
