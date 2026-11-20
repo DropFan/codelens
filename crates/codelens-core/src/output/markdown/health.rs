@@ -4,9 +4,12 @@ use std::io::Write;
 
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
-use crate::output::format::{HealthPresentation, OutputOptions};
+use crate::output::format::{
+    HealthLanguageChangePresentation, HealthPresentation, HealthRegressedFilePresentation,
+    HealthRegressionVerdict, OutputOptions,
+};
 
-use super::{write_language_health_changes, MarkdownOutput};
+use super::MarkdownOutput;
 
 impl MarkdownOutput {
     pub(super) fn write_health(
@@ -17,7 +20,7 @@ impl MarkdownOutput {
     ) -> Result<()> {
         let presentation = HealthPresentation::from_report(report);
         self.write_health_summary(report, &presentation, writer)?;
-        self.write_health_regression(report, writer)?;
+        self.write_health_regression(&presentation, writer)?;
         self.write_health_dimensions(&presentation, writer)?;
         self.write_health_languages(&presentation, writer)?;
         if !options.summary_only {
@@ -81,76 +84,85 @@ impl MarkdownOutput {
 
     fn write_health_regression(
         &self,
-        report: &crate::insight::health::HealthReport,
+        presentation: &HealthPresentation,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        if let Some(reg) = &report.regression {
-            let delta = if reg.score_delta >= 0.0 {
-                format!("+{:.1}", reg.score_delta)
-            } else {
-                format!("{:.1}", reg.score_delta)
-            };
+        let Some(regression) = &presentation.regression else {
+            return Ok(());
+        };
+        writeln!(
+            writer,
+            "**Baseline:** {} | **Comparison model:** {} — {}, Δ {}",
+            regression.baseline, regression.model, regression.transition, regression.score_delta
+        )?;
+        if let Some((baseline, current)) = &regression.scope_change {
             writeln!(
                 writer,
-                "**Baseline:** {} | **Comparison model:** {} — {} ({:.1}) → {} ({:.1}), Δ {}",
-                reg.baseline,
-                reg.model,
-                reg.baseline_grade,
-                reg.baseline_score,
-                reg.current_grade,
-                reg.current_score,
-                delta
+                "**Scope changed:** {baseline} → {current} (project delta is informational and does not affect the gate)"
             )?;
-            if reg.scope_changed {
-                writeln!(
-                    writer,
-                    "**Scope changed:** {} → {} (project delta is informational and does not affect the gate)",
-                    reg.baseline_scope, reg.current_scope
-                )?;
-            }
-            if reg.assessment == HealthAssessment::InsufficientData {
-                writeln!(
-                    writer,
-                    "**Assessment:** insufficient data (score delta is an estimate)"
-                )?;
-            }
-            writeln!(writer)?;
-            if !reg.regressed_files.is_empty() {
-                writeln!(writer, "## Regressed Files")?;
-                writeln!(writer)?;
-                writeln!(writer, "| File | Before | After |")?;
-                writeln!(writer, "|------|--------|-------|")?;
-                for f in &reg.regressed_files {
-                    let before = if f.is_new {
-                        "NEW".to_string()
-                    } else {
-                        format!("{} ({:.1})", f.from_grade, f.from_score)
-                    };
-                    writeln!(
-                        writer,
-                        "| {} | {} | {} ({:.1}) |",
-                        f.path.display(),
-                        before,
-                        f.to_grade,
-                        f.to_score
-                    )?;
-                }
-                writeln!(writer)?;
-            }
-            write_language_health_changes(writer, &reg.by_language)?;
-            writeln!(
-                writer,
-                "**Verdict:** {}",
-                if reg.assessment == HealthAssessment::InsufficientData {
-                    "🟡 INSUFFICIENT DATA"
-                } else if reg.failed {
-                    "🔴 REGRESSED"
-                } else {
-                    "🟢 NO REGRESSION"
-                }
-            )?;
-            writeln!(writer)?;
         }
+        if regression.insufficient_data {
+            writeln!(
+                writer,
+                "**Assessment:** insufficient data (score delta is an estimate)"
+            )?;
+        }
+        writeln!(writer)?;
+        self.write_health_regressed_files(&regression.regressed_files, writer)?;
+        self.write_health_language_changes(&regression.languages, writer)?;
+        let verdict = match regression.verdict {
+            HealthRegressionVerdict::InsufficientData => "🟡 INSUFFICIENT DATA",
+            HealthRegressionVerdict::Regressed => "🔴 REGRESSED",
+            HealthRegressionVerdict::NoRegression => "🟢 NO REGRESSION",
+        };
+        writeln!(writer, "**Verdict:** {verdict}")?;
+        writeln!(writer)?;
+        Ok(())
+    }
+
+    fn write_health_regressed_files(
+        &self,
+        files: &[HealthRegressedFilePresentation],
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer, "## Regressed Files")?;
+        writeln!(writer)?;
+        writeln!(writer, "| File | Before | After |")?;
+        writeln!(writer, "|------|--------|-------|")?;
+        for file in files {
+            writeln!(
+                writer,
+                "| {} | {} | {} |",
+                file.path, file.before, file.after
+            )?;
+        }
+        writeln!(writer)?;
+        Ok(())
+    }
+
+    fn write_health_language_changes(
+        &self,
+        languages: &[HealthLanguageChangePresentation],
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if languages.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer, "## Language Health Changes")?;
+        writeln!(writer)?;
+        writeln!(writer, "| Language | Status | Before | After | Delta |")?;
+        writeln!(writer, "|----------|--------|--------|-------|-------|")?;
+        for language in languages {
+            writeln!(
+                writer,
+                "| {} | {} | {} | {} | {} |",
+                language.language, language.status, language.before, language.after, language.delta,
+            )?;
+        }
+        writeln!(writer)?;
         Ok(())
     }
 

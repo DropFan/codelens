@@ -8,7 +8,9 @@ use std::io::Write;
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{
+    format_optional_delta, format_optional_health, OutputFormat, OutputOptions, Report,
+};
 
 /// Markdown output formatter.
 pub struct MarkdownOutput;
@@ -537,21 +539,6 @@ fn write_language_health_changes(
     }
     writeln!(writer)?;
     Ok(())
-}
-
-fn format_optional_health(grade: Option<crate::insight::Grade>, score: Option<f64>) -> String {
-    match (grade, score) {
-        (Some(grade), Some(score)) => format!("{grade} ({score:.1})"),
-        _ => "-".to_string(),
-    }
-}
-
-fn format_optional_delta(delta: Option<f64>) -> String {
-    match delta {
-        Some(delta) if delta >= 0.0 => format!("+{delta:.1}"),
-        Some(delta) => format!("{delta:.1}"),
-        None => "-".to_string(),
-    }
 }
 
 #[cfg(test)]

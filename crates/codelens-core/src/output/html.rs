@@ -574,7 +574,7 @@ impl HtmlOutput {
         let report = AnalysisHtmlReport {
             title: "Codelens - Code Statistics Report",
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            view: AnalysisPresentation::from_result(result, options.top_n),
+            view: AnalysisPresentation::from_result(result, options),
         };
 
         write!(writer, "{}", report.render()?)?;

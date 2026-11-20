@@ -15,12 +15,23 @@ impl MarkdownOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        let view = AnalysisPresentation::from_result(result, options.top_n);
-
+        let view = AnalysisPresentation::from_result(result, options);
         writeln!(writer, "# Code Statistics Report")?;
         writeln!(writer)?;
+        self.write_analysis_summary(&view, options, writer)?;
+        self.write_analysis_token_windows(&view, writer)?;
+        self.write_analysis_languages(&view, writer)?;
+        self.write_analysis_directories(&view, writer)?;
+        self.write_analysis_files(&view, writer)?;
+        self.write_analysis_footer(&view, writer)
+    }
 
-        // Summary
+    fn write_analysis_summary(
+        &self,
+        view: &AnalysisPresentation,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         writeln!(writer, "## Summary")?;
         writeln!(writer)?;
         writeln!(writer, "| Metric | Value |")?;
@@ -46,120 +57,148 @@ impl MarkdownOutput {
             )?;
         }
         writeln!(writer)?;
+        Ok(())
+    }
 
-        if options.show_tokens && view.tokens_est > 0 {
-            for window in crate::analyzer::tokens::CONTEXT_WINDOWS {
-                let ratio = view.tokens_est as f64 / window.tokens as f64;
-                if ratio <= 1.0 {
-                    writeln!(
-                        writer,
-                        "- {}: fits ({:.0}% used)",
-                        window.label,
-                        ratio * 100.0
-                    )?;
-                } else {
-                    writeln!(writer, "- {}: {:.1}x over", window.label, ratio)?;
+    fn write_analysis_token_windows(
+        &self,
+        view: &AnalysisPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if view.token_windows.is_empty() {
+            return Ok(());
+        }
+        for window in &view.token_windows {
+            match (window.fit_percent, window.over_ratio) {
+                (Some(percent), _) => {
+                    writeln!(writer, "- {}: fits ({percent:.0}% used)", window.label)?
                 }
+                (_, Some(ratio)) => writeln!(writer, "- {}: {ratio:.1}x over", window.label)?,
+                _ => unreachable!("token window presentation always has a verdict"),
             }
-            writeln!(
-                writer,
-                "\n_Token counts are byte-based estimates, not tokenizer-exact._"
-            )?;
-            writeln!(writer)?;
         }
+        writeln!(
+            writer,
+            "\n_Token counts are byte-based estimates, not tokenizer-exact._"
+        )?;
+        writeln!(writer)?;
+        Ok(())
+    }
 
-        // Language breakdown
-        if !options.summary_only && !view.languages.is_empty() {
-            writeln!(writer, "## By Language")?;
-            writeln!(writer)?;
-            writeln!(
-                writer,
-                "| Language | Files | Code | Comment | Blank | Total |"
-            )?;
-            writeln!(
-                writer,
-                "|----------|-------|------|---------|-------|-------|"
-            )?;
-
-            for language in &view.languages {
-                writeln!(
-                    writer,
-                    "| {} | {} | {} | {} | {} | {} |",
-                    language.name,
-                    language.files,
-                    language.code_lines,
-                    language.comment_lines,
-                    language.blank_lines,
-                    language.total_lines
-                )?;
-            }
-            writeln!(writer)?;
+    fn write_analysis_languages(
+        &self,
+        view: &AnalysisPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if !view.show_languages {
+            return Ok(());
         }
-
-        // Per-directory breakdown (--by-dir)
-        if options.by_dir && !result.files.is_empty() {
-            writeln!(writer, "## By Directory")?;
-            writeln!(writer)?;
+        writeln!(writer, "## By Language")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "| Language | Files | Code | Comment | Blank | Total |"
+        )?;
+        writeln!(
+            writer,
+            "|----------|-------|------|---------|-------|-------|"
+        )?;
+        for language in &view.languages {
             writeln!(
                 writer,
-                "| Directory | Files | Code | Comment | Blank | Total | CC |"
+                "| {} | {} | {} | {} | {} | {} |",
+                language.name,
+                language.files,
+                language.code_lines,
+                language.comment_lines,
+                language.blank_lines,
+                language.total_lines
             )?;
-            writeln!(
-                writer,
-                "|-----------|-------|------|---------|-------|-------|-----|"
-            )?;
-            for d in crate::analyzer::stats::aggregate_by_dir(&result.files, options.dir_depth) {
-                writeln!(
-                    writer,
-                    "| {} | {} | {} | {} | {} | {} | {} |",
-                    d.path.display(),
-                    d.files,
-                    d.lines.code,
-                    d.lines.comment,
-                    d.lines.blank,
-                    d.lines.total,
-                    d.cyclomatic,
-                )?;
-            }
-            writeln!(writer)?;
         }
+        writeln!(writer)?;
+        Ok(())
+    }
 
-        // Per-file breakdown (--by-file)
-        if options.by_file && !result.files.is_empty() {
-            writeln!(writer, "## By File")?;
-            writeln!(writer)?;
-            writeln!(
-                writer,
-                "| File | Language | Code | Comment | Blank | Total |"
-            )?;
-            writeln!(
-                writer,
-                "|------|----------|------|---------|-------|-------|"
-            )?;
-            for f in
-                crate::output::format::sorted_files(&result.files, options.sort_by, options.top_n)
-            {
-                writeln!(
-                    writer,
-                    "| {} | {} | {} | {} | {} | {} |",
-                    f.path.display(),
-                    f.language,
-                    f.lines.code,
-                    f.lines.comment,
-                    f.lines.blank,
-                    f.lines.total
-                )?;
-            }
-            writeln!(writer)?;
+    fn write_analysis_directories(
+        &self,
+        view: &AnalysisPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if view.directories.is_empty() {
+            return Ok(());
         }
+        writeln!(writer, "## By Directory")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "| Directory | Files | Code | Comment | Blank | Total | CC |"
+        )?;
+        writeln!(
+            writer,
+            "|-----------|-------|------|---------|-------|-------|-----|"
+        )?;
+        for directory in &view.directories {
+            writeln!(
+                writer,
+                "| {} | {} | {} | {} | {} | {} | {} |",
+                directory.path,
+                directory.files,
+                directory.code_lines,
+                directory.comment_lines,
+                directory.blank_lines,
+                directory.total_lines,
+                directory.cyclomatic,
+            )?;
+        }
+        writeln!(writer)?;
+        Ok(())
+    }
 
+    fn write_analysis_files(
+        &self,
+        view: &AnalysisPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if view.files.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer, "## By File")?;
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "| File | Language | Code | Comment | Blank | Total |"
+        )?;
+        writeln!(
+            writer,
+            "|------|----------|------|---------|-------|-------|"
+        )?;
+        for file in &view.files {
+            writeln!(
+                writer,
+                "| {} | {} | {} | {} | {} | {} |",
+                file.path,
+                file.language,
+                file.code_lines,
+                file.comment_lines,
+                file.blank_lines,
+                file.total_lines
+            )?;
+        }
+        writeln!(writer)?;
+        Ok(())
+    }
+
+    fn write_analysis_footer(
+        &self,
+        view: &AnalysisPresentation,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         writeln!(writer, "---")?;
         writeln!(
             writer,
             "*Generated by codelens in {:.2}s*",
             view.elapsed_secs
         )?;
-
         Ok(())
     }
 }

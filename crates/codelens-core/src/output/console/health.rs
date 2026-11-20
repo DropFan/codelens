@@ -7,9 +7,12 @@ use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement
 
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
-use crate::output::format::{HealthPresentation, OutputOptions};
+use crate::output::format::{
+    HealthLanguageChangePresentation, HealthPresentation, HealthRegressedFilePresentation,
+    HealthRegressionVerdict, OutputOptions,
+};
 
-use super::{format_optional_delta, format_optional_health, ConsoleOutput};
+use super::ConsoleOutput;
 
 impl ConsoleOutput {
     pub(super) fn write_health(
@@ -20,7 +23,7 @@ impl ConsoleOutput {
     ) -> Result<()> {
         let presentation = HealthPresentation::from_report(report);
         self.write_health_summary(report, &presentation, writer)?;
-        self.write_health_regression(report, writer)?;
+        self.write_health_regression(&presentation, writer)?;
         self.write_health_dimensions(&presentation, writer)?;
         self.write_health_languages(&presentation, writer)?;
         if !options.summary_only {
@@ -107,115 +110,101 @@ impl ConsoleOutput {
 
     fn write_health_regression(
         &self,
-        report: &crate::insight::health::HealthReport,
+        presentation: &HealthPresentation,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        if let Some(reg) = &report.regression {
-            let arrow = format!(
-                "{} ({:.1}) → {} ({:.1})",
-                reg.baseline_grade, reg.baseline_score, reg.current_grade, reg.current_score
-            );
-            let delta = if reg.score_delta >= 0.0 {
-                format!("+{:.1}", reg.score_delta).green().to_string()
-            } else {
-                format!("{:.1}", reg.score_delta).red().to_string()
-            };
+        let Some(regression) = &presentation.regression else {
+            return Ok(());
+        };
+        let delta = if regression.score_nonnegative {
+            regression.score_delta.green().to_string()
+        } else {
+            regression.score_delta.red().to_string()
+        };
+        writeln!(
+            writer,
+            "  Baseline: {}  Model: {}  {}  Δ {}",
+            regression.baseline.bold(),
+            regression.model,
+            regression.transition,
+            delta
+        )?;
+        if let Some((baseline, current)) = &regression.scope_change {
             writeln!(
                 writer,
-                "  Baseline: {}  Model: {}  {}  Δ {}",
-                reg.baseline.bold(),
-                reg.model,
-                arrow,
-                delta
+                "  Scope changed: {baseline} → {current} (project delta is informational)"
             )?;
-            if reg.scope_changed {
-                writeln!(
-                    writer,
-                    "  Scope changed: {} → {} (project delta is informational)",
-                    reg.baseline_scope, reg.current_scope
-                )?;
-            }
-            if reg.assessment == HealthAssessment::InsufficientData {
-                writeln!(
-                    writer,
-                    "  Assessment: insufficient data (score delta is an estimate)"
-                )?;
-            }
-            if reg.improved_files > 0 {
-                writeln!(writer, "  Improved files: {}", reg.improved_files)?;
-            }
-
-            if !reg.regressed_files.is_empty() {
-                writeln!(writer)?;
-                writeln!(writer, "{}", "  Regressed Files".bold())?;
-                let mut reg_table = Table::new();
-                reg_table
-                    .load_preset(UTF8_FULL)
-                    .set_content_arrangement(ContentArrangement::Dynamic);
-                reg_table.set_header(vec![
-                    Cell::new("File").add_attribute(Attribute::Bold),
-                    Cell::new("Before").add_attribute(Attribute::Bold),
-                    Cell::new("After").add_attribute(Attribute::Bold),
-                ]);
-                for f in &reg.regressed_files {
-                    let before = if f.is_new {
-                        "NEW".to_string()
-                    } else {
-                        format!("{} ({:.1})", f.from_grade, f.from_score)
-                    };
-                    reg_table.add_row(vec![
-                        Cell::new(f.path.display().to_string()).fg(Color::Cyan),
-                        Cell::new(before).fg(if f.is_new {
-                            Color::Cyan
-                        } else {
-                            Self::grade_color(f.from_grade)
-                        }),
-                        Cell::new(format!("{} ({:.1})", f.to_grade, f.to_score))
-                            .fg(Self::grade_color(f.to_grade)),
-                    ]);
-                }
-                writeln!(writer, "{reg_table}")?;
-            }
-
-            if !reg.by_language.is_empty() {
-                writeln!(writer)?;
-                writeln!(writer, "{}", "  Language Health Changes".bold())?;
-                let mut language_table = Table::new();
-                language_table
-                    .load_preset(UTF8_FULL)
-                    .set_content_arrangement(ContentArrangement::Dynamic);
-                language_table.set_header(vec![
-                    Cell::new("Language").add_attribute(Attribute::Bold),
-                    Cell::new("Status").add_attribute(Attribute::Bold),
-                    Cell::new("Before").add_attribute(Attribute::Bold),
-                    Cell::new("After").add_attribute(Attribute::Bold),
-                    Cell::new("Delta").add_attribute(Attribute::Bold),
-                ]);
-                for language in &reg.by_language {
-                    language_table.add_row(vec![
-                        Cell::new(&language.language).fg(Color::Cyan),
-                        Cell::new(language.status.to_string()),
-                        Cell::new(format_optional_health(
-                            language.from_grade,
-                            language.from_score,
-                        )),
-                        Cell::new(format_optional_health(language.to_grade, language.to_score)),
-                        Cell::new(format_optional_delta(language.score_delta)),
-                    ]);
-                }
-                writeln!(writer, "{language_table}")?;
-            }
-
-            let verdict = if reg.assessment == HealthAssessment::InsufficientData {
-                "INSUFFICIENT DATA".yellow().bold().to_string()
-            } else if reg.failed {
-                "REGRESSED".red().bold().to_string()
-            } else {
-                "NO REGRESSION".green().bold().to_string()
-            };
-            writeln!(writer, "  Verdict: {verdict}")?;
-            writeln!(writer)?;
         }
+        if regression.insufficient_data {
+            writeln!(
+                writer,
+                "  Assessment: insufficient data (score delta is an estimate)"
+            )?;
+        }
+        if regression.improved_files > 0 {
+            writeln!(writer, "  Improved files: {}", regression.improved_files)?;
+        }
+        self.write_health_regressed_files(&regression.regressed_files, writer)?;
+        self.write_health_language_changes(&regression.languages, writer)?;
+        let verdict = match regression.verdict {
+            HealthRegressionVerdict::InsufficientData => {
+                "INSUFFICIENT DATA".yellow().bold().to_string()
+            }
+            HealthRegressionVerdict::Regressed => "REGRESSED".red().bold().to_string(),
+            HealthRegressionVerdict::NoRegression => "NO REGRESSION".green().bold().to_string(),
+        };
+        writeln!(writer, "  Verdict: {verdict}")?;
+        writeln!(writer)?;
+        Ok(())
+    }
+
+    fn write_health_regressed_files(
+        &self,
+        files: &[HealthRegressedFilePresentation],
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer)?;
+        writeln!(writer, "{}", "  Regressed Files".bold())?;
+        let mut table = health_table(&["File", "Before", "After"]);
+        for file in files {
+            table.add_row(vec![
+                Cell::new(&file.path).fg(Color::Cyan),
+                Cell::new(&file.before).fg(if file.is_new {
+                    Color::Cyan
+                } else {
+                    Self::grade_color(file.from_grade)
+                }),
+                Cell::new(&file.after).fg(Self::grade_color(file.to_grade)),
+            ]);
+        }
+        writeln!(writer, "{table}")?;
+        Ok(())
+    }
+
+    fn write_health_language_changes(
+        &self,
+        languages: &[HealthLanguageChangePresentation],
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        if languages.is_empty() {
+            return Ok(());
+        }
+        writeln!(writer)?;
+        writeln!(writer, "{}", "  Language Health Changes".bold())?;
+        let mut table = health_table(&["Language", "Status", "Before", "After", "Delta"]);
+        for language in languages {
+            table.add_row(vec![
+                Cell::new(&language.language).fg(Color::Cyan),
+                Cell::new(&language.status),
+                Cell::new(&language.before),
+                Cell::new(&language.after),
+                Cell::new(&language.delta),
+            ]);
+        }
+        writeln!(writer, "{table}")?;
         Ok(())
     }
 
@@ -224,15 +213,7 @@ impl ConsoleOutput {
         presentation: &HealthPresentation,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        let mut dim_table = Table::new();
-        dim_table
-            .load_preset(UTF8_FULL)
-            .set_content_arrangement(ContentArrangement::Dynamic);
-        dim_table.set_header(vec![
-            Cell::new("Dimension").add_attribute(Attribute::Bold),
-            Cell::new("Score").add_attribute(Attribute::Bold),
-            Cell::new("Grade").add_attribute(Attribute::Bold),
-        ]);
+        let mut dim_table = health_table(&["Dimension", "Score", "Grade"]);
         for dimension in &presentation.dimensions {
             dim_table.add_row(vec![
                 Cell::new(dimension.dimension.to_string()),
@@ -253,18 +234,14 @@ impl ConsoleOutput {
         if !presentation.languages.is_empty() {
             writeln!(writer, "{}", "By Language".bold())?;
             writeln!(writer)?;
-            let mut language_table = Table::new();
-            language_table
-                .load_preset(UTF8_FULL)
-                .set_content_arrangement(ContentArrangement::Dynamic);
-            language_table.set_header(vec![
-                Cell::new("Language").add_attribute(Attribute::Bold),
-                Cell::new("Score").add_attribute(Attribute::Bold),
-                Cell::new("Grade").add_attribute(Attribute::Bold),
-                Cell::new("Files").add_attribute(Attribute::Bold),
-                Cell::new("Code").add_attribute(Attribute::Bold),
-                Cell::new("Confidence").add_attribute(Attribute::Bold),
-                Cell::new("Tail 10%").add_attribute(Attribute::Bold),
+            let mut language_table = health_table(&[
+                "Language",
+                "Score",
+                "Grade",
+                "Files",
+                "Code",
+                "Confidence",
+                "Tail 10%",
             ]);
             for language in &presentation.languages {
                 language_table.add_row(vec![
@@ -299,16 +276,7 @@ impl ConsoleOutput {
         if !presentation.directories.is_empty() {
             writeln!(writer, "{}", "By Directory".bold())?;
             writeln!(writer)?;
-            let mut dir_table = Table::new();
-            dir_table
-                .load_preset(UTF8_FULL)
-                .set_content_arrangement(ContentArrangement::Dynamic);
-            dir_table.set_header(vec![
-                Cell::new("Directory").add_attribute(Attribute::Bold),
-                Cell::new("Score").add_attribute(Attribute::Bold),
-                Cell::new("Grade").add_attribute(Attribute::Bold),
-                Cell::new("Files").add_attribute(Attribute::Bold),
-            ]);
+            let mut dir_table = health_table(&["Directory", "Score", "Grade", "Files"]);
             for directory in &presentation.directories {
                 dir_table.add_row(vec![
                     Cell::new(&directory.path).fg(Color::Cyan),
@@ -331,16 +299,7 @@ impl ConsoleOutput {
         if !presentation.worst_files.is_empty() {
             writeln!(writer, "{}", "Worst Files".bold())?;
             writeln!(writer)?;
-            let mut file_table = Table::new();
-            file_table
-                .load_preset(UTF8_FULL)
-                .set_content_arrangement(ContentArrangement::Dynamic);
-            file_table.set_header(vec![
-                Cell::new("File").add_attribute(Attribute::Bold),
-                Cell::new("Score").add_attribute(Attribute::Bold),
-                Cell::new("Grade").add_attribute(Attribute::Bold),
-                Cell::new("Top Issue").add_attribute(Attribute::Bold),
-            ]);
+            let mut file_table = health_table(&["File", "Score", "Grade", "Top Issue"]);
             for file in &presentation.worst_files {
                 file_table.add_row(vec![
                     Cell::new(&file.path).fg(Color::Cyan),
@@ -354,4 +313,18 @@ impl ConsoleOutput {
         }
         Ok(())
     }
+}
+
+fn health_table(headers: &[&str]) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic);
+    table.set_header(
+        headers
+            .iter()
+            .map(|header| Cell::new(header).add_attribute(Attribute::Bold))
+            .collect::<Vec<_>>(),
+    );
+    table
 }

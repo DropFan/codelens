@@ -11,7 +11,9 @@ use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{
+    format_optional_delta, format_optional_health, OutputFormat, OutputOptions, Report,
+};
 
 /// Console output formatter.
 pub struct ConsoleOutput;
@@ -797,21 +799,6 @@ impl ConsoleOutput {
             Grade::D => Color::Red,
             Grade::F => Color::DarkRed,
         }
-    }
-}
-
-fn format_optional_health(grade: Option<crate::insight::Grade>, score: Option<f64>) -> String {
-    match (grade, score) {
-        (Some(grade), Some(score)) => format!("{grade} ({score:.1})"),
-        _ => "-".to_string(),
-    }
-}
-
-fn format_optional_delta(delta: Option<f64>) -> String {
-    match delta {
-        Some(delta) if delta >= 0.0 => format!("+{delta:.1}"),
-        Some(delta) => format!("{delta:.1}"),
-        None => "-".to_string(),
     }
 }
 

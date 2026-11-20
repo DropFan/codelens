@@ -8,10 +8,18 @@ use crate::error::Result;
 use crate::insight::coupling::CouplingReport;
 use crate::insight::diff::DiffReport;
 use crate::insight::estimation::{EstimationComparison, EstimationReport};
-use crate::insight::health::{HealthAssessment, HealthReport, HealthScope};
+use crate::insight::health::HealthReport;
 use crate::insight::hotspot::HotspotReport;
 use crate::insight::trend::TrendReport;
 use crate::insight::Grade;
+
+mod health_regression;
+
+pub(crate) use health_regression::{
+    format_optional_delta, format_optional_health, health_model_display_name,
+    HealthLanguageChangePresentation, HealthRegressedFilePresentation,
+    HealthRegressionPresentation, HealthRegressionVerdict,
+};
 
 /// Unified report type for all output formatters.
 #[derive(Debug, Clone)]
@@ -55,11 +63,22 @@ pub(crate) struct AnalysisPresentation {
     pub tests: Option<AnalysisTestPresentation>,
     pub duplication: Option<AnalysisDuplicationPresentation>,
     pub tokens_est: u64,
+    pub token_windows: Vec<AnalysisTokenWindowPresentation>,
     pub languages: Vec<AnalysisLanguagePresentation>,
+    pub show_languages: bool,
+    pub directories: Vec<AnalysisDirectoryPresentation>,
+    pub files: Vec<AnalysisFilePresentation>,
     pub elapsed_secs: f64,
     pub scanned_files: usize,
     pub skipped_files: usize,
     pub error_files: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnalysisTokenWindowPresentation {
+    pub label: &'static str,
+    pub fit_percent: Option<f64>,
+    pub over_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,8 +111,31 @@ pub(crate) struct AnalysisLanguagePresentation {
     pub tokens_est: u64,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct AnalysisDirectoryPresentation {
+    pub path: String,
+    pub name: String,
+    pub depth: usize,
+    pub files: usize,
+    pub code_lines: usize,
+    pub comment_lines: usize,
+    pub blank_lines: usize,
+    pub total_lines: usize,
+    pub cyclomatic: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnalysisFilePresentation {
+    pub path: String,
+    pub language: String,
+    pub code_lines: usize,
+    pub comment_lines: usize,
+    pub blank_lines: usize,
+    pub total_lines: usize,
+}
+
 impl AnalysisPresentation {
-    pub(crate) fn from_result(result: &AnalysisResult, top_n: Option<usize>) -> Self {
+    pub(crate) fn from_result(result: &AnalysisResult, options: &OutputOptions) -> Self {
         let summary = &result.summary;
         let production_code = summary.lines.code.saturating_sub(summary.test_lines.code);
         let tests = (summary.test_files > 0).then(|| AnalysisTestPresentation {
@@ -126,9 +168,13 @@ impl AnalysisPresentation {
                 tokens_est: stats.tokens_est,
             })
             .collect();
-        if let Some(limit) = top_n {
+        if let Some(limit) = options.top_n {
             languages.truncate(limit);
         }
+        let show_languages = !options.summary_only && !languages.is_empty();
+        let token_windows = analysis_token_windows(summary.tokens_est, options.show_tokens);
+        let directories = analysis_directories(result, options);
+        let files = analysis_files(result, options);
 
         Self {
             total_files: summary.total_files,
@@ -148,13 +194,84 @@ impl AnalysisPresentation {
             tests,
             duplication,
             tokens_est: summary.tokens_est,
+            token_windows,
             languages,
+            show_languages,
+            directories,
+            files,
             elapsed_secs: result.elapsed.as_secs_f64(),
             scanned_files: result.scanned_files,
             skipped_files: result.skipped_files,
             error_files: result.error_files,
         }
     }
+}
+
+fn analysis_token_windows(
+    tokens_est: u64,
+    show_tokens: bool,
+) -> Vec<AnalysisTokenWindowPresentation> {
+    if !show_tokens || tokens_est == 0 {
+        return Vec::new();
+    }
+    crate::analyzer::tokens::CONTEXT_WINDOWS
+        .iter()
+        .map(|window| {
+            let ratio = tokens_est as f64 / window.tokens as f64;
+            AnalysisTokenWindowPresentation {
+                label: window.label,
+                fit_percent: (ratio <= 1.0).then_some(ratio * 100.0),
+                over_ratio: (ratio > 1.0).then_some(ratio),
+            }
+        })
+        .collect()
+}
+
+fn analysis_directories(
+    result: &AnalysisResult,
+    options: &OutputOptions,
+) -> Vec<AnalysisDirectoryPresentation> {
+    if !options.by_dir || result.files.is_empty() {
+        return Vec::new();
+    }
+    crate::analyzer::stats::aggregate_by_dir(&result.files, options.dir_depth)
+        .into_iter()
+        .map(|directory| AnalysisDirectoryPresentation {
+            path: directory.path.display().to_string(),
+            name: directory
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| directory.path.display().to_string()),
+            depth: directory.depth,
+            files: directory.files,
+            code_lines: directory.lines.code,
+            comment_lines: directory.lines.comment,
+            blank_lines: directory.lines.blank,
+            total_lines: directory.lines.total,
+            cyclomatic: directory.cyclomatic,
+        })
+        .collect()
+}
+
+fn analysis_files(
+    result: &AnalysisResult,
+    options: &OutputOptions,
+) -> Vec<AnalysisFilePresentation> {
+    if !options.by_file || result.files.is_empty() {
+        return Vec::new();
+    }
+    sorted_files(&result.files, options.sort_by, options.top_n)
+        .into_iter()
+        .map(|file| AnalysisFilePresentation {
+            path: file.path.display().to_string(),
+            language: file.language.clone(),
+            code_lines: file.lines.code,
+            comment_lines: file.lines.comment,
+            blank_lines: file.lines.blank,
+            total_lines: file.lines.total,
+        })
+        .collect()
 }
 
 /// Formatter-neutral health summary used by human-readable outputs.
@@ -177,6 +294,7 @@ pub(crate) struct HealthPresentation {
     pub directories: Vec<HealthDirectoryPresentation>,
     pub worst_directory: Option<HealthDirectoryPresentation>,
     pub worst_files: Vec<HealthFilePresentation>,
+    pub regression: Option<HealthRegressionPresentation>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,122 +331,6 @@ pub(crate) struct HealthFilePresentation {
     pub score_display: String,
     pub grade: Grade,
     pub top_issue: crate::insight::scoring::HealthDimension,
-}
-
-impl HealthPresentation {
-    pub(crate) fn from_report(report: &HealthReport) -> Self {
-        let directories: Vec<_> = report
-            .by_directory
-            .iter()
-            .map(|directory| HealthDirectoryPresentation {
-                path: directory.path.display().to_string(),
-                score_display: format_score(directory.score),
-                grade: directory.grade,
-                file_count: directory.file_count,
-            })
-            .collect();
-        Self {
-            score: format_score(report.score),
-            model: health_model_display_name(&report.model),
-            scope: health_scope_display_name(report.scope).to_string(),
-            confidence: format_confidence(report.confidence.level, report.confidence.coverage),
-            tail_score: format_score(report.tail_risk.tail_score),
-            failing_files: report.tail_risk.failing_files,
-            failing_ratio: format!("{:.1}%", report.tail_risk.failing_ratio * 100.0),
-            test_health: report.test_health.as_ref().map(|test| {
-                let score = format_score(test.score);
-                let confidence = format_confidence(test.confidence.level, test.confidence.coverage);
-                if test.assessment == HealthAssessment::InsufficientData {
-                    format!(
-                        "Insufficient data (estimated score {score}); {} files; {confidence}",
-                        test.file_count
-                    )
-                } else {
-                    format!(
-                        "{} ({score}); {} files; {confidence}",
-                        test.grade, test.file_count
-                    )
-                }
-            }),
-            dimensions: report
-                .dimensions
-                .iter()
-                .map(|dimension| HealthDimensionPresentation {
-                    dimension: dimension.dimension,
-                    score_display: format_score(dimension.score),
-                    grade: dimension.grade,
-                })
-                .collect(),
-            languages: report
-                .by_language
-                .iter()
-                .map(|language| {
-                    let estimated = language.assessment == HealthAssessment::InsufficientData;
-                    HealthLanguagePresentation {
-                        language: language.language.clone(),
-                        score_display: format_score(language.score),
-                        grade: language.grade,
-                        grade_display: if estimated {
-                            "Insufficient data".to_string()
-                        } else {
-                            language.grade.to_string()
-                        },
-                        estimated,
-                        file_count: language.file_count,
-                        code_lines: language.code_lines,
-                        confidence: format!(
-                            "{} ({:.0}%)",
-                            language.confidence.level,
-                            language.confidence.coverage * 100.0
-                        ),
-                        tail_score: format_score(language.tail_risk.tail_score),
-                    }
-                })
-                .collect(),
-            worst_directory: directories.first().cloned(),
-            directories,
-            worst_files: report
-                .worst_files
-                .iter()
-                .map(|file| HealthFilePresentation {
-                    path: file.path.display().to_string(),
-                    score_display: format_score(file.score),
-                    grade: file.grade,
-                    top_issue: file.top_issue,
-                })
-                .collect(),
-        }
-    }
-}
-
-pub(crate) fn format_score(score: f64) -> String {
-    format!("{score:.1}")
-}
-
-pub(crate) fn format_confidence(
-    level: crate::insight::health::ConfidenceLevel,
-    coverage: f64,
-) -> String {
-    format!("{level} ({:.1}% measured)", coverage * 100.0)
-}
-
-pub(crate) fn health_model_display_name(model: &str) -> String {
-    match model {
-        "default" => "v1".to_string(),
-        "default-no-dup" => "v1 (no duplication scan)".to_string(),
-        "default-v2" => "v2".to_string(),
-        "default-v2-no-dup" => "v2 (no duplication scan)".to_string(),
-        other => other.to_string(),
-    }
-}
-
-fn health_scope_display_name(scope: HealthScope) -> &'static str {
-    match scope {
-        HealthScope::Production => "Production code",
-        HealthScope::TestsOnly => "Test code only",
-        HealthScope::LegacyAll => "All analyzed files (legacy v1 scope)",
-        HealthScope::Empty => "No health-supported files",
-    }
 }
 
 /// Sort file stats by the given key (descending for numeric keys,
