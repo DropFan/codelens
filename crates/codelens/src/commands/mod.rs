@@ -8,6 +8,7 @@ pub(crate) mod health;
 pub(crate) mod hotspot;
 pub(crate) mod trend;
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -62,14 +63,162 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
     let comparison =
         codelens_core::insight::estimation::estimate_all(&result.summary, &models, &cost_config);
 
-    let report = Report::Combined(Box::new(codelens_core::output::CombinedReport {
+    let combined = codelens_core::output::CombinedReport {
         analysis: result,
         health: health_report,
         estimation: comparison,
-    }));
+    };
 
-    write_report(report, &config.output)?;
+    if config.output.format == codelens_core::config::OutputFormatType::Html {
+        let insights = collect_default_html_insights(&paths, &combined.analysis, health_top_n);
+        write_combined_html_dashboard(&combined, &insights, &config.output)?;
+    } else {
+        write_report(Report::Combined(Box::new(combined)), &config.output)?;
+    }
     Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Default)]
+struct DefaultHtmlInsights {
+    hotspot: Option<codelens_core::insight::hotspot::HotspotReport>,
+    coupling: Option<codelens_core::insight::coupling::CouplingReport>,
+    trend: Option<codelens_core::insight::trend::TrendReport>,
+    git_history_note: String,
+    trend_note: String,
+}
+
+fn collect_default_html_insights(
+    paths: &[PathBuf],
+    analysis: &codelens_core::AnalysisResult,
+    top_n: usize,
+) -> DefaultHtmlInsights {
+    use codelens_core::analyzer::test_code::is_test_path;
+    use codelens_core::git;
+    use codelens_core::insight::{coupling, hotspot, trend};
+
+    const HISTORY_WINDOW: &str = "90d";
+
+    let project_path = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+    let lookup_path = if project_path.is_file() {
+        project_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        project_path.clone()
+    };
+    let mut insights = DefaultHtmlInsights::default();
+
+    match GitClient::detect(&lookup_path) {
+        Ok(git_client) => {
+            let since = git::parse_since(HISTORY_WINDOW);
+            match git_client.commit_log(&since) {
+                Ok(commits) => {
+                    let mut history_analysis = analysis.clone();
+                    rewrite_paths_repo_relative(
+                        &mut history_analysis.files,
+                        git_client.repo_path(),
+                    );
+
+                    let churns = git::churn_from_commits(&commits);
+                    let authors = git::aggregate_authors(&commits);
+                    let mut hotspot_report = hotspot::analyze(
+                        &churns,
+                        &history_analysis,
+                        HISTORY_WINDOW,
+                        commits.len(),
+                        top_n,
+                    );
+                    hotspot::attach_knowledge(&mut hotspot_report, &authors);
+                    if let Ok(first_commits) = git_client.first_commit_times() {
+                        let now_ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|duration| duration.as_secs() as i64)
+                            .unwrap_or(0);
+                        if now_ts > 0 {
+                            hotspot::attach_ages(&mut hotspot_report, &first_commits, now_ts);
+                        }
+                    }
+
+                    let mut universe: BTreeSet<PathBuf> = history_analysis
+                        .files
+                        .iter()
+                        .map(|file| {
+                            file.path
+                                .strip_prefix("./")
+                                .unwrap_or(&file.path)
+                                .to_path_buf()
+                        })
+                        .collect();
+                    let before_test_filter = universe.len();
+                    universe.retain(|path| !is_test_path(path));
+                    let excluded_test_files = before_test_filter - universe.len();
+                    let options = coupling::CouplingOptions {
+                        top_n,
+                        ..coupling::CouplingOptions::default()
+                    };
+                    let mut coupling_report =
+                        coupling::analyze(&commits, Some(&universe), HISTORY_WINDOW, &options);
+                    coupling_report.excluded_test_files = excluded_test_files;
+
+                    insights.hotspot = Some(hotspot_report);
+                    insights.coupling = Some(coupling_report);
+                }
+                Err(error) => {
+                    insights.git_history_note =
+                        format!("Git history could not be read for this report: {error}");
+                }
+            }
+        }
+        Err(_) => {
+            insights.git_history_note = "Git history is unavailable. Run Codelens inside a Git repository to include hotspots and coupling.".to_string();
+        }
+    }
+
+    match trend::list_snapshots(&lookup_path) {
+        Ok(snapshots) if !snapshots.is_empty() => {
+            let latest = snapshots.last().expect("checked as non-empty").clone();
+            match trend::load_snapshot(&latest.file_path) {
+                Ok(snapshot) => {
+                    let (delta, by_language) =
+                        trend::compute_delta(&snapshot.result.summary, &analysis.summary);
+                    let now = chrono::Utc::now();
+                    let mut history = trend::history(&lookup_path).unwrap_or_default();
+                    history.push(trend::HistoryPoint {
+                        timestamp: now,
+                        label: Some("Current".to_string()),
+                        files: analysis.summary.total_files,
+                        code: analysis.summary.lines.code,
+                        cyclomatic: analysis.summary.complexity.cyclomatic,
+                    });
+                    insights.trend = Some(trend::TrendReport {
+                        from: latest,
+                        to: trend::SnapshotMeta {
+                            timestamp: now,
+                            label: Some("Current".to_string()),
+                            git_commit: None,
+                            file_path: PathBuf::new(),
+                        },
+                        delta,
+                        by_language,
+                        history,
+                    });
+                }
+                Err(error) => {
+                    insights.trend_note =
+                        format!("The latest Codelens snapshot could not be read: {error}");
+                }
+            }
+        }
+        Ok(_) => {
+            insights.trend_note = "No saved snapshot is available. Run `codelens trend --save` once, then regenerate this report to see historical changes.".to_string();
+        }
+        Err(error) => {
+            insights.trend_note = format!("Codelens snapshots could not be read: {error}");
+        }
+    }
+
+    insights
 }
 
 pub(crate) fn list_languages(languages_file: Option<&Path>) -> Result<()> {
@@ -429,6 +578,52 @@ fn write_report(report: Report, output: &codelens_core::config::OutputConfig) ->
         let stdout = io::stdout();
         let mut writer = stdout.lock();
         formatter.write(&report, &output_options, &mut writer)?;
+    }
+    Ok(())
+}
+
+fn write_combined_html_dashboard(
+    combined: &codelens_core::output::CombinedReport,
+    insights: &DefaultHtmlInsights,
+    output: &codelens_core::config::OutputConfig,
+) -> Result<()> {
+    let output_options = report_output_options(output);
+    let formatter = codelens_core::output::HtmlOutput::new();
+
+    if output.quiet && output.file.is_none() {
+        return Ok(());
+    }
+
+    if let Some(ref path) = output.file {
+        let file = File::create(path).context("Failed to create output file")?;
+        let mut writer = BufWriter::new(file);
+        formatter.write_combined_dashboard(
+            combined,
+            insights.hotspot.as_ref(),
+            insights.coupling.as_ref(),
+            insights.trend.as_ref(),
+            &insights.git_history_note,
+            &insights.trend_note,
+            &output_options,
+            &mut writer,
+        )?;
+        writer.flush()?;
+        if !output.quiet {
+            println!("Output written to: {}", path.display().to_string().green());
+        }
+    } else {
+        let stdout = io::stdout();
+        let mut writer = stdout.lock();
+        formatter.write_combined_dashboard(
+            combined,
+            insights.hotspot.as_ref(),
+            insights.coupling.as_ref(),
+            insights.trend.as_ref(),
+            &insights.git_history_note,
+            &insights.trend_note,
+            &output_options,
+            &mut writer,
+        )?;
     }
     Ok(())
 }

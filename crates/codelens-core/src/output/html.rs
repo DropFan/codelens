@@ -476,6 +476,23 @@ struct CombinedHtmlReport<'a> {
     worst_directories: Vec<HtmlDirectoryHealth>,
     worst_files: Vec<HtmlFileHealth>,
     priority_files: Vec<HtmlFileHealth>,
+    show_history_sections: bool,
+    git_history_note: String,
+    hotspot_since: String,
+    hotspot_total_commits: usize,
+    hotspots: Vec<HtmlFileHotspot>,
+    coupling_since: String,
+    coupling_total_commits: usize,
+    coupling_excluded_test_files: usize,
+    coupling_pairs: Vec<HtmlCouplingPair>,
+    trend_note: String,
+    trend_available: bool,
+    trend_from_date: String,
+    trend_from_label: String,
+    trend_to_date: String,
+    trend_metrics: Vec<HtmlTrendMetric>,
+    trend_languages: Vec<HtmlLanguageTrend>,
+    trend_history: Vec<HtmlHistoryPoint>,
     total_sloc: usize,
     cost_scope: String,
     traditional_estimation_rows: Vec<HtmlCombinedEstimationRow>,
@@ -489,6 +506,36 @@ pub struct HtmlOutput;
 impl HtmlOutput {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Render the default HTML report with optional Git and snapshot history.
+    ///
+    /// This entry point is used by the CLI's default HTML command. Other
+    /// output formats keep the stable `CombinedReport` schema unchanged.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_combined_dashboard(
+        &self,
+        combined: &crate::output::format::CombinedReport,
+        hotspot: Option<&crate::insight::hotspot::HotspotReport>,
+        coupling: Option<&crate::insight::coupling::CouplingReport>,
+        trend: Option<&crate::insight::trend::TrendReport>,
+        git_history_note: &str,
+        trend_note: &str,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        self.write_combined_report(
+            combined,
+            hotspot,
+            coupling,
+            trend,
+            git_history_note,
+            trend_note,
+            true,
+            options,
+            writer,
+        )
     }
 }
 
@@ -565,6 +612,22 @@ impl HtmlOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        self.write_combined_report(combined, None, None, None, "", "", false, options, writer)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn write_combined_report(
+        &self,
+        combined: &crate::output::format::CombinedReport,
+        hotspot: Option<&crate::insight::hotspot::HotspotReport>,
+        coupling: Option<&crate::insight::coupling::CouplingReport>,
+        trend: Option<&crate::insight::trend::TrendReport>,
+        git_history_note: &str,
+        trend_note: &str,
+        show_history_sections: bool,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
         let result = &combined.analysis;
         let health = &combined.health;
         let estimation = &combined.estimation;
@@ -615,6 +678,126 @@ impl HtmlOutput {
             .collect::<Vec<_>>()
             .join(", ");
 
+        let hotspots = hotspot
+            .map(|report| {
+                report
+                    .files
+                    .iter()
+                    .map(|file| HtmlFileHotspot {
+                        path: file.path.display().to_string(),
+                        language: file.language.clone(),
+                        commits: file.churn.commits,
+                        lines_added: file.churn.lines_added,
+                        lines_deleted: file.churn.lines_deleted,
+                        cyclomatic: file.complexity.cyclomatic,
+                        age: file
+                            .age_days
+                            .map(crate::insight::hotspot::format_age)
+                            .unwrap_or_else(|| "-".to_string()),
+                        authors: match &file.knowledge {
+                            Some(knowledge) if knowledge.knowledge_island => format!(
+                                "{} · {} {:.0}% · knowledge island",
+                                knowledge.authors,
+                                knowledge.main_author,
+                                knowledge.ownership * 100.0
+                            ),
+                            Some(knowledge) => knowledge.authors.to_string(),
+                            None => "-".to_string(),
+                        },
+                        score_display: format!("{:.2}", file.hotspot_score),
+                        score_pct: (file.hotspot_score * 100.0) as u32,
+                        risk: file.risk.to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let coupling_pairs = coupling
+            .map(|report| {
+                report
+                    .pairs
+                    .iter()
+                    .map(|pair| HtmlCouplingPair {
+                        file_a: pair.file_a.display().to_string(),
+                        file_b: pair.file_b.display().to_string(),
+                        shared_commits: pair.shared_commits,
+                        commits_a: pair.commits_a,
+                        commits_b: pair.commits_b,
+                        degree_display: format!("{:.0}%", pair.degree),
+                        degree_pct: pair.degree.clamp(0.0, 100.0) as u32,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let make_trend_metric =
+            |label: &str, delta: &crate::insight::DeltaValue<usize>| -> HtmlTrendMetric {
+                let signed_delta = delta.signed_delta();
+                HtmlTrendMetric {
+                    label: label.to_string(),
+                    from_value: delta.from,
+                    to_value: delta.to,
+                    signed_delta,
+                    delta_display: if signed_delta >= 0 {
+                        format!("+{signed_delta}")
+                    } else {
+                        signed_delta.to_string()
+                    },
+                    percent_display: format!("{:+.1}%", delta.percent),
+                }
+            };
+        let trend_metrics = trend
+            .map(|report| {
+                vec![
+                    make_trend_metric("Files", &report.delta.files),
+                    make_trend_metric("Code lines", &report.delta.code),
+                    make_trend_metric("Complexity", &report.delta.complexity),
+                    make_trend_metric("Functions", &report.delta.functions),
+                ]
+            })
+            .unwrap_or_default();
+        let mut trend_languages = trend
+            .map(|report| {
+                report
+                    .by_language
+                    .iter()
+                    .map(|language| {
+                        let signed_delta = language.code.signed_delta();
+                        HtmlLanguageTrend {
+                            language: language.language.clone(),
+                            status: language.status.to_string(),
+                            code_from: language.code.from,
+                            code_to: language.code.to,
+                            code_delta: signed_delta,
+                            code_delta_display: if signed_delta >= 0 {
+                                format!("+{signed_delta}")
+                            } else {
+                                signed_delta.to_string()
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Some(top_n) = options.top_n {
+            trend_languages.truncate(top_n);
+        }
+        let trend_history = trend
+            .filter(|report| report.history.len() >= 2)
+            .map(|report| {
+                report
+                    .history
+                    .iter()
+                    .map(|point| HtmlHistoryPoint {
+                        date: point.timestamp.format("%Y-%m-%d").to_string(),
+                        label: point.label.clone().unwrap_or_default(),
+                        code: point.code,
+                        cyclomatic: point.cyclomatic,
+                        files: point.files,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let html = CombinedHtmlReport {
             title: "Codelens - Code Analysis Report",
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -657,6 +840,31 @@ impl HtmlOutput {
                 .collect(),
             worst_files,
             priority_files,
+            show_history_sections,
+            git_history_note: git_history_note.to_string(),
+            hotspot_since: hotspot.map(|report| report.since.clone()).unwrap_or_default(),
+            hotspot_total_commits: hotspot.map(|report| report.total_commits).unwrap_or(0),
+            hotspots,
+            coupling_since: coupling.map(|report| report.since.clone()).unwrap_or_default(),
+            coupling_total_commits: coupling.map(|report| report.total_commits).unwrap_or(0),
+            coupling_excluded_test_files: coupling
+                .map(|report| report.excluded_test_files)
+                .unwrap_or(0),
+            coupling_pairs,
+            trend_note: trend_note.to_string(),
+            trend_available: trend.is_some(),
+            trend_from_date: trend
+                .map(|report| report.from.timestamp.format("%Y-%m-%d").to_string())
+                .unwrap_or_default(),
+            trend_from_label: trend
+                .and_then(|report| report.from.label.clone())
+                .unwrap_or_default(),
+            trend_to_date: trend
+                .map(|report| report.to.timestamp.format("%Y-%m-%d").to_string())
+                .unwrap_or_default(),
+            trend_metrics,
+            trend_languages,
+            trend_history,
             total_sloc: estimation.total_sloc,
             cost_scope: format!(
                 "All {} counted SLOC across recognized files, including tests and counted documentation or configuration formats. Counted languages: {}.",
@@ -1223,6 +1431,104 @@ mod tests {
         String::from_utf8(output).unwrap()
     }
 
+    fn render_combined_dashboard(combined: crate::output::format::CombinedReport) -> String {
+        use crate::analyzer::stats::Complexity;
+        use crate::insight::coupling::{CouplingPair, CouplingReport};
+        use crate::insight::hotspot::{ChurnMetrics, FileHotspot, HotspotReport, RiskLevel};
+        use crate::insight::trend::{HistoryPoint, SnapshotMeta, TrendReport};
+
+        let hotspot = HotspotReport {
+            files: vec![FileHotspot {
+                path: PathBuf::from("src/lib.rs"),
+                language: "Rust".to_string(),
+                churn: ChurnMetrics {
+                    commits: 12,
+                    lines_added: 80,
+                    lines_deleted: 20,
+                    lines_churn: 100,
+                },
+                complexity: Complexity {
+                    cyclomatic: 18,
+                    ..Complexity::default()
+                },
+                hotspot_score: 0.72,
+                risk: RiskLevel::High,
+                age_days: Some(200),
+                knowledge: None,
+                functions: None,
+            }],
+            since: "90d".to_string(),
+            total_commits: 24,
+        };
+        let coupling = CouplingReport {
+            pairs: vec![CouplingPair {
+                file_a: PathBuf::from("src/lib.rs"),
+                file_b: PathBuf::from("src/output.rs"),
+                shared_commits: 8,
+                commits_a: 12,
+                commits_b: 10,
+                degree: 72.7,
+            }],
+            since: "90d".to_string(),
+            total_commits: 24,
+            skipped_large_commits: 0,
+            excluded_test_files: 2,
+            focus: None,
+        };
+        let (delta, by_language) = crate::insight::trend::compute_delta(
+            &combined.analysis.summary,
+            &combined.analysis.summary,
+        );
+        let now = chrono::Utc::now();
+        let trend = TrendReport {
+            from: SnapshotMeta {
+                timestamp: now - chrono::Duration::days(7),
+                label: Some("before".to_string()),
+                git_commit: None,
+                file_path: PathBuf::from("before.json"),
+            },
+            to: SnapshotMeta {
+                timestamp: now,
+                label: Some("Current".to_string()),
+                git_commit: None,
+                file_path: PathBuf::new(),
+            },
+            delta,
+            by_language,
+            history: vec![
+                HistoryPoint {
+                    timestamp: now - chrono::Duration::days(7),
+                    label: Some("before".to_string()),
+                    files: 1,
+                    code: 90,
+                    cyclomatic: 15,
+                },
+                HistoryPoint {
+                    timestamp: now,
+                    label: Some("Current".to_string()),
+                    files: 1,
+                    code: 100,
+                    cyclomatic: 18,
+                },
+            ],
+        };
+
+        let mut output = Vec::new();
+        HtmlOutput::new()
+            .write_combined_dashboard(
+                &combined,
+                Some(&hotspot),
+                Some(&coupling),
+                Some(&trend),
+                "",
+                "",
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        String::from_utf8(output).unwrap()
+    }
+
     #[test]
     fn combined_html_is_one_complete_document() {
         let html = render_combined(representative_combined_report());
@@ -1265,7 +1571,7 @@ mod tests {
         assert!(html.contains("src/analyzer/counter.rs"));
         assert!(html.contains("Test code health"));
         assert!(html.contains("Needs attention"));
-        assert!(html.contains("Current snapshot only"));
+        assert!(html.contains("The health score is a current snapshot"));
         assert!(html.contains("Priority Checks"));
         assert!(html.contains("Why this file:"));
         assert!(html.contains("Suggested check:"));
@@ -1280,6 +1586,20 @@ mod tests {
         assert!(overview < health);
         assert!(health < languages);
         assert!(languages < cost);
+    }
+
+    #[test]
+    fn combined_dashboard_includes_git_and_snapshot_history() {
+        let html = render_combined_dashboard(representative_combined_report());
+
+        assert!(html.contains("Change Hotspots"));
+        assert!(html.contains("src/lib.rs"));
+        assert!(html.contains("Change Coupling"));
+        assert!(html.contains("src/output.rs"));
+        assert!(html.contains("Historical Change"));
+        assert!(html.contains("Snapshot history"));
+        assert!(html.contains("before"));
+        assert!(html.contains("historyChart"));
     }
 
     #[test]

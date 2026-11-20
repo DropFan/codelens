@@ -119,6 +119,14 @@
         .priority-card .focus-command { margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid var(--border); }
         .next-steps { max-width: 78ch; margin: 0; padding-left: 1.25rem; }
         .next-steps li { margin: 0.55rem 0; }
+        .section-summary { margin: 0.65rem 0 1rem; color: var(--text-secondary); font-size: 0.88rem; }
+        .availability-note { max-width: 78ch; margin-top: 1rem; padding: 0.9rem 0; color: var(--text-secondary); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .risk-high { color: var(--accent-red); font-weight: 620; }
+        .risk-med { color: var(--accent-yellow); font-weight: 620; }
+        .risk-low { color: var(--accent-green); }
+        .trend-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .trend-grid .delta { margin-top: 0.35rem; color: var(--text-secondary); font-size: 0.82rem; }
+        .history-range { margin: 0.7rem 0 1rem; color: var(--text-secondary); }
         code { color: var(--accent-blue); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.92em; overflow-wrap: anywhere; }
         .progress-bar { min-width: 70px; height: 4px; overflow: hidden; background: var(--bg-tertiary); }
         .progress-bar .fill { height: 100%; background: var(--accent-blue); }
@@ -185,6 +193,11 @@
                 <a href="#project-overview">Project overview</a>
                 <a href="#health-summary">Decision</a>
                 <a href="#priority-checks">Priority checks</a>
+                {% if show_history_sections %}
+                <a href="#hotspots">Hotspots</a>
+                <a href="#coupling">Coupling</a>
+                <a href="#history">History</a>
+                {% endif %}
                 <a href="#dimensions">Health evidence</a>
                 <a href="#language-breakdown">Language breakdown</a>
                 <a href="#cost-estimation">Additional estimates</a>
@@ -210,7 +223,7 @@
             <div class="decision-banner {{ health_decision_tone }}">
                 <span class="status-label">{{ health_decision_label }}</span>
                 <p class="decision-summary">{{ health_decision_summary }}</p>
-                <p class="snapshot-note">Current snapshot only. This report does not claim whether health improved or regressed. Use <code>codelens health . --baseline &lt;ref&gt;</code> or <code>codelens diff &lt;base&gt;</code> for a comparison.</p>
+                <p class="snapshot-note">The health score is a current snapshot. Historical Change compares size and complexity when a saved snapshot exists; use <code>codelens health . --baseline &lt;ref&gt;</code> or <code>codelens diff &lt;base&gt;</code> to check health regression.</p>
             </div>
             <div class="health-hero">
                 <div class="grade-panel">
@@ -263,6 +276,108 @@
                 <li>Use a baseline or <code>codelens diff &lt;base&gt;</code> to verify that a change improved health without creating a regression elsewhere.</li>
             </ol>
         </section>
+
+        {% if show_history_sections %}
+        <section class="report-block" aria-labelledby="hotspots">
+            <h2 id="hotspots">Change Hotspots</h2>
+            <p class="scope-note">Files that combine frequent changes with high complexity deserve extra care during review.</p>
+            {% if !git_history_note.is_empty() %}
+            <p class="availability-note">{{ git_history_note }}</p>
+            {% else %}
+            <p class="section-summary">Last {{ hotspot_since }} · {{ hotspot_total_commits }} commits · {{ hotspots.len() }} files shown</p>
+            {% if !hotspots.is_empty() %}
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>File</th><th>Commits</th><th>Complexity</th><th>Age</th><th>Authors</th><th>Score</th><th>Risk</th></tr></thead>
+                    <tbody>
+                    {% for hotspot in hotspots %}
+                    <tr>
+                        <td><code>{{ hotspot.path }}</code></td>
+                        <td>{{ hotspot.commits }}</td>
+                        <td>{{ hotspot.cyclomatic }}</td>
+                        <td>{{ hotspot.age }}</td>
+                        <td>{{ hotspot.authors }}</td>
+                        <td>{{ hotspot.score_display }}</td>
+                        <td class="{% if hotspot.risk == "HIGH" %}risk-high{% else if hotspot.risk == "MED" %}risk-med{% else %}risk-low{% endif %}">{{ hotspot.risk }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="availability-note">No files met the hotspot threshold in this time window.</p>
+            {% endif %}
+            {% endif %}
+        </section>
+
+        <section class="report-block" aria-labelledby="coupling">
+            <h2 id="coupling">Change Coupling</h2>
+            <p class="scope-note">Files repeatedly changed in the same commit may share a dependency that is not obvious from the directory structure.</p>
+            {% if !git_history_note.is_empty() %}
+            <p class="availability-note">{{ git_history_note }}</p>
+            {% else %}
+            <p class="section-summary">Last {{ coupling_since }} · {{ coupling_total_commits }} commits · {{ coupling_excluded_test_files }} test files excluded</p>
+            {% if !coupling_pairs.is_empty() %}
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>File A</th><th>File B</th><th>Shared commits</th><th>Individual commits</th><th>Coupling</th></tr></thead>
+                    <tbody>
+                    {% for pair in coupling_pairs %}
+                    <tr>
+                        <td><code>{{ pair.file_a }}</code></td>
+                        <td><code>{{ pair.file_b }}</code></td>
+                        <td>{{ pair.shared_commits }}</td>
+                        <td>{{ pair.commits_a }} / {{ pair.commits_b }}</td>
+                        <td>{{ pair.degree_display }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="availability-note">No file pairs met the default thresholds of 5 shared commits and 30% coupling.</p>
+            {% endif %}
+            {% endif %}
+        </section>
+
+        <section class="report-block" aria-labelledby="history">
+            <h2 id="history">Historical Change</h2>
+            <p class="scope-note">Changes from the latest saved Codelens snapshot to the current scan.</p>
+            {% if trend_available %}
+            <p class="history-range">{{ trend_from_date }}{% if !trend_from_label.is_empty() %} · {{ trend_from_label }}{% endif %} → {{ trend_to_date }} · Current</p>
+            <div class="stats-grid trend-grid">
+                {% for metric in trend_metrics %}
+                <div class="stat-card">
+                    <div class="value">{{ metric.to_value }}</div>
+                    <div class="label">{{ metric.label }}</div>
+                    <div class="delta">{{ metric.delta_display }} · {{ metric.percent_display }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% if !trend_history.is_empty() %}
+            <div class="chart-container" style="margin-top: 1.5rem;">
+                <h3>Snapshot history</h3>
+                <canvas id="historyChart" role="img" aria-label="Project snapshot history chart">Snapshot history is summarized in the metrics and tables.</canvas>
+            </div>
+            {% endif %}
+            {% if !trend_languages.is_empty() %}
+            <h3>Code change by language</h3>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Language</th><th>Status</th><th>Before</th><th>Current</th><th>Delta</th></tr></thead>
+                    <tbody>
+                    {% for language in trend_languages %}
+                    <tr><td><strong>{{ language.language }}</strong></td><td>{{ language.status }}</td><td>{{ language.code_from }}</td><td>{{ language.code_to }}</td><td>{{ language.code_delta_display }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            {% else %}
+            <p class="availability-note">{{ trend_note }}</p>
+            {% endif %}
+        </section>
+        {% endif %}
 
         <section class="report-block" aria-labelledby="dimensions">
             <h2 id="dimensions">Health Dimensions</h2>
@@ -398,7 +513,8 @@
         <section class="report-block panel" aria-labelledby="methodology">
             <h2 id="methodology">How to Read This Report</h2>
             <ul class="assumptions">
-                <li>The default combined report is a current snapshot. It does not include Git-history hotspots, change coupling, or a baseline comparison.</li>
+                <li>The health score is a current snapshot. Hotspots and coupling use the last 90 days of Git history when available.</li>
+                <li>Historical Change compares the latest saved Codelens snapshot with the current scan; it is not a health regression check.</li>
                 <li>Health scores identify code that deserves inspection. They do not prove that a specific refactor is correct.</li>
                 <li>Compare reports only when the health model and analysis scope match. Scope or model changes can move the score without a code-quality change.</li>
                 <li>Charts are optional. The complete result remains available in text and tables for offline reading and printing.</li>
@@ -453,6 +569,37 @@
 
         if (typeof Chart !== 'undefined') {
             const initialChartTheme = chartTheme();
+            {% if show_history_sections %}
+            {% if trend_available %}
+            {% if !trend_history.is_empty() %}
+            const historyData = [
+                {% for point in trend_history %}
+                { date: "{{ point.date }}", code: {{ point.code }}, complexity: {{ point.cyclomatic }} },
+                {% endfor %}
+            ];
+            reportCharts.push(new Chart(document.getElementById('historyChart'), {
+                type: 'line',
+                data: {
+                    labels: historyData.map(point => point.date),
+                    datasets: [
+                        { label: 'Code lines', data: historyData.map(point => point.code), borderColor: '#769fc4', backgroundColor: '#769fc426', tension: 0.15, yAxisID: 'y' },
+                        { label: 'Complexity', data: historyData.map(point => point.complexity), borderColor: '#b29a68', backgroundColor: '#b29a6826', tension: 0.15, yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: { position: 'left', ticks: { color: initialChartTheme.secondary }, grid: { color: initialChartTheme.border } },
+                        y1: { position: 'right', ticks: { color: initialChartTheme.secondary }, grid: { drawOnChartArea: false } },
+                        x: { ticks: { color: initialChartTheme.secondary }, grid: { display: false } }
+                    },
+                    plugins: { legend: { labels: { color: initialChartTheme.primary } } }
+                }
+            }));
+            {% endif %}
+            {% endif %}
+            {% endif %}
             const langData = [
                 {% for (name, stats) in by_language %}
                 { name: "{{ name }}", code: {{ stats.lines.code }} },
