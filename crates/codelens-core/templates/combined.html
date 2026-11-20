@@ -4,145 +4,165 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
+    <script>
+        (() => {
+            let savedTheme = null;
+            try { savedTheme = localStorage.getItem('codelens-theme'); } catch (_) {}
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.dataset.theme = savedTheme === 'light' || savedTheme === 'dark'
+                ? savedTheme
+                : (prefersDark ? 'dark' : 'light');
+        })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --text-primary: #f0f6fc;
-            --text-secondary: #8b949e;
-            --accent-blue: #58a6ff;
-            --accent-green: #3fb950;
-            --accent-yellow: #d29922;
-            --accent-purple: #a371f7;
-            --accent-red: #f85149;
+            color-scheme: light;
+            --bg-primary: #f7f8fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #eceff3;
+            --border: #d7dce2;
+            --border-strong: #b9c0c9;
+            --text-primary: #20242a;
+            --text-secondary: #626a75;
+            --accent-blue: #356f9d;
+            --accent-green: #397d4c;
+            --accent-yellow: #86671f;
+            --accent-orange: #a4542f;
+            --accent-red: #ad4141;
+        }
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --bg-primary: #101214;
+            --bg-secondary: #15181c;
+            --bg-tertiary: #1b1f24;
+            --border: #2b3037;
+            --border-strong: #3a414a;
+            --text-primary: #e7e9ec;
+            --text-secondary: #969da7;
+            --accent-blue: #8ab4dc;
+            --accent-green: #69a979;
+            --accent-yellow: #c4a15e;
+            --accent-orange: #c47d55;
+            --accent-red: #c96868;
         }
         * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 15px;
+            line-height: 1.55;
             color: var(--text-primary);
-            line-height: 1.6;
+            background: var(--bg-primary);
         }
-        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
-        header { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--bg-tertiary); }
-        header h1 {
-            margin: 0;
-            font-size: 2.25rem;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        h2 { margin: 0 0 1rem; }
-        h3 { margin: 1.5rem 0 0.75rem; }
+        .container { width: min(100% - 3rem, 1240px); margin: 0 auto; }
+        header { margin-bottom: 2.75rem; padding: 2.75rem 0 1.4rem; border-bottom: 1px solid var(--border); }
+        .header-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1.5rem; }
+        header h1 { margin: 0; font-size: clamp(1.9rem, 4vw, 2.5rem); font-weight: 620; letter-spacing: -0.035em; }
+        .theme-toggle { flex: none; padding: 0.42rem 0.68rem; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 0.82rem; cursor: pointer; }
+        .theme-toggle:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        h2 { margin: 0 0 0.85rem; font-size: 1.35rem; font-weight: 620; letter-spacing: -0.015em; }
+        h3 { margin: 1.65rem 0 0.7rem; font-size: 1.02rem; font-weight: 620; }
+        p { max-width: 78ch; }
         .muted, .scope-note { color: var(--text-secondary); }
-        .report-nav { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; margin-top: 1rem; }
-        .report-nav a { font-size: 0.9rem; text-decoration: none; }
-        .report-block { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--bg-tertiary); }
-        .decision-banner {
-            margin-bottom: 1.25rem;
-            padding: 1.15rem 1.25rem;
-            border: 1px solid var(--bg-tertiary);
-            border-left: 4px solid var(--accent-yellow);
-            border-radius: 10px;
-            background: var(--bg-secondary);
-        }
-        .decision-banner.good { border-left-color: var(--accent-green); }
-        .decision-banner.warning { border-left-color: var(--accent-red); }
-        .decision-banner.neutral { border-left-color: var(--accent-blue); }
-        .status-label { display: inline-block; margin-bottom: 0.4rem; font-weight: 700; }
-        .decision-summary { margin: 0; font-size: 1.05rem; }
-        .snapshot-note { margin: 0.65rem 0 0; color: var(--text-secondary); font-size: 0.9rem; }
-        .health-hero {
-            display: grid;
-            grid-template-columns: minmax(160px, 0.35fr) minmax(280px, 1fr);
-            gap: 1.5rem;
-            align-items: stretch;
-            margin-bottom: 1.5rem;
-        }
-        .grade-panel, .panel, .stat-card, details {
-            background: var(--bg-secondary);
-            border: 1px solid var(--bg-tertiary);
-            border-radius: 12px;
-        }
-        .grade-panel { display: grid; place-items: center; padding: 1.5rem; text-align: center; }
-        .grade-badge {
-            display: inline-grid;
-            place-items: center;
-            min-width: 88px;
-            min-height: 88px;
-            padding: 0.5rem;
-            border: 3px solid currentColor;
-            border-radius: 50%;
-            font-size: 3rem;
-            font-weight: 700;
-        }
+        .report-nav { display: flex; flex-wrap: wrap; gap: 0.55rem 1.25rem; margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+        .report-nav a { color: var(--text-secondary); font-size: 0.88rem; text-decoration: none; }
+        .report-nav a:hover { color: var(--text-primary); }
+        .report-block { margin-top: 3.5rem; padding-top: 2.5rem; border-top: 1px solid var(--border); }
+        .decision-banner { margin: 1.2rem 0 1.5rem; padding: 1rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .decision-banner.good .status-label { color: var(--accent-green); }
+        .decision-banner.warning .status-label { color: var(--accent-red); }
+        .decision-banner.neutral .status-label { color: var(--accent-blue); }
+        .status-label { display: inline-block; margin-bottom: 0.35rem; font-weight: 650; }
+        .decision-summary { margin: 0; font-size: 1.02rem; }
+        .snapshot-note { margin: 0.6rem 0 0; color: var(--text-secondary); font-size: 0.88rem; }
+        .health-hero { display: grid; grid-template-columns: minmax(160px, 0.3fr) minmax(280px, 1fr); margin-bottom: 1.5rem; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .grade-panel { display: grid; place-items: center; padding: 1.5rem; text-align: center; border-right: 1px solid var(--border); }
+        .grade-badge { font-size: 4rem; font-weight: 650; line-height: 1; letter-spacing: -0.06em; }
         .grade-A { color: var(--accent-green); }
         .grade-B { color: var(--accent-blue); }
         .grade-C { color: var(--accent-yellow); }
-        .grade-D { color: #f0883e; }
+        .grade-D { color: var(--accent-orange); }
         .grade-F { color: var(--accent-red); }
-        .score { margin-top: 0.75rem; font-size: 1.15rem; font-weight: 600; }
-        .panel { padding: 1.25rem; }
-        .summary-grid, .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 1rem;
-        }
-        .overview-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-        .summary-item { padding: 0.8rem; border-left: 3px solid var(--accent-blue); }
-        .summary-item strong { display: block; font-size: 1.1rem; }
-        .summary-item span { color: var(--text-secondary); font-size: 0.9rem; }
-        .priority-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
-        .priority-card { padding: 1.1rem 1.2rem; border: 1px solid var(--bg-tertiary); border-radius: 10px; background: var(--bg-secondary); }
-        .priority-card h3 { margin: 0 0 0.75rem; font-size: 1rem; overflow-wrap: anywhere; }
-        .priority-card p { margin: 0.55rem 0; }
+        .score { margin-top: 0.65rem; color: var(--text-secondary); font-size: 0.95rem; font-weight: 600; }
+        .panel { padding: 1rem 1.5rem; }
+        .summary-grid, .stats-grid { display: grid; }
+        .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 1.5rem; }
+        .summary-item { padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+        .summary-item strong { display: block; font-size: 1.05rem; font-weight: 620; overflow-wrap: anywhere; }
+        .summary-item span { color: var(--text-secondary); font-size: 0.84rem; }
+        .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem 1.5rem; }
+        .overview-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .stat-card { padding: 1rem 0; border-top: 1px solid var(--border); text-align: left; }
+        .overview-grid .stat-card { padding: 1.1rem 1rem; border-top: 0; border-right: 1px solid var(--border); }
+        .overview-grid .stat-card:first-child { padding-left: 0; }
+        .overview-grid .stat-card:last-child { border-right: 0; }
+        .stat-card .value { font-size: 1.65rem; font-weight: 620; letter-spacing: -0.025em; }
+        .stat-card .label { margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.85rem; }
+        .dimension-explanation { margin: 0.5rem 0 0; color: var(--text-secondary); font-size: 0.84rem; }
+        [data-grade="A"] .value, [data-grade="A"] .label { color: var(--accent-green); }
+        [data-grade="B"] .value, [data-grade="B"] .label { color: var(--accent-blue); }
+        [data-grade="C"] .value, [data-grade="C"] .label { color: var(--accent-yellow); }
+        [data-grade="D"] .value, [data-grade="D"] .label { color: var(--accent-orange); }
+        [data-grade="F"] .value, [data-grade="F"] .label { color: var(--accent-red); }
+        [data-grade="A"] .fill { background: var(--accent-green); }
+        [data-grade="B"] .fill { background: var(--accent-blue); }
+        [data-grade="C"] .fill { background: var(--accent-yellow); }
+        [data-grade="D"] .fill { background: var(--accent-orange); }
+        [data-grade="F"] .fill { background: var(--accent-red); }
+        .priority-grid { border-top: 1px solid var(--border); }
+        .priority-card { padding: 1.2rem 0; border-bottom: 1px solid var(--border); }
+        .priority-card h3 { margin: 0 0 0.7rem; font-size: 0.98rem; overflow-wrap: anywhere; }
+        .priority-card p { margin: 0.45rem 0; }
         .priority-card .signal { color: var(--text-secondary); }
-        .priority-card .focus-command { margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--bg-tertiary); }
-        .next-steps { margin: 0; padding-left: 1.25rem; }
-        .next-steps li { margin: 0.6rem 0; }
-        code { color: #79c0ff; overflow-wrap: anywhere; }
-        .stat-card { padding: 1.2rem; text-align: center; }
-        .stat-card .value { font-size: 1.7rem; font-weight: 700; color: var(--accent-green); }
-        .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.35rem; }
-        .dimension-explanation { margin: 0.55rem 0 0; color: var(--text-secondary); font-size: 0.85rem; text-align: left; }
-        .progress-bar { min-width: 70px; height: 8px; overflow: hidden; border-radius: 4px; background: var(--bg-tertiary); }
-        .progress-bar .fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
+        .priority-card .focus-command { margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid var(--border); }
+        .next-steps { max-width: 78ch; margin: 0; padding-left: 1.25rem; }
+        .next-steps li { margin: 0.55rem 0; }
+        code { color: var(--accent-blue); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.92em; overflow-wrap: anywhere; }
+        .progress-bar { min-width: 70px; height: 4px; overflow: hidden; background: var(--bg-tertiary); }
+        .progress-bar .fill { height: 100%; background: var(--accent-blue); }
         .table-scroll { max-width: 100%; overflow-x: auto; margin-bottom: 1.5rem; }
-        table { width: 100%; min-width: 680px; border-collapse: collapse; background: var(--bg-secondary); }
-        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
-        th { background: var(--bg-tertiary); color: var(--text-secondary); }
-        tr:hover { background: var(--bg-tertiary); }
-        .charts-section {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin: 1.5rem 0;
-        }
-        .chart-container { min-width: 0; padding: 1.25rem; border: 1px solid var(--bg-tertiary); border-radius: 12px; background: var(--bg-secondary); }
-        .chart-note { margin: 0.75rem 0 0; color: var(--text-secondary); font-size: 0.9rem; }
-        details { padding: 1rem 1.25rem; }
-        summary { cursor: pointer; font-weight: 700; }
-        .assumptions { margin: 0; padding-left: 1.1rem; color: var(--text-secondary); }
-        footer { margin-top: 3rem; padding: 1.5rem 0; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); }
-        a { color: var(--accent-blue); }
+        table { width: 100%; min-width: 680px; border-collapse: collapse; }
+        th, td { padding: 0.75rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-secondary); font-size: 0.8rem; font-weight: 620; border-top: 1px solid var(--border-strong); }
+        tbody tr:hover { background: var(--bg-secondary); }
+        .charts-section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .chart-container { min-width: 0; padding: 1.15rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); }
+        .chart-container h3 { margin-top: 0; }
+        .chart-note { margin: 0.75rem 0 0; color: var(--text-secondary); font-size: 0.86rem; }
+        details { padding: 1rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        summary { cursor: pointer; font-weight: 620; }
+        .assumptions { max-width: 78ch; margin: 0; padding-left: 1.1rem; color: var(--text-secondary); }
+        .report-block.panel { padding: 2.5rem 0 0; }
+        footer { margin-top: 3.5rem; padding: 1.5rem 0 2.5rem; color: var(--text-secondary); border-top: 1px solid var(--border); font-size: 0.88rem; }
+        a { color: var(--accent-blue); text-underline-offset: 0.18em; }
+        a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
         @media (max-width: 720px) {
-            .container { padding: 1rem; }
+            .container { width: min(100% - 2rem, 1240px); }
+            header { padding-top: 1.75rem; }
             .health-hero { grid-template-columns: 1fr; }
+            .grade-panel { border-right: 0; border-bottom: 1px solid var(--border); }
+            .summary-grid, .stats-grid { grid-template-columns: 1fr; }
             .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            header h1 { font-size: 1.75rem; }
+            .overview-grid .stat-card { border-bottom: 1px solid var(--border); }
+            .overview-grid .stat-card:nth-child(2n) { border-right: 0; }
+            .overview-grid .stat-card:nth-last-child(-n + 2) { border-bottom: 0; }
+            .charts-section { grid-template-columns: 1fr; }
         }
         @media (min-width: 721px) and (max-width: 1080px) {
+            .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .overview-grid .stat-card:nth-child(3) { border-right: 0; }
+            .overview-grid .stat-card:nth-child(-n + 3) { border-bottom: 1px solid var(--border); }
         }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
         @media print {
-            :root { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #ddd; --text-primary: #111; --text-secondary: #444; }
+            :root, :root[data-theme="dark"] { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #f2f2f2; --border: #ccc; --border-strong: #999; --text-primary: #111; --text-secondary: #444; }
             body { background: #fff; color: #111; font-size: 10pt; }
-            .container { max-width: none; padding: 0; }
-            header h1 { background: none; -webkit-text-fill-color: #111; color: #111; }
+            .container { width: 100%; max-width: none; }
+            .theme-toggle { display: none; }
             .report-block { break-before: auto; }
             .panel, .stat-card, .grade-panel, .priority-card, details { break-inside: avoid; }
             details { display: block; }
@@ -156,7 +176,10 @@
 <body>
     <main class="container">
         <header>
-            <h1>{{ title }}</h1>
+            <div class="header-row">
+                <h1>{{ title }}</h1>
+                <button class="theme-toggle" id="theme-toggle" type="button">Light mode</button>
+            </div>
             <p class="muted">Generated {{ generated_at }} by <a href="https://github.com/DropFan/codelens">Codelens</a> {{ tool_version }}</p>
             <nav class="report-nav" aria-label="Report sections">
                 <a href="#project-overview">Project overview</a>
@@ -243,9 +266,9 @@
 
         <section class="report-block" aria-labelledby="dimensions">
             <h2 id="dimensions">Health Dimensions</h2>
-            <div class="stats-grid">
+            <div class="stats-grid dimension-grid">
                 {% for dim in dimensions %}
-                <div class="stat-card">
+                <div class="stat-card" data-grade="{{ dim.grade }}">
                     <div class="value">{{ dim.score_display }}</div>
                     <div class="label">{{ dim.dimension }} — grade {{ dim.grade }}</div>
                     <div class="progress-bar" style="margin-top: 0.5rem"><div class="fill" style="width: {{ dim.score_display }}%"></div></div>
@@ -389,35 +412,75 @@
     </main>
 
     <script>
+        const reportRoot = document.documentElement;
+        const themeToggle = document.getElementById('theme-toggle');
+        const reportCharts = [];
+        const chartTheme = () => {
+            const styles = getComputedStyle(reportRoot);
+            return {
+                primary: styles.getPropertyValue('--text-primary').trim(),
+                secondary: styles.getPropertyValue('--text-secondary').trim(),
+                border: styles.getPropertyValue('--border').trim()
+            };
+        };
+        const refreshChartTheme = () => {
+            const colors = chartTheme();
+            reportCharts.forEach(chart => {
+                const legendLabels = chart.options.plugins && chart.options.plugins.legend && chart.options.plugins.legend.labels;
+                if (legendLabels) legendLabels.color = colors.primary;
+                Object.values(chart.options.scales || {}).forEach(scale => {
+                    if (scale.ticks) scale.ticks.color = colors.secondary;
+                    if (scale.grid && scale.grid.display !== false) scale.grid.color = colors.border;
+                    if (scale.pointLabels) scale.pointLabels.color = colors.primary;
+                    if (scale.angleLines) scale.angleLines.color = colors.border;
+                });
+                chart.update('none');
+            });
+        };
+        const syncThemeToggle = () => {
+            const nextTheme = reportRoot.dataset.theme === 'dark' ? 'light' : 'dark';
+            const label = nextTheme === 'light' ? 'Light mode' : 'Dark mode';
+            themeToggle.textContent = label;
+            themeToggle.setAttribute('aria-label', 'Switch to ' + label.toLowerCase());
+        };
+        themeToggle.addEventListener('click', () => {
+            reportRoot.dataset.theme = reportRoot.dataset.theme === 'dark' ? 'light' : 'dark';
+            try { localStorage.setItem('codelens-theme', reportRoot.dataset.theme); } catch (_) {}
+            syncThemeToggle();
+            refreshChartTheme();
+        });
+        syncThemeToggle();
+
         if (typeof Chart !== 'undefined') {
+            const initialChartTheme = chartTheme();
             const langData = [
                 {% for (name, stats) in by_language %}
                 { name: "{{ name }}", code: {{ stats.lines.code }} },
                 {% endfor %}
             ];
-            new Chart(document.getElementById('languageChart'), {
+            reportCharts.push(new Chart(document.getElementById('languageChart'), {
                 type: 'doughnut',
                 data: {
                     labels: langData.map(d => d.name),
-                    datasets: [{ data: langData.map(d => d.code), backgroundColor: ['#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f85149', '#79c0ff', '#56d364', '#e3b341', '#ff7b72', '#7ee787', '#ffa657', '#d2a8ff'] }]
+                    datasets: [{ data: langData.map(d => d.code), backgroundColor: ['#769fc4', '#729b7c', '#b29a68', '#8f82aa', '#b67575', '#7d91a3', '#789c96', '#a88d71', '#9a7b83', '#829c78', '#a98467', '#9186a5'] }]
                 },
-                options: { responsive: true, plugins: { legend: { position: 'right', labels: { color: '#f0f6fc' } } } }
-            });
-            new Chart(document.getElementById('codeCommentChart'), {
+                options: { responsive: true, plugins: { legend: { position: 'right', labels: { color: initialChartTheme.primary } } } }
+            }));
+            reportCharts.push(new Chart(document.getElementById('codeCommentChart'), {
                 type: 'bar',
                 data: {
                     labels: ['Code', 'Comments', 'Blank'],
-                    datasets: [{ data: [{{ summary.lines.code }}, {{ summary.lines.comment }}, {{ summary.lines.blank }}], backgroundColor: ['#3fb950', '#d29922', '#8b949e'] }]
+                    datasets: [{ data: [{{ summary.lines.code }}, {{ summary.lines.comment }}, {{ summary.lines.blank }}], backgroundColor: ['#729b7c', '#b29a68', '#7d8792'] }]
                 },
                 options: {
                     responsive: true,
                     plugins: { legend: { display: false } },
                     scales: {
-                        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
-                        x: { ticks: { color: '#8b949e' }, grid: { display: false } }
+                        y: { ticks: { color: initialChartTheme.secondary }, grid: { color: initialChartTheme.border } },
+                        x: { ticks: { color: initialChartTheme.secondary }, grid: { display: false } }
                     }
                 }
-            });
+            }));
         }
     </script>
 </body>

@@ -1232,6 +1232,10 @@ mod tests {
         assert_eq!(html.matches("<head>").count(), 1);
         assert_eq!(html.matches("<body>").count(), 1);
         assert_eq!(html.matches("</html>").count(), 1);
+        assert!(html.contains("id=\"theme-toggle\""));
+        assert!(html.contains("localStorage.getItem('codelens-theme')"));
+        assert!(html.contains(":root[data-theme=\"dark\"]"));
+        assert!(html.contains("prefers-color-scheme: dark"));
         assert_eq!(
             html.matches("href=\"https://github.com/DropFan/codelens\"")
                 .count(),
@@ -1397,6 +1401,9 @@ mod tests {
             .unwrap();
 
         let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("id=\"theme-toggle\""));
+        assert!(html.contains("localStorage.getItem('codelens-theme')"));
+        assert!(html.contains(":root[data-theme=\"dark\"]"));
         assert_eq!(
             html.matches("href=\"https://github.com/DropFan/codelens\"")
                 .count(),

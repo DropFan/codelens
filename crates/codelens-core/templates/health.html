@@ -4,57 +4,112 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codelens - Code Health Report</title>
+    <script>
+        (() => {
+            let savedTheme = null;
+            try { savedTheme = localStorage.getItem('codelens-theme'); } catch (_) {}
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.dataset.theme = savedTheme === 'light' || savedTheme === 'dark'
+                ? savedTheme
+                : (prefersDark ? 'dark' : 'light');
+        })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --text-primary: #f0f6fc;
-            --text-secondary: #8b949e;
-            --accent-blue: #58a6ff;
-            --accent-green: #3fb950;
-            --accent-yellow: #d29922;
-            --accent-red: #f85149;
+            color-scheme: light;
+            --bg-primary: #f7f8fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #eceff3;
+            --border: #d7dce2;
+            --border-strong: #b9c0c9;
+            --text-primary: #20242a;
+            --text-secondary: #626a75;
+            --accent-blue: #356f9d;
+            --accent-green: #397d4c;
+            --accent-yellow: #86671f;
+            --accent-orange: #a4542f;
+            --accent-red: #ad4141;
+        }
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --bg-primary: #101214;
+            --bg-secondary: #15181c;
+            --bg-tertiary: #1b1f24;
+            --border: #2b3037;
+            --border-strong: #3a414a;
+            --text-primary: #e7e9ec;
+            --text-secondary: #969da7;
+            --accent-blue: #8ab4dc;
+            --accent-green: #69a979;
+            --accent-yellow: #c4a15e;
+            --accent-orange: #c47d55;
+            --accent-red: #c96868;
         }
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
-        header { text-align: center; margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid var(--bg-tertiary); }
-        header h1 { margin: 0; font-size: 2.3rem; }
-        h2 { margin: 2.5rem 0 1rem; }
-        .muted { color: var(--text-secondary); }
-        .grade-badge { display: inline-grid; place-items: center; width: 96px; height: 96px; margin: 1rem auto 0.5rem; border: 3px solid currentColor; border-radius: 50%; font-size: 3.5rem; font-weight: 700; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.55; color: var(--text-primary); background: var(--bg-primary); }
+        .container { width: min(100% - 3rem, 1120px); margin: 0 auto; }
+        header { margin-bottom: 2.75rem; padding: 2.75rem 0 1.75rem; border-bottom: 1px solid var(--border); }
+        .header-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1.5rem; }
+        header h1 { margin: 0; font-size: clamp(1.9rem, 4vw, 2.5rem); font-weight: 620; letter-spacing: -0.035em; }
+        .theme-toggle { flex: none; padding: 0.42rem 0.68rem; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 0.82rem; cursor: pointer; }
+        .theme-toggle:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        h2 { margin: 0 0 0.9rem; font-size: 1.35rem; font-weight: 620; letter-spacing: -0.015em; }
+        h3 { font-size: 1.02rem; font-weight: 620; }
+        section { margin-top: 3.5rem; padding-top: 2.5rem; border-top: 1px solid var(--border); }
+        .muted, .score-text { color: var(--text-secondary); }
+        .grade-badge { margin: 1.5rem 0 0.65rem; font-size: 4.5rem; font-weight: 650; line-height: 1; letter-spacing: -0.06em; }
         .grade-A { color: var(--accent-green); }
         .grade-B { color: var(--accent-blue); }
         .grade-C { color: var(--accent-yellow); }
-        .grade-D { color: #f0883e; }
+        .grade-D { color: var(--accent-orange); }
         .grade-F { color: var(--accent-red); }
-        .assessment-badge { display: inline-block; margin: 1rem auto; padding: 0.8rem 1.2rem; border: 2px solid var(--accent-yellow); border-radius: 12px; color: var(--accent-yellow); font-size: 1.4rem; font-weight: 700; }
-        .score-text { margin-top: 0.45rem; color: var(--text-secondary); }
-        .risk-alert { max-width: 900px; margin: 1rem auto 0; padding: 0.9rem 1rem; border: 1px solid var(--accent-red); border-radius: 10px; background: rgba(248,81,73,0.08); }
+        .assessment-badge { margin: 1.5rem 0 0.75rem; color: var(--accent-yellow); font-size: 1.4rem; font-weight: 650; }
+        .score-text { max-width: 78ch; margin-top: 0.35rem; font-size: 0.92rem; }
+        .risk-alert { max-width: 78ch; margin: 1rem 0 0; padding: 0.85rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
         .risk-alert strong { color: var(--accent-red); }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
-        .stat-card, .chart-container, .next-steps { padding: 1.25rem; border: 1px solid var(--bg-tertiary); border-radius: 12px; background: var(--bg-secondary); }
-        .stat-card .value { font-size: 1.7rem; font-weight: 700; }
-        .stat-card .label { margin-top: 0.4rem; color: var(--text-secondary); }
-        .progress-bar { min-width: 70px; height: 8px; margin-top: 0.5rem; overflow: hidden; border-radius: 4px; background: var(--bg-tertiary); }
-        .fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
-        .chart-container { max-width: 480px; margin: 1.5rem auto; }
-        .chart-note { color: var(--text-secondary); font-size: 0.9rem; text-align: center; }
+        .next-steps { margin-top: 0; padding: 1.15rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .next-steps h2 { margin-top: 0; }
+        .next-steps ol { max-width: 78ch; margin: 0; padding-left: 1.25rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem 1.5rem; }
+        .stat-card { padding: 1rem 0; border-top: 1px solid var(--border); }
+        .stat-card .value { font-size: 1.65rem; font-weight: 620; letter-spacing: -0.025em; }
+        .stat-card .label { margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.85rem; }
+        [data-grade="A"] .value, [data-grade="A"] .label { color: var(--accent-green); }
+        [data-grade="B"] .value, [data-grade="B"] .label { color: var(--accent-blue); }
+        [data-grade="C"] .value, [data-grade="C"] .label { color: var(--accent-yellow); }
+        [data-grade="D"] .value, [data-grade="D"] .label { color: var(--accent-orange); }
+        [data-grade="F"] .value, [data-grade="F"] .label { color: var(--accent-red); }
+        [data-grade="A"] .fill { background: var(--accent-green); }
+        [data-grade="B"] .fill { background: var(--accent-blue); }
+        [data-grade="C"] .fill { background: var(--accent-yellow); }
+        [data-grade="D"] .fill { background: var(--accent-orange); }
+        [data-grade="F"] .fill { background: var(--accent-red); }
+        .progress-bar { min-width: 70px; height: 4px; margin-top: 0.55rem; overflow: hidden; background: var(--bg-tertiary); }
+        .fill { height: 100%; background: var(--accent-blue); }
+        .chart-container { max-width: 520px; margin: 1.5rem 0; padding: 1.15rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); }
+        .chart-container h3 { margin-top: 0; }
+        .chart-note { color: var(--text-secondary); font-size: 0.86rem; }
         .table-scroll { max-width: 100%; overflow-x: auto; margin-bottom: 1.5rem; }
-        table { width: 100%; min-width: 680px; border-collapse: collapse; background: var(--bg-secondary); }
-        th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--bg-tertiary); }
-        th { background: var(--bg-tertiary); color: var(--text-secondary); }
-        .next-steps ol { margin: 0; padding-left: 1.25rem; }
-        code { color: #79c0ff; }
-        footer { margin-top: 3rem; padding: 1.5rem 0; text-align: center; color: var(--text-secondary); border-top: 1px solid var(--bg-tertiary); }
-        a { color: var(--accent-blue); }
-        @media (max-width: 720px) { .container { padding: 1rem; } }
+        table { width: 100%; min-width: 680px; border-collapse: collapse; }
+        th, td { padding: 0.75rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-secondary); font-size: 0.8rem; font-weight: 620; border-top: 1px solid var(--border-strong); }
+        tbody tr:hover { background: var(--bg-secondary); }
+        code { color: var(--accent-blue); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.92em; }
+        footer { margin-top: 3.5rem; padding: 1.5rem 0 2.5rem; color: var(--text-secondary); border-top: 1px solid var(--border); font-size: 0.88rem; }
+        a { color: var(--accent-blue); text-underline-offset: 0.18em; }
+        a:focus-visible, button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+        @media (max-width: 720px) {
+            .container { width: min(100% - 2rem, 1120px); }
+            header { padding-top: 1.75rem; }
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+        @media (min-width: 721px) and (max-width: 960px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media print {
-            :root { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #ddd; --text-primary: #111; --text-secondary: #444; }
+            :root, :root[data-theme="dark"] { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #f2f2f2; --border: #ccc; --border-strong: #999; --text-primary: #111; --text-secondary: #444; }
             body { background: #fff; color: #111; font-size: 10pt; }
-            .container { max-width: none; padding: 0; }
+            .container { width: 100%; max-width: none; }
+            .theme-toggle { display: none; }
             .chart-container { display: none; }
             .stat-card, .next-steps { break-inside: avoid; }
             table { min-width: 0; }
@@ -65,7 +120,10 @@
 <body>
     <main class="container">
         <header>
-            <h1>Code Health Report</h1>
+            <div class="header-row">
+                <h1>Code Health Report</h1>
+                <button class="theme-toggle" id="theme-toggle" type="button">Light mode</button>
+            </div>
             <p class="muted">Generated {{ generated_at }} by <a href="https://github.com/DropFan/codelens">Codelens</a> {{ tool_version }}</p>
             {% if is_scored %}
             <div class="grade-badge grade-{{ grade }}" aria-label="Overall grade {{ grade }}">{{ grade }}</div>
@@ -103,7 +161,7 @@
             <h2>Health Dimensions</h2>
             <div class="stats-grid">
                 {% for dim in dimensions %}
-                <div class="stat-card">
+                <div class="stat-card" data-grade="{{ dim.grade }}">
                     <div class="value">{{ dim.score_display }}</div>
                     <div class="label">{{ dim.dimension }} — grade {{ dim.grade }}</div>
                     <div class="progress-bar"><div class="fill" style="width: {{ dim.score_display }}%"></div></div>
@@ -162,24 +220,63 @@
         </footer>
     </main>
     <script>
+        const reportRoot = document.documentElement;
+        const themeToggle = document.getElementById('theme-toggle');
+        const reportCharts = [];
+        const chartTheme = () => {
+            const styles = getComputedStyle(reportRoot);
+            return {
+                primary: styles.getPropertyValue('--text-primary').trim(),
+                secondary: styles.getPropertyValue('--text-secondary').trim(),
+                border: styles.getPropertyValue('--border').trim()
+            };
+        };
+        const refreshChartTheme = () => {
+            const colors = chartTheme();
+            reportCharts.forEach(chart => {
+                const radar = chart.options.scales && chart.options.scales.r;
+                if (radar) {
+                    radar.ticks.color = colors.secondary;
+                    radar.grid.color = colors.border;
+                    radar.pointLabels.color = colors.primary;
+                    radar.angleLines.color = colors.border;
+                }
+                chart.update('none');
+            });
+        };
+        const syncThemeToggle = () => {
+            const nextTheme = reportRoot.dataset.theme === 'dark' ? 'light' : 'dark';
+            const label = nextTheme === 'light' ? 'Light mode' : 'Dark mode';
+            themeToggle.textContent = label;
+            themeToggle.setAttribute('aria-label', 'Switch to ' + label.toLowerCase());
+        };
+        themeToggle.addEventListener('click', () => {
+            reportRoot.dataset.theme = reportRoot.dataset.theme === 'dark' ? 'light' : 'dark';
+            try { localStorage.setItem('codelens-theme', reportRoot.dataset.theme); } catch (_) {}
+            syncThemeToggle();
+            refreshChartTheme();
+        });
+        syncThemeToggle();
+
         if (typeof Chart !== 'undefined') {
+            const initialChartTheme = chartTheme();
             const dims = [
                 {% for dim in dimensions %}
                 { label: "{{ dim.dimension }}", value: {{ dim.score_display }} },
                 {% endfor %}
             ];
-            new Chart(document.getElementById('radarChart'), {
+            reportCharts.push(new Chart(document.getElementById('radarChart'), {
                 type: 'radar',
                 data: {
                     labels: dims.map(d => d.label),
-                    datasets: [{ label: 'Score', data: dims.map(d => d.value), backgroundColor: 'rgba(88, 166, 255, 0.2)', borderColor: '#58a6ff', pointBackgroundColor: '#58a6ff' }]
+                    datasets: [{ label: 'Score', data: dims.map(d => d.value), backgroundColor: 'rgba(118, 159, 196, 0.16)', borderColor: '#769fc4', pointBackgroundColor: '#769fc4' }]
                 },
                 options: {
                     responsive: true,
-                    scales: { r: { beginAtZero: true, max: 100, ticks: { color: '#8b949e', backdropColor: 'transparent' }, grid: { color: '#21262d' }, pointLabels: { color: '#f0f6fc' }, angleLines: { color: '#21262d' } } },
+                    scales: { r: { beginAtZero: true, max: 100, ticks: { color: initialChartTheme.secondary, backdropColor: 'transparent' }, grid: { color: initialChartTheme.border }, pointLabels: { color: initialChartTheme.primary }, angleLines: { color: initialChartTheme.border } } },
                     plugins: { legend: { display: false } }
                 }
-            });
+            }));
         }
     </script>
 </body>
