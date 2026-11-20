@@ -39,7 +39,23 @@
         h2 { margin: 0 0 1rem; }
         h3 { margin: 1.5rem 0 0.75rem; }
         .muted, .scope-note { color: var(--text-secondary); }
+        .report-nav { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; margin-top: 1rem; }
+        .report-nav a { font-size: 0.9rem; text-decoration: none; }
         .report-block { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--bg-tertiary); }
+        .decision-banner {
+            margin-bottom: 1.25rem;
+            padding: 1.15rem 1.25rem;
+            border: 1px solid var(--bg-tertiary);
+            border-left: 4px solid var(--accent-yellow);
+            border-radius: 10px;
+            background: var(--bg-secondary);
+        }
+        .decision-banner.good { border-left-color: var(--accent-green); }
+        .decision-banner.warning { border-left-color: var(--accent-red); }
+        .decision-banner.neutral { border-left-color: var(--accent-blue); }
+        .status-label { display: inline-block; margin-bottom: 0.4rem; font-weight: 700; }
+        .decision-summary { margin: 0; font-size: 1.05rem; }
+        .snapshot-note { margin: 0.65rem 0 0; color: var(--text-secondary); font-size: 0.9rem; }
         .health-hero {
             display: grid;
             grid-template-columns: minmax(160px, 0.35fr) minmax(280px, 1fr);
@@ -76,25 +92,23 @@
             grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
             gap: 1rem;
         }
+        .overview-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
         .summary-item { padding: 0.8rem; border-left: 3px solid var(--accent-blue); }
         .summary-item strong { display: block; font-size: 1.1rem; }
         .summary-item span { color: var(--text-secondary); font-size: 0.9rem; }
-        .risk-alert {
-            margin: 1rem 0 0;
-            padding: 1rem 1.25rem;
-            border: 1px solid var(--accent-red);
-            border-radius: 10px;
-            background: rgba(248, 81, 73, 0.08);
-        }
-        .risk-alert strong { color: var(--accent-red); }
-        .priority-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
-        .priority-list li { margin: 0.35rem 0; overflow-wrap: anywhere; }
+        .priority-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+        .priority-card { padding: 1.1rem 1.2rem; border: 1px solid var(--bg-tertiary); border-radius: 10px; background: var(--bg-secondary); }
+        .priority-card h3 { margin: 0 0 0.75rem; font-size: 1rem; overflow-wrap: anywhere; }
+        .priority-card p { margin: 0.55rem 0; }
+        .priority-card .signal { color: var(--text-secondary); }
+        .priority-card .focus-command { margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--bg-tertiary); }
         .next-steps { margin: 0; padding-left: 1.25rem; }
         .next-steps li { margin: 0.6rem 0; }
         code { color: #79c0ff; overflow-wrap: anywhere; }
         .stat-card { padding: 1.2rem; text-align: center; }
         .stat-card .value { font-size: 1.7rem; font-weight: 700; color: var(--accent-green); }
         .stat-card .label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.35rem; }
+        .dimension-explanation { margin: 0.55rem 0 0; color: var(--text-secondary); font-size: 0.85rem; text-align: left; }
         .progress-bar { min-width: 70px; height: 8px; overflow: hidden; border-radius: 4px; background: var(--bg-tertiary); }
         .progress-bar .fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
         .table-scroll { max-width: 100%; overflow-x: auto; margin-bottom: 1.5rem; }
@@ -118,7 +132,11 @@
         @media (max-width: 720px) {
             .container { padding: 1rem; }
             .health-hero { grid-template-columns: 1fr; }
+            .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             header h1 { font-size: 1.75rem; }
+        }
+        @media (min-width: 721px) and (max-width: 1080px) {
+            .overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
         @media print {
             :root { --bg-primary: #fff; --bg-secondary: #fff; --bg-tertiary: #ddd; --text-primary: #111; --text-secondary: #444; }
@@ -126,7 +144,7 @@
             .container { max-width: none; padding: 0; }
             header h1 { background: none; -webkit-text-fill-color: #111; color: #111; }
             .report-block { break-before: auto; }
-            .panel, .stat-card, .grade-panel, details { break-inside: avoid; }
+            .panel, .stat-card, .grade-panel, .priority-card, details { break-inside: avoid; }
             details { display: block; }
             details > * { display: block; }
             .charts-section { display: none; }
@@ -139,11 +157,38 @@
     <main class="container">
         <header>
             <h1>{{ title }}</h1>
-            <p class="muted">Generated {{ generated_at }} by Codelens {{ tool_version }}</p>
+            <p class="muted">Generated {{ generated_at }} by <a href="https://github.com/DropFan/codelens">Codelens</a> {{ tool_version }}</p>
+            <nav class="report-nav" aria-label="Report sections">
+                <a href="#project-overview">Project overview</a>
+                <a href="#health-summary">Decision</a>
+                <a href="#priority-checks">Priority checks</a>
+                <a href="#dimensions">Health evidence</a>
+                <a href="#language-breakdown">Language breakdown</a>
+                <a href="#cost-estimation">Additional estimates</a>
+                <a href="#methodology">How to read this report</a>
+            </nav>
         </header>
 
-        <section aria-labelledby="health-summary">
+        <section aria-labelledby="project-overview">
+            <h2 id="project-overview">Project Overview</h2>
+            <p class="scope-note">All recognized and counted files. Health scoring may use a narrower scope, shown in the next section.</p>
+            <div class="stats-grid overview-grid">
+                <div class="stat-card"><div class="value">{{ summary.total_files }}</div><div class="label">Counted files</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.code }}</div><div class="label">Code lines</div></div>
+                <div class="stat-card"><div class="value">{{ by_language.len() }}</div><div class="label">Counted languages</div></div>
+                <div class="stat-card"><div class="value">{{ summary.complexity.functions }}</div><div class="label">Measured functions</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.comment }}</div><div class="label">Comment lines</div></div>
+                <div class="stat-card"><div class="value">{{ summary.lines.blank }}</div><div class="label">Blank lines</div></div>
+            </div>
+        </section>
+
+        <section class="report-block" aria-labelledby="health-summary">
             <h2 id="health-summary">Health and Risk Summary</h2>
+            <div class="decision-banner {{ health_decision_tone }}">
+                <span class="status-label">{{ health_decision_label }}</span>
+                <p class="decision-summary">{{ health_decision_summary }}</p>
+                <p class="snapshot-note">Current snapshot only. This report does not claim whether health improved or regressed. Use <code>codelens health . --baseline &lt;ref&gt;</code> or <code>codelens diff &lt;base&gt;</code> for a comparison.</p>
+            </div>
             <div class="health-hero">
                 <div class="grade-panel">
                     {% if health_is_scored %}
@@ -170,26 +215,29 @@
                     </div>
                 </div>
             </div>
-            {% if health_failing_files > 0 %}
-            <div class="risk-alert">
-                <strong>Immediate attention:</strong> {{ health_failing_files }} file(s) are graded F even though the overall project grade is {{ health_grade }}.
-                {% if !priority_files.is_empty() %}
-                <ol class="priority-list">
-                    {% for file in priority_files %}
-                    <li><strong>{{ file.path }}</strong> — {{ file.grade }} {{ file.score_display }}, main issue: {{ file.top_issue }}</li>
-                    {% endfor %}
-                </ol>
-                {% endif %}
-            </div>
-            {% endif %}
         </section>
 
-        <section class="report-block panel" aria-labelledby="next-steps">
-            <h2 id="next-steps">Recommended Next Steps</h2>
+        <section class="report-block" aria-labelledby="priority-checks">
+            <h2 id="priority-checks">Priority Checks</h2>
+            <p class="scope-note">These are inspection prompts based on health signals, not automatic refactoring decisions.</p>
+            {% if !priority_files.is_empty() %}
+            <div class="priority-grid">
+                {% for file in priority_files %}
+                <article class="priority-card">
+                    <h3><code>{{ file.path }}</code></h3>
+                    <p class="signal"><strong>Primary signal:</strong> {{ file.top_issue }}</p>
+                    <p><strong>Why this file:</strong> {{ file.priority_reason }}</p>
+                    <p><strong>Suggested check:</strong> {{ file.suggested_check }}</p>
+                    <p class="focus-command"><strong>Focus command:</strong> <code>{{ file.focus_command }}</code></p>
+                </article>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <h3>Broaden the diagnosis</h3>
             <ol class="next-steps">
-                <li>Run <code>codelens hotspot . --functions</code> to locate the functions absorbing the most churn.</li>
-                <li>Run <code>codelens health &lt;directory&gt; --top 5</code> for a focused health report.</li>
-                <li>Start with the F-grade files and the worst directory listed above; keep the same health model when comparing results.</li>
+                <li>Run <code>codelens hotspot . --functions</code> to learn whether low-scoring files are also frequently changed and which functions absorb the churn.</li>
+                <li>Run <code>codelens coupling . --for &lt;file&gt;</code> before changing a priority file to find files that usually move with it.</li>
+                <li>Use a baseline or <code>codelens diff &lt;base&gt;</code> to verify that a change improved health without creating a regression elsewhere.</li>
             </ol>
         </section>
 
@@ -201,6 +249,7 @@
                     <div class="value">{{ dim.score_display }}</div>
                     <div class="label">{{ dim.dimension }} — grade {{ dim.grade }}</div>
                     <div class="progress-bar" style="margin-top: 0.5rem"><div class="fill" style="width: {{ dim.score_display }}%"></div></div>
+                    <p class="dimension-explanation">{{ dim.explanation }}</p>
                 </div>
                 {% endfor %}
             </div>
@@ -221,7 +270,8 @@
 
         {% if !worst_directories.is_empty() %}
         <section class="report-block" aria-labelledby="worst-directories">
-            <h2 id="worst-directories">Worst Directories</h2>
+            <h2 id="worst-directories">Lowest-Scoring Directories</h2>
+            <p class="scope-note">A low score is a prompt to inspect the directory, not proof that it should be reorganized.</p>
             <div class="table-scroll">
                 <table>
                     <thead><tr><th>Directory</th><th>Score</th><th>Grade</th><th>Evaluated files</th></tr></thead>
@@ -237,7 +287,8 @@
 
         {% if !worst_files.is_empty() %}
         <section class="report-block" aria-labelledby="worst-files">
-            <h2 id="worst-files">Worst Files</h2>
+            <h2 id="worst-files">Lowest-Scoring Files</h2>
+            <p class="scope-note">The primary issue is the largest score drag measured for each file.</p>
             <div class="table-scroll">
                 <table>
                     <thead><tr><th>File</th><th>Score</th><th>Grade</th><th>Main issue</th></tr></thead>
@@ -251,17 +302,8 @@
         </section>
         {% endif %}
 
-        <section class="report-block" aria-labelledby="project-scale">
-            <h2 id="project-scale">Project Scale and Languages</h2>
-            <p class="scope-note">Scope: all recognized and counted files. This is broader than the health scope shown above.</p>
-            <div class="stats-grid">
-                <div class="stat-card"><div class="value">{{ summary.total_files }}</div><div class="label">Counted files</div></div>
-                <div class="stat-card"><div class="value">{{ summary.lines.code }}</div><div class="label">Code lines</div></div>
-                <div class="stat-card"><div class="value">{{ summary.lines.comment }}</div><div class="label">Comment lines</div></div>
-                <div class="stat-card"><div class="value">{{ summary.lines.blank }}</div><div class="label">Blank lines</div></div>
-                <div class="stat-card"><div class="value">{{ by_language.len() }}</div><div class="label">Counted languages</div></div>
-                <div class="stat-card"><div class="value">{{ summary.complexity.functions }}</div><div class="label">Measured functions</div></div>
-            </div>
+        <section class="report-block" aria-labelledby="language-breakdown">
+            <h2 id="language-breakdown">Language Breakdown</h2>
             <div class="charts-section">
                 <div class="chart-container">
                     <h3>Language Distribution</h3>
@@ -289,10 +331,10 @@
         </section>
 
         <section class="report-block" aria-labelledby="cost-estimation">
-            <h2 id="cost-estimation">Cost Estimation</h2>
+            <h2 id="cost-estimation">Additional Cost Estimation</h2>
             <p class="scope-note">Total counted SLOC: {{ total_sloc }}. {{ cost_scope }}</p>
             <details>
-                <summary>Show estimates and calculation assumptions</summary>
+                <summary>Show optional estimates and calculation assumptions</summary>
                 {% if !traditional_estimation_rows.is_empty() %}
                 <h3>Traditional workforce models</h3>
                 <p class="scope-note">These models estimate software-development effort using salary-based labor cost. They are directional estimates, not budgets or delivery commitments.</p>
@@ -330,9 +372,19 @@
             </details>
         </section>
 
+        <section class="report-block panel" aria-labelledby="methodology">
+            <h2 id="methodology">How to Read This Report</h2>
+            <ul class="assumptions">
+                <li>The default combined report is a current snapshot. It does not include Git-history hotspots, change coupling, or a baseline comparison.</li>
+                <li>Health scores identify code that deserves inspection. They do not prove that a specific refactor is correct.</li>
+                <li>Compare reports only when the health model and analysis scope match. Scope or model changes can move the score without a code-quality change.</li>
+                <li>Charts are optional. The complete result remains available in text and tables for offline reading and printing.</li>
+            </ul>
+        </section>
+
         <footer>
             <strong>Generation Information</strong>
-            <p>Generated {{ generated_at }} by Codelens {{ tool_version }} in {{ elapsed_secs }}s. Health model: {{ health_model }}. Health scope: {{ health_scope }}.</p>
+            <p>Generated {{ generated_at }} by <a href="https://github.com/DropFan/codelens">Codelens</a> {{ tool_version }} in {{ elapsed_secs }}s. Health model: {{ health_model }}. Health scope: {{ health_scope }}.</p>
         </footer>
     </main>
 

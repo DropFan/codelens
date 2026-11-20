@@ -66,7 +66,7 @@
     <main class="container">
         <header>
             <h1>Code Health Report</h1>
-            <p class="muted">Generated {{ generated_at }} by Codelens {{ tool_version }}</p>
+            <p class="muted">Generated {{ generated_at }} by <a href="https://github.com/DropFan/codelens">Codelens</a> {{ tool_version }}</p>
             {% if is_scored %}
             <div class="grade-badge grade-{{ grade }}" aria-label="Overall grade {{ grade }}">{{ grade }}</div>
             <div class="score-text"><strong>Score: {{ score }} / 100</strong> | Model: {{ model }}</div>

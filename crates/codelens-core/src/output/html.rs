@@ -7,6 +7,7 @@ use askama::Template;
 use crate::analyzer::stats::{AnalysisResult, LanguageSummary, Summary};
 use crate::error::Result;
 use crate::insight::health::HealthAssessment;
+use crate::insight::scoring::HealthDimension;
 use crate::insight::Grade;
 
 use super::format::{
@@ -31,6 +32,7 @@ struct HtmlDimensionScore {
     dimension: String,
     score_display: String,
     grade: Grade,
+    explanation: String,
 }
 
 #[derive(Clone)]
@@ -47,6 +49,9 @@ struct HtmlFileHealth {
     score_display: String,
     grade: Grade,
     top_issue: String,
+    priority_reason: String,
+    suggested_check: String,
+    focus_command: String,
 }
 
 struct HtmlLanguageHealth {
@@ -156,12 +161,79 @@ fn html_directory_health(
 }
 
 fn html_file_health(file: &crate::insight::health::FileHealth) -> HtmlFileHealth {
+    let path = file.path.display().to_string();
+    let score_display = format!("{:.1}", file.score);
+    let parent = file
+        .path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
     HtmlFileHealth {
-        path: file.path.display().to_string(),
-        score_display: format!("{:.1}", file.score),
+        priority_reason: format!(
+            "Grade {} ({}). {} is the largest health drag in this file.",
+            file.grade, score_display, file.top_issue
+        ),
+        suggested_check: health_dimension_suggested_check(file.top_issue).to_string(),
+        focus_command: format!(
+            "codelens health {} --top 5",
+            shell_quote_for_display(&parent)
+        ),
+        path,
+        score_display,
         grade: file.grade,
         top_issue: file.top_issue.to_string(),
     }
+}
+
+fn health_dimension_explanation(dimension: HealthDimension) -> &'static str {
+    match dimension {
+        HealthDimension::Complexity => {
+            "Independent paths through the measured code; more paths are harder to reason about."
+        }
+        HealthDimension::FuncSize => {
+            "Whether measured functions stay small enough to understand and review."
+        }
+        HealthDimension::CommentRatio => {
+            "Whether the analyzed code contains enough explanation; the right amount depends on context."
+        }
+        HealthDimension::FileSize => {
+            "Whether files stay focused enough to navigate, review, and change safely."
+        }
+        HealthDimension::NestingDepth => {
+            "How deeply conditions and loops are nested; deeper nesting is harder to follow."
+        }
+        HealthDimension::Duplication => {
+            "How much line-level content repeats across the analyzed code."
+        }
+    }
+}
+
+fn health_dimension_suggested_check(dimension: HealthDimension) -> &'static str {
+    match dimension {
+        HealthDimension::Complexity => {
+            "Inspect the most complex functions and confirm which branches are essential before refactoring."
+        }
+        HealthDimension::FuncSize => {
+            "Check whether the largest functions mix responsibilities that can be reviewed separately."
+        }
+        HealthDimension::CommentRatio => {
+            "Review non-obvious behavior and public contracts; add explanation only where it improves understanding."
+        }
+        HealthDimension::FileSize => {
+            "Check whether this file combines unrelated responsibilities before deciding to split it."
+        }
+        HealthDimension::NestingDepth => {
+            "Locate deeply nested functions and consider guard clauses or extracting independent branches."
+        }
+        HealthDimension::Duplication => {
+            "Confirm repeated lines represent the same behavior before consolidating them."
+        }
+    }
+}
+
+fn shell_quote_for_display(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 // ── Hotspot ──────────────────────────────────────────────
@@ -313,6 +385,70 @@ struct EstimationComparisonHtmlReport {
 
 // ── Combined (default command: stats + health + estimation) ──
 
+struct HtmlHealthDecision {
+    label: String,
+    tone: &'static str,
+    summary: String,
+}
+
+fn combined_health_decision(
+    report: &crate::insight::health::HealthReport,
+    view: &HealthPresentation,
+) -> HtmlHealthDecision {
+    let weakest_dimension = report
+        .dimensions
+        .iter()
+        .min_by(|left, right| left.score.total_cmp(&right.score))
+        .map(|dimension| {
+            format!(
+                " The weakest measured dimension is {} ({} {:.1}).",
+                dimension.dimension, dimension.grade, dimension.score
+            )
+        })
+        .unwrap_or_default();
+
+    if report.assessment == HealthAssessment::InsufficientData {
+        return HtmlHealthDecision {
+            label: "Insufficient data".to_string(),
+            tone: "neutral",
+            summary: format!(
+                "The scan does not have enough measured data for a reliable letter grade. Treat the {} score as an estimate and review measurement coverage before acting.{}",
+                view.score, weakest_dimension
+            ),
+        };
+    }
+
+    if view.failing_files > 0 {
+        let starting_point = report
+            .worst_files
+            .first()
+            .map(|file| format!(" Start with {}.", file.path.display()))
+            .unwrap_or_default();
+        return HtmlHealthDecision {
+            label: "Needs attention".to_string(),
+            tone: "warning",
+            summary: format!(
+                "Overall health is {} ({}), but {} evaluated file(s) are graded F.{}{}",
+                report.grade, view.score, view.failing_files, starting_point, weakest_dimension
+            ),
+        };
+    }
+
+    let (label, tone) = if report.grade <= Grade::B {
+        ("No F-grade files detected", "good")
+    } else {
+        ("Needs attention", "warning")
+    };
+    HtmlHealthDecision {
+        label: label.to_string(),
+        tone,
+        summary: format!(
+            "Overall health is {} ({}), with no F-grade files among the evaluated files.{}",
+            report.grade, view.score, weakest_dimension
+        ),
+    }
+}
+
 #[derive(Template)]
 #[template(path = "combined.html")]
 struct CombinedHtmlReport<'a> {
@@ -332,6 +468,9 @@ struct CombinedHtmlReport<'a> {
     health_failing_files: usize,
     health_failing_ratio: String,
     health_test: String,
+    health_decision_label: String,
+    health_decision_tone: &'static str,
+    health_decision_summary: String,
     dimensions: Vec<HtmlDimensionScore>,
     health_languages: Vec<HtmlLanguageHealth>,
     worst_directories: Vec<HtmlDirectoryHealth>,
@@ -441,6 +580,7 @@ impl HtmlOutput {
         }
 
         let health_view = HealthPresentation::from_report(health);
+        let health_decision = combined_health_decision(health, &health_view);
         let worst_files: Vec<_> = health.worst_files.iter().map(html_file_health).collect();
         let priority_files = worst_files.iter().take(3).cloned().collect();
         let mut traditional_estimation_rows = Vec::new();
@@ -492,6 +632,9 @@ impl HtmlOutput {
             health_failing_files: health_view.failing_files,
             health_failing_ratio: health_view.failing_ratio,
             health_test: health_view.test_health.unwrap_or_default(),
+            health_decision_label: health_decision.label,
+            health_decision_tone: health_decision.tone,
+            health_decision_summary: health_decision.summary,
             dimensions: health
                 .dimensions
                 .iter()
@@ -499,6 +642,7 @@ impl HtmlOutput {
                     dimension: d.dimension.to_string(),
                     score_display: format!("{:.1}", d.score),
                     grade: d.grade,
+                    explanation: health_dimension_explanation(d.dimension).to_string(),
                 })
                 .collect(),
             health_languages: health
@@ -600,6 +744,7 @@ impl HtmlOutput {
                     dimension: d.dimension.to_string(),
                     score_display: format!("{:.1}", d.score),
                     grade: d.grade,
+                    explanation: health_dimension_explanation(d.dimension).to_string(),
                 })
                 .collect(),
             by_language: report
@@ -925,8 +1070,9 @@ mod tests {
     use crate::analyzer::stats::{AnalysisResult, FileStats, LineStats, Summary};
     use crate::insight::estimation::{EstimationComparison, EstimationReport};
     use crate::insight::health::{
-        Confidence, DirectoryHealth, FileHealth, HealthReport, HealthScope, LanguageHealth,
-        LanguageHealthChange, LanguageHealthChangeStatus, RegressionReport, TailRisk, TestHealth,
+        Confidence, DimensionScore, DirectoryHealth, FileHealth, HealthReport, HealthScope,
+        LanguageHealth, LanguageHealthChange, LanguageHealthChangeStatus, RegressionReport,
+        TailRisk, TestHealth,
     };
     use crate::insight::scoring::default::DefaultModel;
     use crate::insight::scoring::HealthDimension;
@@ -959,7 +1105,12 @@ mod tests {
             score: 87.44,
             grade: Grade::B,
             model: "default-v2".to_string(),
-            dimensions: vec![],
+            dimensions: vec![DimensionScore {
+                dimension: HealthDimension::NestingDepth,
+                score: 40.0,
+                grade: Grade::F,
+                weight: 0.1,
+            }],
             by_directory: vec![DirectoryHealth {
                 path: PathBuf::from("src/output"),
                 score: 67.64,
@@ -1081,12 +1232,22 @@ mod tests {
         assert_eq!(html.matches("<head>").count(), 1);
         assert_eq!(html.matches("<body>").count(), 1);
         assert_eq!(html.matches("</html>").count(), 1);
+        assert_eq!(
+            html.matches("href=\"https://github.com/DropFan/codelens\"")
+                .count(),
+            2
+        );
     }
 
     #[test]
-    fn combined_html_leads_with_health_scope_and_risk() {
+    fn combined_html_leads_with_project_overview_then_health_risk() {
         let html = render_combined(representative_combined_report());
 
+        assert!(html.contains("Project Overview"));
+        assert!(html.contains("Counted files"));
+        assert!(html.contains("Code lines"));
+        assert!(html.contains("Counted languages"));
+        assert!(html.contains("Measured functions"));
         assert!(html.contains("Score: 87.4 / 100"));
         assert!(html.contains("Health model"));
         assert!(html.contains("Production code"));
@@ -1099,12 +1260,22 @@ mod tests {
         assert!(html.contains("src/output/console.rs"));
         assert!(html.contains("src/analyzer/counter.rs"));
         assert!(html.contains("Test code health"));
+        assert!(html.contains("Needs attention"));
+        assert!(html.contains("Current snapshot only"));
+        assert!(html.contains("Priority Checks"));
+        assert!(html.contains("Why this file:"));
+        assert!(html.contains("Suggested check:"));
+        assert!(html.contains("Focus command:"));
+        assert!(html.contains("How deeply conditions and loops are nested"));
+        assert!(html.contains("How to Read This Report"));
 
+        let overview = html.find("Project Overview").unwrap();
         let health = html.find("Health and Risk Summary").unwrap();
-        let scale = html.find("Project Scale and Languages").unwrap();
+        let languages = html.find("Language Breakdown").unwrap();
         let cost = html.find("Cost Estimation").unwrap();
-        assert!(health < scale);
-        assert!(scale < cost);
+        assert!(overview < health);
+        assert!(health < languages);
+        assert!(languages < cost);
     }
 
     #[test]
@@ -1127,6 +1298,19 @@ mod tests {
     }
 
     #[test]
+    fn combined_html_uses_a_precise_status_when_no_files_are_f_grade() {
+        let mut combined = representative_combined_report();
+        combined.health.tail_risk.failing_files = 0;
+        combined.health.tail_risk.failing_ratio = 0.0;
+        combined.health.worst_files.clear();
+
+        let html = render_combined(combined);
+
+        assert!(html.contains("No F-grade files detected"));
+        assert!(html.contains("with no F-grade files among the evaluated files"));
+    }
+
+    #[test]
     fn health_model_display_name_is_user_facing() {
         assert_eq!(health_model_display_name("default"), "v1");
         assert_eq!(
@@ -1139,6 +1323,15 @@ mod tests {
             "v2 (no duplication scan)"
         );
         assert_eq!(health_model_display_name("custom"), "custom");
+    }
+
+    #[test]
+    fn shell_paths_are_quoted_for_copyable_focus_commands() {
+        assert_eq!(shell_quote_for_display("src/output"), "'src/output'");
+        assert_eq!(
+            shell_quote_for_display("src/owner's output"),
+            "'src/owner'\"'\"'s output'"
+        );
     }
 
     #[test]
@@ -1204,6 +1397,11 @@ mod tests {
             .unwrap();
 
         let html = String::from_utf8(output).unwrap();
+        assert_eq!(
+            html.matches("href=\"https://github.com/DropFan/codelens\"")
+                .count(),
+            2
+        );
         let language_summary = html.find("By Language").unwrap();
         let language_change = html.find("Language Health Changes").unwrap();
         let file_details = html.find("Worst Files").unwrap_or(html.len());
@@ -1275,6 +1473,7 @@ mod tests {
         let html = String::from_utf8(output).unwrap();
         assert!(html.contains("Insufficient data"));
         assert!(html.contains("Estimated score:"));
+        assert!(html.contains("Treat the 100.0 score as an estimate"));
     }
 
     #[test]
