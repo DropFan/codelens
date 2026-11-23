@@ -69,6 +69,39 @@ impl Default for CouplingOptions {
     }
 }
 
+fn count_pairs<'a>(
+    files: &'a BTreeSet<PathBuf>,
+    focus: Option<&Path>,
+    pair_counts: &mut HashMap<(&'a Path, &'a Path), usize>,
+) {
+    if let Some(focus) = focus {
+        let Some(focus) = files.get(focus).map(PathBuf::as_path) else {
+            return;
+        };
+        for other in files {
+            let other = other.as_path();
+            if other == focus {
+                continue;
+            }
+            let pair = if other < focus {
+                (other, focus)
+            } else {
+                (focus, other)
+            };
+            *pair_counts.entry(pair).or_insert(0) += 1;
+        }
+        return;
+    }
+
+    let list: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+    for i in 0..list.len() {
+        for j in (i + 1)..list.len() {
+            // BTreeSet iteration keeps the pair key ordered.
+            *pair_counts.entry((list[i], list[j])).or_insert(0) += 1;
+        }
+    }
+}
+
 /// Compute change coupling from per-commit records.
 ///
 /// `universe` restricts the analysis to a known file set (typically the
@@ -119,13 +152,7 @@ pub fn analyze(
         if files.len() < 2 {
             continue;
         }
-        let list: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
-        for i in 0..list.len() {
-            for j in (i + 1)..list.len() {
-                // BTreeSet iteration keeps the pair key ordered.
-                *pair_counts.entry((list[i], list[j])).or_insert(0) += 1;
-            }
-        }
+        count_pairs(files, opts.focus.as_deref(), &mut pair_counts);
     }
 
     let mut pairs: Vec<CouplingPair> = pair_counts
@@ -308,6 +335,89 @@ mod tests {
         assert!(
             report.pairs[0].file_a == Path::new("c.rs")
                 || report.pairs[0].file_b == Path::new("c.rs")
+        );
+    }
+
+    #[test]
+    fn test_focus_preserves_universe_bulk_counts_dedup_and_degree() {
+        let mut commits: Vec<CommitRecord> = (0..5)
+            .map(|i| {
+                commit(
+                    &format!("c{i}"),
+                    i,
+                    &["focus.rs", "kept.rs", "dropped.rs", "focus.rs"],
+                )
+            })
+            .collect();
+        commits.push(commit(
+            "bulk",
+            10,
+            &["focus.rs", "kept.rs", "bulk-a.rs", "bulk-b.rs"],
+        ));
+        commits.push(commit("focus-only", 11, &["focus.rs"]));
+
+        let universe: BTreeSet<PathBuf> = ["focus.rs", "kept.rs"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        let opts = CouplingOptions {
+            max_changeset: 3,
+            focus: Some(PathBuf::from("focus.rs")),
+            ..CouplingOptions::default()
+        };
+
+        let report = analyze(&commits, Some(&universe), "90d", &opts);
+
+        assert_eq!(report.skipped_large_commits, 1);
+        assert_eq!(report.pairs.len(), 1);
+        let pair = &report.pairs[0];
+        assert_eq!(pair.file_a, Path::new("focus.rs"));
+        assert_eq!(pair.file_b, Path::new("kept.rs"));
+        assert_eq!(pair.shared_commits, 5);
+        assert_eq!(pair.commits_a, 7);
+        assert_eq!(pair.commits_b, 6);
+        assert!((pair.degree - 76.923).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_count_pairs_focus_builds_linear_candidate_set() {
+        let files: BTreeSet<PathBuf> = (0..101)
+            .map(|i| PathBuf::from(format!("f{i:03}.rs")))
+            .collect();
+        let focus = Path::new("f050.rs");
+        let mut pair_counts = HashMap::new();
+
+        count_pairs(&files, Some(focus), &mut pair_counts);
+
+        assert_eq!(pair_counts.len(), files.len() - 1);
+        assert!(pair_counts.keys().all(|(a, b)| *a == focus || *b == focus));
+        assert!(pair_counts.values().all(|count| *count == 1));
+    }
+
+    #[test]
+    fn test_focus_output_order_after_top_n() {
+        let commits: Vec<CommitRecord> = (0..5)
+            .map(|i| commit(&format!("c{i}"), i, &["z.rs", "c.rs", "b.rs", "a.rs"]))
+            .collect();
+        let opts = CouplingOptions {
+            top_n: 2,
+            focus: Some(PathBuf::from("z.rs")),
+            ..CouplingOptions::default()
+        };
+
+        let report = analyze(&commits, None, "90d", &opts);
+        let paths: Vec<(&Path, &Path)> = report
+            .pairs
+            .iter()
+            .map(|pair| (pair.file_a.as_path(), pair.file_b.as_path()))
+            .collect();
+
+        assert_eq!(
+            paths,
+            vec![
+                (Path::new("a.rs"), Path::new("z.rs")),
+                (Path::new("b.rs"), Path::new("z.rs")),
+            ]
         );
     }
 
