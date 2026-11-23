@@ -25,7 +25,6 @@ walkdir.workspace = true
 globset.workspace = true
 
 # Parallelism
-rayon.workspace = true
 crossbeam-channel.workspace = true
 num_cpus.workspace = true
 
@@ -35,9 +34,6 @@ askama.workspace = true
 # Error handling
 thiserror.workspace = true
 
-# Logging
-tracing.workspace = true
-
 # Output formatting
 colored.workspace = true
 comfy-table.workspace = true
@@ -46,11 +42,10 @@ comfy-table.workspace = true
 chrono.workspace = true
 indexmap.workspace = true
 regex.workspace = true
-once_cell.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion.workspace = true
 
 [[bench]]
 name = "counting"

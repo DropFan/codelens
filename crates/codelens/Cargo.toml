@@ -44,7 +44,6 @@ tracing-subscriber.workspace = true
 
 # Output
 colored.workspace = true
-indicatif.workspace = true
 
 # Utilities
 chrono.workspace = true
