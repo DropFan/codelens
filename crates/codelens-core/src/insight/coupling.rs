@@ -165,6 +165,8 @@ pub fn analyze(
             .partial_cmp(&x.degree)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(y.shared_commits.cmp(&x.shared_commits))
+            .then_with(|| x.file_a.cmp(&y.file_a))
+            .then_with(|| x.file_b.cmp(&y.file_b))
     });
     pairs.truncate(opts.top_n);
 
@@ -327,6 +329,32 @@ mod tests {
         };
         let report = analyze(&commits, None, "90d", &opts);
         assert_eq!(report.pairs.len(), 3);
+    }
+
+    #[test]
+    fn test_tied_pairs_sort_by_full_path() {
+        let commits: Vec<CommitRecord> = (0..5)
+            .map(|i| commit(&format!("c{i}"), i, &["c.rs", "b.rs", "a.rs"]))
+            .collect();
+        let opts = CouplingOptions {
+            top_n: 2,
+            ..CouplingOptions::default()
+        };
+
+        let report = analyze(&commits, None, "90d", &opts);
+        let paths: Vec<(&Path, &Path)> = report
+            .pairs
+            .iter()
+            .map(|pair| (pair.file_a.as_path(), pair.file_b.as_path()))
+            .collect();
+
+        assert_eq!(
+            paths,
+            vec![
+                (Path::new("a.rs"), Path::new("b.rs")),
+                (Path::new("a.rs"), Path::new("c.rs")),
+            ]
+        );
     }
 
     #[test]
