@@ -1,8 +1,9 @@
 //! Git repository integration via CLI.
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde::Serialize;
 
@@ -121,17 +122,46 @@ impl GitClient {
     /// Walks the entire history once, so this is noticeably slower than the
     /// windowed queries on repositories with very long histories.
     pub fn first_commit_times(&self) -> Result<HashMap<PathBuf, i64>> {
-        let commits = self.commit_log_range(None)?;
-        let mut first: HashMap<PathBuf, i64> = HashMap::new();
-        for commit in &commits {
-            for change in &commit.files {
-                first
-                    .entry(change.path.clone())
-                    .and_modify(|ts| *ts = (*ts).min(commit.timestamp))
-                    .or_insert(commit.timestamp);
+        let mut child = Command::new("git")
+            .args([
+                "-c",
+                "core.quotepath=false",
+                "log",
+                "--numstat",
+                "-z",
+                "-M",
+                "--format=%x01%ct%x00",
+            ])
+            .current_dir(&self.repo_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::GitError {
+                message: format!("failed to execute git log: {e}"),
+            })?;
+
+        let stdout = child.stdout.take().ok_or_else(|| Error::GitError {
+            message: "failed to read git log stdout".to_string(),
+        })?;
+        let parsed = parse_first_commit_times(BufReader::new(stdout));
+        let output = child.wait_with_output().map_err(|e| Error::GitError {
+            message: format!("failed to wait for git log: {e}"),
+        })?;
+
+        if !output.status.success() {
+            // An empty repository (no commits yet) causes git log to fail.
+            if self.run_git(&["rev-parse", "HEAD"]).is_err() {
+                return Ok(HashMap::new());
             }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::GitError {
+                message: format!("git log failed: {stderr}"),
+            });
         }
-        Ok(first)
+
+        parsed.map_err(|e| Error::GitError {
+            message: format!("failed to read git log: {e}"),
+        })
     }
 
     fn commit_log_range(&self, since: Option<&str>) -> Result<Vec<CommitRecord>> {
@@ -435,6 +465,76 @@ fn parse_log(output: &str) -> Vec<CommitRecord> {
     commits
 }
 
+/// Stream NUL-delimited numstat records into the minimum state needed for
+/// file ages. Git emits a rename as `counts\0old\0new\0`; ordinary paths are
+/// part of the `counts\tpath\0` record. Processing newest-first keeps rename
+/// resolution time-aware when an old path is later recreated.
+fn parse_first_commit_times<R: BufRead>(mut reader: R) -> std::io::Result<HashMap<PathBuf, i64>> {
+    let mut first: HashMap<PathBuf, i64> = HashMap::new();
+    let mut final_name: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut timestamp = 0;
+    let mut field = Vec::new();
+
+    while read_nul_field(&mut reader, &mut field)? {
+        let record = field.strip_prefix(b"\n").unwrap_or(&field);
+        if record.is_empty() {
+            continue;
+        }
+
+        if record[0] == HEADER_MARK as u8 {
+            timestamp = String::from_utf8_lossy(&record[1..])
+                .parse::<i64>()
+                .unwrap_or(0);
+            continue;
+        }
+
+        let mut parts = record.splitn(3, |byte| *byte == b'\t');
+        let (Some(_added), Some(_deleted), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+
+        let path = if path.is_empty() {
+            let mut old = Vec::new();
+            let mut new = Vec::new();
+            if !read_nul_field(&mut reader, &mut old)? || !read_nul_field(&mut reader, &mut new)? {
+                break;
+            }
+            let old = path_from_bytes(&old);
+            let new = path_from_bytes(&new);
+            let target = final_name.get(&new).cloned().unwrap_or(new);
+            final_name.insert(old, target.clone());
+            target
+        } else {
+            let raw = path_from_bytes(path);
+            final_name.get(&raw).cloned().unwrap_or(raw)
+        };
+
+        first
+            .entry(path)
+            .and_modify(|oldest| *oldest = (*oldest).min(timestamp))
+            .or_insert(timestamp);
+    }
+
+    Ok(first)
+}
+
+fn read_nul_field<R: BufRead>(reader: &mut R, field: &mut Vec<u8>) -> std::io::Result<bool> {
+    field.clear();
+    let read = reader.read_until(b'\0', field)?;
+    if read == 0 {
+        return Ok(false);
+    }
+    if field.last() == Some(&b'\0') {
+        field.pop();
+    }
+    Ok(true)
+}
+
+fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
 /// Parse `git log -p -U0 --format=%x01%H` output into per-commit changed
 /// line ranges on the new-file side. Hunk headers look like
 /// `@@ -a,b +c,d @@` (`,b`/`,d` omitted when 1).
@@ -609,6 +709,22 @@ mod tests {
         format!("\u{01}{hash}\u{1f}{author}\u{1f}{ts}")
     }
 
+    fn age_header(output: &mut Vec<u8>, timestamp: i64) {
+        output.extend_from_slice(format!("\u{01}{timestamp}\0").as_bytes());
+    }
+
+    fn age_change(output: &mut Vec<u8>, added: &str, deleted: &str, path: &str) {
+        output.extend_from_slice(format!("\n{added}\t{deleted}\t{path}\0").as_bytes());
+    }
+
+    fn age_rename(output: &mut Vec<u8>, old: &str, new: &str) {
+        output.extend_from_slice(b"\n0\t0\t\0");
+        output.extend_from_slice(old.as_bytes());
+        output.push(0);
+        output.extend_from_slice(new.as_bytes());
+        output.push(0);
+    }
+
     #[test]
     fn test_parse_log_empty() {
         assert!(parse_log("").is_empty());
@@ -642,6 +758,38 @@ mod tests {
         assert_eq!(commits.len(), 2);
         assert!(commits[0].files.is_empty());
         assert_eq!(commits[1].files.len(), 1);
+    }
+
+    #[test]
+    fn test_first_commit_parser_handles_renames_recreation_and_special_paths() {
+        let old = "旧 路径[一]\t.rs";
+        let middle = "中间{路径}.rs";
+        let final_path = ":最终 路径.rs";
+        let mut input = Vec::new();
+
+        // Newest-first, matching git log. The empty commit contributes no age.
+        age_header(&mut input, 600);
+        age_header(&mut input, 500);
+        age_change(&mut input, "0", "1", final_path);
+        age_header(&mut input, 400);
+        age_change(&mut input, "2", "0", old);
+        age_header(&mut input, 300);
+        age_rename(&mut input, middle, final_path);
+        age_header(&mut input, 200);
+        age_rename(&mut input, old, middle);
+        age_header(&mut input, 100);
+        age_change(&mut input, "5", "0", old);
+
+        let ages = parse_first_commit_times(std::io::Cursor::new(input)).unwrap();
+        assert_eq!(ages[Path::new(final_path)], 100);
+        assert_eq!(ages[Path::new(old)], 400);
+        assert!(!ages.contains_key(Path::new(middle)));
+    }
+
+    #[test]
+    fn test_first_commit_parser_empty_history() {
+        let ages = parse_first_commit_times(std::io::Cursor::new(Vec::<u8>::new())).unwrap();
+        assert!(ages.is_empty());
     }
 
     #[test]
@@ -988,6 +1136,7 @@ mod tests {
         let client = GitClient::detect(temp.path()).unwrap();
         let churns = client.file_churn("90 days ago").unwrap();
         assert!(churns.is_empty());
+        assert!(client.first_commit_times().unwrap().is_empty());
     }
 
     #[test]
