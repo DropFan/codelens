@@ -1079,6 +1079,11 @@ mod tests {
 
         let client = GitClient::detect(temp.path()).unwrap();
         let commits = client.commit_log("90 days ago").unwrap();
+        assert_eq!(
+            commits.len(),
+            client.commit_count("90 days ago").unwrap(),
+            "the parsed log snapshot and the standalone count must agree"
+        );
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0].author, "Test");
         assert!(commits[0].timestamp > 0);

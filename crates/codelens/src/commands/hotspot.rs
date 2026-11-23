@@ -28,7 +28,7 @@ pub(crate) fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs)
     let commits = git_client.commit_log(&since)?;
     let churns = git::churn_from_commits(&commits);
     let authors = git::aggregate_authors(&commits);
-    let total_commits = git_client.commit_count(&since)?;
+    let total_commits = commits.len();
     if total_commits == 0 {
         eprintln!(
             "{}: no commits found since '{}'; check the --since format (e.g. 30d, 4w, 6m, 1y, YYYY-MM-DD)",

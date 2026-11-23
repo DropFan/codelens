@@ -149,7 +149,7 @@ impl CodelensServer {
             let commits = git_client.commit_log(&since)?;
             let churns = codelens_core::git::churn_from_commits(&commits);
             let authors = codelens_core::git::aggregate_authors(&commits);
-            let total = git_client.commit_count(&since)?;
+            let total = commits.len();
             let mut report =
                 hotspot::analyze(&churns, &result, &since_arg, total, args.top.unwrap_or(10));
             hotspot::attach_knowledge(&mut report, &authors);
