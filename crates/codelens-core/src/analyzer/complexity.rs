@@ -558,7 +558,7 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
             continue;
         }
         let Some(token) = trie
-            .match_at(source, i)
+            .match_ref_at(source, i)
             .filter(|token| !token.line_start_only || token_at_line_start)
         else {
             i += 1;
@@ -573,8 +573,8 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
                 }
             }
             TokenType::BlockCommentStart => {
-                let open = source[start..start + token.advance].to_vec();
-                let close = token.close.unwrap_or_default();
+                let open = &source[start..start + token.advance];
+                let close = token.close.as_deref().unwrap_or_default();
                 i += token.advance;
                 let mut nested_depth = 0usize;
                 let mut comment_line_start = false;
@@ -587,7 +587,7 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
                     }
                     let anchored = !token.line_start_only || comment_line_start;
                     comment_line_start = false;
-                    if anchored && bytes_match_at(source, i, &close) {
+                    if anchored && bytes_match_at(source, i, close) {
                         i += close.len();
                         if nested_depth == 0 {
                             break;
@@ -595,7 +595,7 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
                         nested_depth -= 1;
                         continue;
                     }
-                    if token.nested && anchored && bytes_match_at(source, i, &open) {
+                    if token.nested && anchored && bytes_match_at(source, i, open) {
                         nested_depth += 1;
                         i += open.len();
                         continue;
@@ -604,7 +604,7 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
                 }
             }
             TokenType::StringDelimiter | TokenType::DocStringDelimiter => {
-                let close = token.close.unwrap_or_default();
+                let close = token.close.as_deref().unwrap_or_default();
                 i += token.advance;
                 while i < source.len() {
                     if source[i] == b'\n' && !token.multiline {
@@ -614,7 +614,7 @@ pub(crate) fn mask_non_code(content: &str, lang: &Language) -> String {
                         i = (i + 2).min(source.len());
                         continue;
                     }
-                    if bytes_match_at(source, i, &close) {
+                    if bytes_match_at(source, i, close) {
                         i += close.len();
                         break;
                     }

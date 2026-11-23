@@ -27,13 +27,13 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
 
     let mut stats = LineStats::default();
     let mut state = State::Blank;
-    let mut close_bytes: Vec<u8> = Vec::new();
+    let mut close_bytes: &[u8] = &[];
     // 当前字符串定界符是否允许跨行（非跨行的未闭合字符串在行尾复位）
     let mut string_multiline = false;
     // 当前字符串定界符的转义字节（None 表示无转义，如 shell 单引号）
     let mut string_escape: Option<u8> = None;
     // 当前块注释的开启序列、是否可嵌套及嵌套深度
-    let mut open_bytes: Vec<u8> = Vec::new();
+    let mut open_bytes: &[u8] = &[];
     let mut comment_nested = false;
     let mut comment_depth: usize = 0;
     // 当前块注释的开/闭序列是否要求出现在列 0（Ruby =begin/=end）
@@ -73,7 +73,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                 if should_process(byte, mask) {
                     // 行首约束的 token（如 Ruby =begin）不在行中生效
                     if let Some(m) = trie
-                        .match_at(content, index)
+                        .match_ref_at(content, index)
                         .filter(|m| !m.line_start_only || line_start)
                     {
                         match m.token_type {
@@ -83,8 +83,8 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 continue;
                             }
                             TokenType::BlockCommentStart => {
-                                close_bytes = m.close.unwrap_or_default();
-                                open_bytes = content[index..index + m.advance].to_vec();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
+                                open_bytes = &content[index..index + m.advance];
                                 comment_nested = m.nested;
                                 comment_depth = 0;
                                 comment_line_start_only = m.line_start_only;
@@ -93,7 +93,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 continue;
                             }
                             TokenType::StringDelimiter => {
-                                close_bytes = m.close.unwrap_or_default();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
                                 string_multiline = m.multiline;
                                 string_escape = m.escape;
                                 state = State::InString;
@@ -101,7 +101,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 continue;
                             }
                             TokenType::DocStringDelimiter => {
-                                close_bytes = m.close.unwrap_or_default();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
                                 state = State::InDocString;
                                 index += m.advance;
                                 continue;
@@ -117,7 +117,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                 if should_process(byte, mask) {
                     // 行首约束的 token（如 Ruby =begin）不在行中生效
                     if let Some(m) = trie
-                        .match_at(content, index)
+                        .match_ref_at(content, index)
                         .filter(|m| !m.line_start_only || line_start)
                     {
                         match m.token_type {
@@ -127,8 +127,8 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 continue;
                             }
                             TokenType::BlockCommentStart => {
-                                close_bytes = m.close.unwrap_or_default();
-                                open_bytes = content[index..index + m.advance].to_vec();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
+                                open_bytes = &content[index..index + m.advance];
                                 comment_nested = m.nested;
                                 comment_depth = 0;
                                 comment_line_start_only = m.line_start_only;
@@ -137,7 +137,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                                 continue;
                             }
                             TokenType::StringDelimiter => {
-                                close_bytes = m.close.unwrap_or_default();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
                                 string_multiline = m.multiline;
                                 string_escape = m.escape;
                                 state = State::InString;
@@ -146,7 +146,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                             }
                             TokenType::DocStringDelimiter => {
                                 // Triple-quote after code = string assignment, not docstring
-                                close_bytes = m.close.unwrap_or_default();
+                                close_bytes = m.close.as_deref().unwrap_or_default();
                                 string_multiline = m.multiline;
                                 string_escape = m.escape;
                                 state = State::InString;
@@ -167,7 +167,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             State::BlockComment | State::BlockCommentAfterCode => {
                 // 行首约束的闭合序列（如 Ruby =end）只在列 0 生效
                 let anchored = !comment_line_start_only || line_start;
-                if anchored && content_matches_at(content, index, &close_bytes) {
+                if anchored && content_matches_at(content, index, close_bytes) {
                     index += close_bytes.len();
                     // 嵌套注释：先弹出内层，深度归零才真正闭合
                     if comment_depth > 0 {
@@ -182,7 +182,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                     };
                     continue;
                 }
-                if comment_nested && anchored && content_matches_at(content, index, &open_bytes) {
+                if comment_nested && anchored && content_matches_at(content, index, open_bytes) {
                     comment_depth += 1;
                     index += open_bytes.len();
                     continue;
@@ -201,7 +201,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
                     }
                     continue;
                 }
-                if content_matches_at(content, index, &close_bytes) {
+                if content_matches_at(content, index, close_bytes) {
                     index += close_bytes.len();
                     state = State::Code;
                     continue;
@@ -210,7 +210,7 @@ pub fn count_stats(content: &[u8], trie: &TokenTrie, mask: u8) -> LineStats {
             }
 
             State::InDocString => {
-                if content_matches_at(content, index, &close_bytes) {
+                if content_matches_at(content, index, close_bytes) {
                     index += close_bytes.len();
                     // docstring 闭合后继续扫描，同行代码算 code
                     state = State::AfterBlockComment;
@@ -584,6 +584,26 @@ mod tests {
         assert_eq!(stats.total, 2);
         assert_eq!(stats.code, 1);
         assert_eq!(stats.comment, 1);
+    }
+
+    #[test]
+    fn test_mixed_token_boundaries_without_trailing_newline() {
+        let stats = count(
+            concat!(
+                "let text = \"/* not a comment */ // still string\";\n",
+                "// line comment\n",
+                "/* outer\n",
+                "/* nested */\n",
+                "*/ let value = \"// code string\";\n",
+                "let tail = \"ok\";",
+            ),
+            &rust_lang(),
+        );
+
+        assert_eq!(stats.total, 6);
+        assert_eq!(stats.code, 3);
+        assert_eq!(stats.comment, 3);
+        assert_eq!(stats.blank, 0);
     }
 
     #[test]

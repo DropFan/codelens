@@ -103,6 +103,11 @@ impl TokenTrie {
 
     /// Try to match a token at position `pos`. Returns longest match (greedy).
     pub fn match_at(&self, content: &[u8], pos: usize) -> Option<TokenMatch> {
+        self.match_ref_at(content, pos).cloned()
+    }
+
+    /// Borrow the longest token match at `pos` for internal scanning hot paths.
+    pub(crate) fn match_ref_at(&self, content: &[u8], pos: usize) -> Option<&TokenMatch> {
         let mut node = &self.root;
         let mut last_match: Option<&TokenMatch> = None;
 
@@ -118,7 +123,7 @@ impl TokenTrie {
             }
         }
 
-        last_match.cloned()
+        last_match
     }
 
     pub fn process_mask(&self) -> u8 {
@@ -287,6 +292,21 @@ mod tests {
         let m = trie.match_at(b"\"hello\"", 0).unwrap();
         assert_eq!(m.token_type, TokenType::StringDelimiter);
         assert_eq!(m.close.as_deref(), Some(b"\"".as_slice()));
+    }
+
+    #[test]
+    fn borrowed_match_reuses_the_stored_token() {
+        let mut trie = TokenTrie::new();
+        trie.insert(
+            b"/*",
+            TokenMatch::new(TokenType::BlockCommentStart, Some(b"*/".to_vec())),
+        );
+
+        let first = trie.match_ref_at(b"/* block */", 0).unwrap();
+        let second = trie.match_ref_at(b"/* another */", 0).unwrap();
+
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(first.close.as_deref(), Some(b"*/".as_slice()));
     }
 
     #[test]
