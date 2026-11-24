@@ -148,10 +148,19 @@ runs:
         # never by interpolating the input into the command line.
         read -r -a PATHS <<<"$INPUT_PATH"
 
-        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} -f markdown -O codelens-health.md
-        GATE_CODE=$?
-        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f json -O codelens-health.json || true
-        codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f badge -O codelens-badge.json || true
+        if codelens health --help 2>/dev/null | grep -q -- '--emit'; then
+          codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} \
+            -f markdown -O codelens-health.md \
+            --emit json=codelens-health.json \
+            --emit badge=codelens-badge.json
+          GATE_CODE=$?
+        else
+          # Compatibility with older releases selected through the version input.
+          codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} -f markdown -O codelens-health.md
+          GATE_CODE=$?
+          codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f json -O codelens-health.json || true
+          codelens health "${PATHS[@]}" ${ANALYSIS_ARGS[@]+"${ANALYSIS_ARGS[@]}"} -f badge -O codelens-badge.json || true
+        fi
 
         SCORE=$(jq -r '.score // empty' codelens-health.json 2>/dev/null || true)
         GRADE=$(jq -r '.grade // empty' codelens-health.json 2>/dev/null || true)

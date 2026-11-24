@@ -2,6 +2,8 @@
 
 在 CI 里跑代码健康门禁：健康分低于阈值、或相对基线分支出现回归时让 PR 变红，并把报告贴成 PR 置顶评论和 step summary。
 
+支持 `--emit` 的版本只扫描一次代码，再从同一份健康报告生成 Markdown、JSON 和 badge。通过 `version` 固定到旧版 CLI 时，Action 自动回退到原来的三次扫描流程。
+
 ## 快速开始
 
 ```yaml
