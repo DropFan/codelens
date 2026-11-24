@@ -102,7 +102,12 @@ codelens health . -f json       # Output as JSON
 codelens health . --health-model v2   # Use file-first, language-aware scoring
 codelens health . --fail-under B   # CI gate: exit 1 if health is below B
 codelens health . --baseline main --fail-on-regression   # regression gate
+codelens health . -f markdown -O health.md --emit json=health.json --emit badge=badge.json
 ```
+
+`health --emit FORMAT=FILE` is repeatable. It writes extra formats from the
+same analysis and comparison result, avoiding a full rescan for each file.
+The normal `-f`/`-O` output remains the primary output.
 
 `--health-model v1|v2` is a global option and applies to the default report,
 `health`, `diff`, and MCP server. It can also be set in `.codelens.toml`:
@@ -239,6 +244,9 @@ codelens estimate . --avg-wage 120000      # Custom salary across all models
 | OpenMetrics | `-f openmetrics` | Prometheus text format, including health assessment labels |
 | Badge | `-f badge` | shields.io endpoint JSON; insufficient data renders as a neutral badge |
 | SARIF | `-f sarif` | SARIF 2.1.0 findings, including insufficient-data warnings |
+
+For health reports that need several files, repeat `--emit FORMAT=FILE` to
+render them from one scan. All formats in the table are accepted.
 
 ## CI Integration
 

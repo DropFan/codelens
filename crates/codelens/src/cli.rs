@@ -130,6 +130,11 @@ pub struct HealthArgs {
     #[arg(long, requires = "baseline")]
     pub fail_on_regression: bool,
 
+    /// Write the same health report to an additional FORMAT=FILE target.
+    /// Repeat the flag to create multiple formats from one analysis.
+    #[arg(long, value_name = "FORMAT=FILE")]
+    pub emit: Vec<OutputTargetArg>,
+
     #[command(flatten)]
     pub filter: FilterArgs,
 
@@ -502,7 +507,7 @@ pub struct AdvancedArgs {
 }
 
 /// Output format argument.
-#[derive(ValueEnum, Clone, Copy, Debug, Default)]
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutputFormatArg {
     #[default]
     Console,
@@ -516,6 +521,33 @@ pub enum OutputFormatArg {
     Badge,
     /// SARIF 2.1.0 for GitHub code scanning / reviewdog.
     Sarif,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputTargetArg {
+    pub format: OutputFormatArg,
+    pub file: PathBuf,
+}
+
+impl std::str::FromStr for OutputTargetArg {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let invalid = || {
+            format!(
+                "invalid output target '{value}'; expected FORMAT=FILE (for example json=health.json)"
+            )
+        };
+        let (format, file) = value.split_once('=').ok_or_else(invalid)?;
+        if format.is_empty() || file.is_empty() {
+            return Err(invalid());
+        }
+        let format = OutputFormatArg::from_str(format, false).map_err(|_| invalid())?;
+        Ok(Self {
+            format,
+            file: PathBuf::from(file),
+        })
+    }
 }
 
 /// User-selectable health scoring pipeline.
@@ -693,5 +725,38 @@ mod tests {
 
         assert!(help.contains("insufficient-data estimates also fail"));
         assert!(help.contains("comparison has insufficient v2 data"));
+    }
+
+    #[test]
+    fn health_emit_accepts_multiple_format_file_targets() {
+        let cli = Cli::try_parse_from([
+            "codelens",
+            "health",
+            ".",
+            "--emit",
+            "json=health.json",
+            "--emit",
+            "badge=badge.json",
+        ])
+        .unwrap();
+        let Some(Command::Health(args)) = cli.command else {
+            panic!("expected health command");
+        };
+
+        assert_eq!(args.emit.len(), 2);
+        assert_eq!(args.emit[0].format, OutputFormatArg::Json);
+        assert_eq!(args.emit[0].file, PathBuf::from("health.json"));
+        assert_eq!(args.emit[1].format, OutputFormatArg::Badge);
+        assert_eq!(args.emit[1].file, PathBuf::from("badge.json"));
+    }
+
+    #[test]
+    fn health_emit_rejects_missing_format_or_file() {
+        for target in ["json", "=health.json", "json="] {
+            let error = Cli::try_parse_from(["codelens", "health", ".", "--emit", target])
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("FORMAT=FILE"), "unexpected error: {error}");
+        }
     }
 }

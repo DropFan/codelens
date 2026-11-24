@@ -15,7 +15,7 @@ use codelens_core::output::Report;
 
 use super::{
     compare::{analysis_is_valid, analyze_at_git_ref, prepare_comparison},
-    load_partial_config, resolve_config, scoring_model_for, write_report,
+    load_partial_config, resolve_config, scoring_model_for, write_report_targets,
 };
 use crate::cli;
 
@@ -82,7 +82,21 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
         args.fail_on_regression,
         args.baseline.as_deref(),
     );
-    write_report(Report::Health(report), &config.output)?;
+    let output_report = Report::Health(report);
+    let additional_outputs = args
+        .emit
+        .iter()
+        .map(|target| {
+            let mut output = config.output.clone();
+            output.format = target.format.into();
+            output.file = Some(target.file.clone());
+            output
+        })
+        .collect::<Vec<_>>();
+    write_report_targets(
+        &output_report,
+        std::iter::once(&config.output).chain(additional_outputs.iter()),
+    )?;
 
     if let Some(reason) = gate_failure {
         eprintln!("{}: {reason}", "gate failed".red().bold());
