@@ -11,9 +11,12 @@ use crate::insight::scoring::HealthDimension;
 use crate::insight::Grade;
 
 use super::format::{
-    health_model_display_name, AnalysisPresentation, EstimationComparisonPresentation,
-    EstimationPresentation, HealthDirectoryPresentation, HealthFilePresentation,
-    HealthLanguagePresentation, HealthPresentation, OutputFormat, OutputOptions, Report,
+    health_model_display_name, AnalysisPresentation, CouplingPairPresentation,
+    CouplingPresentation, DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation,
+    EstimationComparisonPresentation, EstimationPresentation, HealthDirectoryPresentation,
+    HealthFilePresentation, HealthLanguagePresentation, HealthPresentation,
+    HotspotFilePresentation, HotspotFunctionFilePresentation, HotspotPresentation, OutputFormat,
+    OutputOptions, Report, TrendLanguagePresentation, TrendMetricPresentation, TrendPresentation,
 };
 
 // ── Analysis (existing) ──────────────────────────────────
@@ -253,6 +256,58 @@ struct HtmlFunctionHotspotFile {
     functions: Vec<HtmlFunctionHotspot>,
 }
 
+fn html_hotspot_file(file: &HotspotFilePresentation, detailed_owner: bool) -> HtmlFileHotspot {
+    let authors = match (&file.knowledge_island, detailed_owner) {
+        (Some(knowledge), true) => format!(
+            "{} · {} {:.0}% · knowledge island",
+            file.authors.trim_end_matches(" ★"),
+            knowledge.main_author,
+            knowledge.ownership_percent,
+        ),
+        (Some(knowledge), false) => format!(
+            "{} ({} {:.0}%)",
+            file.authors, knowledge.main_author, knowledge.ownership_percent,
+        ),
+        (None, _) => file.authors.clone(),
+    };
+
+    HtmlFileHotspot {
+        path: file.path.clone(),
+        language: file.language.clone(),
+        commits: file.commits,
+        lines_added: file.lines_added,
+        lines_deleted: file.lines_deleted,
+        cyclomatic: file.cyclomatic,
+        age: file.age.clone(),
+        authors,
+        score_display: file.score.clone(),
+        score_pct: file.score_percent,
+        risk: file.risk.to_string(),
+    }
+}
+
+fn html_function_hotspots(
+    files: &[HotspotFunctionFilePresentation],
+) -> Vec<HtmlFunctionHotspotFile> {
+    files
+        .iter()
+        .map(|file| HtmlFunctionHotspotFile {
+            path: file.path.clone(),
+            functions: file
+                .functions
+                .iter()
+                .map(|function| HtmlFunctionHotspot {
+                    name: function.name.clone(),
+                    start_line: function.start_line,
+                    end_line: function.end_line,
+                    commits: function.commits,
+                    cyclomatic: function.cyclomatic,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 #[derive(Template)]
 #[template(path = "hotspot.html")]
 struct HotspotHtmlReport {
@@ -273,6 +328,18 @@ struct HtmlCouplingPair {
     commits_b: usize,
     degree_display: String,
     degree_pct: u32,
+}
+
+fn html_coupling_pair(pair: &CouplingPairPresentation) -> HtmlCouplingPair {
+    HtmlCouplingPair {
+        file_a: pair.file_a.clone(),
+        file_b: pair.file_b.clone(),
+        shared_commits: pair.shared_commits,
+        commits_a: pair.commits_a,
+        commits_b: pair.commits_b,
+        degree_display: pair.degree_text.clone(),
+        degree_pct: pair.degree.clamp(0.0, 100.0) as u32,
+    }
 }
 
 #[derive(Template)]
@@ -298,6 +365,36 @@ struct HtmlTrendMetric {
     percent_display: String,
 }
 
+fn html_trend_metric(metric: &TrendMetricPresentation, code_label: &str) -> HtmlTrendMetric {
+    HtmlTrendMetric {
+        label: if metric.name == "Code" {
+            code_label.to_string()
+        } else {
+            metric.name.to_string()
+        },
+        from_value: metric.start,
+        to_value: metric.end,
+        signed_delta: metric.signed_change,
+        delta_display: if metric.signed_change == 0 {
+            "+0".to_string()
+        } else {
+            metric.signed_change_text.clone()
+        },
+        percent_display: metric.percent_change_text.clone(),
+    }
+}
+
+fn html_diff_metric(metric: &DiffMetricPresentation) -> HtmlTrendMetric {
+    HtmlTrendMetric {
+        label: metric.label.to_string(),
+        from_value: metric.before,
+        to_value: metric.after,
+        signed_delta: metric.delta,
+        delta_display: metric.delta_text.clone(),
+        percent_display: metric.percent_text.clone(),
+    }
+}
+
 struct HtmlLanguageTrend {
     language: String,
     status: String,
@@ -305,6 +402,28 @@ struct HtmlLanguageTrend {
     code_to: usize,
     code_delta: i64,
     code_delta_display: String,
+}
+
+fn html_trend_language(language: &TrendLanguagePresentation) -> HtmlLanguageTrend {
+    HtmlLanguageTrend {
+        language: language.name.clone(),
+        status: language.marker.clone(),
+        code_from: language.code_start,
+        code_to: language.code_end,
+        code_delta: language.signed_code_change,
+        code_delta_display: language.signed_code_change_text.clone(),
+    }
+}
+
+fn html_diff_language(language: &DiffLanguagePresentation) -> HtmlLanguageTrend {
+    HtmlLanguageTrend {
+        language: language.language.clone(),
+        status: language.status.clone(),
+        code_from: language.code_before,
+        code_to: language.code_after,
+        code_delta: language.code_delta,
+        code_delta_display: language.code_delta_text.clone(),
+    }
 }
 
 struct HtmlHistoryPoint {
@@ -678,103 +797,41 @@ impl HtmlOutput {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let hotspots = hotspot
-            .map(|report| {
-                report
-                    .files
+        let hotspot_view = hotspot.map(HotspotPresentation::from_report);
+        let hotspots = hotspot_view
+            .as_ref()
+            .map(|view| {
+                view.files
                     .iter()
-                    .map(|file| HtmlFileHotspot {
-                        path: file.path.display().to_string(),
-                        language: file.language.clone(),
-                        commits: file.churn.commits,
-                        lines_added: file.churn.lines_added,
-                        lines_deleted: file.churn.lines_deleted,
-                        cyclomatic: file.complexity.cyclomatic,
-                        age: file
-                            .age_days
-                            .map(crate::insight::hotspot::format_age)
-                            .unwrap_or_else(|| "-".to_string()),
-                        authors: match &file.knowledge {
-                            Some(knowledge) if knowledge.knowledge_island => format!(
-                                "{} · {} {:.0}% · knowledge island",
-                                knowledge.authors,
-                                knowledge.main_author,
-                                knowledge.ownership * 100.0
-                            ),
-                            Some(knowledge) => knowledge.authors.to_string(),
-                            None => "-".to_string(),
-                        },
-                        score_display: format!("{:.2}", file.hotspot_score),
-                        score_pct: (file.hotspot_score * 100.0) as u32,
-                        risk: file.risk.to_string(),
-                    })
+                    .map(|file| html_hotspot_file(file, true))
                     .collect()
             })
             .unwrap_or_default();
-        let coupling_pairs = coupling
-            .map(|report| {
-                report
-                    .pairs
-                    .iter()
-                    .map(|pair| HtmlCouplingPair {
-                        file_a: pair.file_a.display().to_string(),
-                        file_b: pair.file_b.display().to_string(),
-                        shared_commits: pair.shared_commits,
-                        commits_a: pair.commits_a,
-                        commits_b: pair.commits_b,
-                        degree_display: format!("{:.0}%", pair.degree),
-                        degree_pct: pair.degree.clamp(0.0, 100.0) as u32,
-                    })
-                    .collect()
-            })
+        let coupling_view = coupling.map(CouplingPresentation::from_report);
+        let coupling_pairs = coupling_view
+            .as_ref()
+            .map(|view| view.rows.iter().map(html_coupling_pair).collect())
             .unwrap_or_default();
 
-        let make_trend_metric =
-            |label: &str, delta: &crate::insight::DeltaValue<usize>| -> HtmlTrendMetric {
-                let signed_delta = delta.signed_delta();
-                HtmlTrendMetric {
-                    label: label.to_string(),
-                    from_value: delta.from,
-                    to_value: delta.to,
-                    signed_delta,
-                    delta_display: if signed_delta >= 0 {
-                        format!("+{signed_delta}")
-                    } else {
-                        signed_delta.to_string()
-                    },
-                    percent_display: format!("{:+.1}%", delta.percent),
-                }
-            };
-        let trend_metrics = trend
-            .map(|report| {
-                vec![
-                    make_trend_metric("Files", &report.delta.files),
-                    make_trend_metric("Code lines", &report.delta.code),
-                    make_trend_metric("Complexity", &report.delta.complexity),
-                    make_trend_metric("Functions", &report.delta.functions),
-                ]
+        let trend_view = trend.map(TrendPresentation::from_report);
+        let trend_metrics = trend_view
+            .as_ref()
+            .map(|view| {
+                view.metric_rows
+                    .iter()
+                    .filter(|metric| {
+                        matches!(metric.name, "Files" | "Code" | "Complexity" | "Functions")
+                    })
+                    .map(|metric| html_trend_metric(metric, "Code lines"))
+                    .collect()
             })
             .unwrap_or_default();
-        let mut trend_languages = trend
-            .map(|report| {
-                report
-                    .by_language
+        let mut trend_languages = trend_view
+            .as_ref()
+            .map(|view| {
+                view.language_rows
                     .iter()
-                    .map(|language| {
-                        let signed_delta = language.code.signed_delta();
-                        HtmlLanguageTrend {
-                            language: language.language.clone(),
-                            status: language.status.to_string(),
-                            code_from: language.code.from,
-                            code_to: language.code.to,
-                            code_delta: signed_delta,
-                            code_delta_display: if signed_delta >= 0 {
-                                format!("+{signed_delta}")
-                            } else {
-                                signed_delta.to_string()
-                            },
-                        }
-                    })
+                    .map(html_trend_language)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -842,25 +899,41 @@ impl HtmlOutput {
             priority_files,
             show_history_sections,
             git_history_note: git_history_note.to_string(),
-            hotspot_since: hotspot.map(|report| report.since.clone()).unwrap_or_default(),
-            hotspot_total_commits: hotspot.map(|report| report.total_commits).unwrap_or(0),
+            hotspot_since: hotspot_view
+                .as_ref()
+                .map(|view| view.since.clone())
+                .unwrap_or_default(),
+            hotspot_total_commits: hotspot_view
+                .as_ref()
+                .map(|view| view.total_commits)
+                .unwrap_or(0),
             hotspots,
-            coupling_since: coupling.map(|report| report.since.clone()).unwrap_or_default(),
-            coupling_total_commits: coupling.map(|report| report.total_commits).unwrap_or(0),
-            coupling_excluded_test_files: coupling
-                .map(|report| report.excluded_test_files)
+            coupling_since: coupling_view
+                .as_ref()
+                .map(|view| view.period.clone())
+                .unwrap_or_default(),
+            coupling_total_commits: coupling_view
+                .as_ref()
+                .map(|view| view.total_commits)
+                .unwrap_or(0),
+            coupling_excluded_test_files: coupling_view
+                .as_ref()
+                .map(|view| view.excluded_test_files)
                 .unwrap_or(0),
             coupling_pairs,
             trend_note: trend_note.to_string(),
-            trend_available: trend.is_some(),
-            trend_from_date: trend
-                .map(|report| report.from.timestamp.format("%Y-%m-%d").to_string())
+            trend_available: trend_view.is_some(),
+            trend_from_date: trend_view
+                .as_ref()
+                .map(|view| view.from_date.clone())
                 .unwrap_or_default(),
-            trend_from_label: trend
-                .and_then(|report| report.from.label.clone())
+            trend_from_label: trend_view
+                .as_ref()
+                .map(|view| view.from_label.clone())
                 .unwrap_or_default(),
-            trend_to_date: trend
-                .map(|report| report.to.timestamp.format("%Y-%m-%d").to_string())
+            trend_to_date: trend_view
+                .as_ref()
+                .map(|view| view.to_date.clone())
                 .unwrap_or_default(),
             trend_metrics,
             trend_languages,
@@ -980,60 +1053,17 @@ impl HtmlOutput {
         report: &crate::insight::hotspot::HotspotReport,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let hotspot = HotspotPresentation::from_report(report);
         let html = HotspotHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            since: report.since.clone(),
-            total_commits: report.total_commits,
-            files: report
+            since: hotspot.since,
+            total_commits: hotspot.total_commits,
+            files: hotspot
                 .files
                 .iter()
-                .map(|h| HtmlFileHotspot {
-                    path: h.path.display().to_string(),
-                    language: h.language.clone(),
-                    commits: h.churn.commits,
-                    lines_added: h.churn.lines_added,
-                    lines_deleted: h.churn.lines_deleted,
-                    cyclomatic: h.complexity.cyclomatic,
-                    age: h
-                        .age_days
-                        .map(crate::insight::hotspot::format_age)
-                        .unwrap_or_else(|| "-".to_string()),
-                    authors: match &h.knowledge {
-                        Some(k) if k.knowledge_island => format!(
-                            "{} ★ ({} {:.0}%)",
-                            k.authors,
-                            k.main_author,
-                            k.ownership * 100.0
-                        ),
-                        Some(k) => k.authors.to_string(),
-                        None => "-".to_string(),
-                    },
-                    score_display: format!("{:.2}", h.hotspot_score),
-                    score_pct: (h.hotspot_score * 100.0) as u32,
-                    risk: h.risk.to_string(),
-                })
+                .map(|file| html_hotspot_file(file, false))
                 .collect(),
-            function_files: report
-                .files
-                .iter()
-                .filter_map(|file| {
-                    file.functions
-                        .as_ref()
-                        .map(|functions| HtmlFunctionHotspotFile {
-                            path: file.path.display().to_string(),
-                            functions: functions
-                                .iter()
-                                .map(|function| HtmlFunctionHotspot {
-                                    name: function.name.clone(),
-                                    start_line: function.start_line,
-                                    end_line: function.end_line,
-                                    commits: function.commits,
-                                    cyclomatic: function.cyclomatic,
-                                })
-                                .collect(),
-                        })
-                })
-                .collect(),
+            function_files: html_function_hotspots(&hotspot.function_files),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
@@ -1044,26 +1074,15 @@ impl HtmlOutput {
         report: &crate::insight::coupling::CouplingReport,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let coupling = CouplingPresentation::from_report(report);
         let html = CouplingHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            since: report.since.clone(),
-            total_commits: report.total_commits,
-            focus: report.focus.as_ref().map(|path| path.display().to_string()),
-            skipped_large_commits: report.skipped_large_commits,
-            excluded_test_files: report.excluded_test_files,
-            pairs: report
-                .pairs
-                .iter()
-                .map(|p| HtmlCouplingPair {
-                    file_a: p.file_a.display().to_string(),
-                    file_b: p.file_b.display().to_string(),
-                    shared_commits: p.shared_commits,
-                    commits_a: p.commits_a,
-                    commits_b: p.commits_b,
-                    degree_display: format!("{:.0}%", p.degree),
-                    degree_pct: (p.degree.min(100.0)) as u32,
-                })
-                .collect(),
+            since: coupling.period,
+            total_commits: coupling.total_commits,
+            focus: coupling.focus,
+            skipped_large_commits: coupling.skipped_large_commits,
+            excluded_test_files: coupling.excluded_test_files,
+            pairs: coupling.rows.iter().map(html_coupling_pair).collect(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
@@ -1076,56 +1095,17 @@ impl HtmlOutput {
     ) -> Result<()> {
         // The trend template renders before/after comparisons; a git-ref
         // diff is exactly that with ref names in place of snapshot dates.
-        let make_metric = |label: &str, dv: &crate::insight::DeltaValue<usize>| {
-            let signed = dv.signed_delta();
-            HtmlTrendMetric {
-                label: label.to_string(),
-                from_value: dv.from,
-                to_value: dv.to,
-                signed_delta: signed,
-                delta_display: if signed >= 0 {
-                    format!("+{signed}")
-                } else {
-                    format!("{signed}")
-                },
-                percent_display: format!("{:+.1}%", dv.percent),
-            }
-        };
-        let d = &report.delta;
-        let metrics = vec![
-            make_metric("Files", &d.files),
-            make_metric("Code", &d.code),
-            make_metric("Comments", &d.comment),
-            make_metric("Complexity", &d.complexity),
-            make_metric("Functions", &d.functions),
-        ];
-        let by_language = report
-            .by_language
-            .iter()
-            .map(|lt| {
-                let signed = lt.code.signed_delta();
-                HtmlLanguageTrend {
-                    language: lt.language.clone(),
-                    status: lt.status.to_string(),
-                    code_from: lt.code.from,
-                    code_to: lt.code.to,
-                    code_delta: signed,
-                    code_delta_display: if signed >= 0 {
-                        format!("+{signed}")
-                    } else {
-                        format!("{signed}")
-                    },
-                }
-            })
-            .collect();
+        let diff = DiffPresentation::from_report(report);
+        let metrics = diff.metrics.iter().map(html_diff_metric).collect();
+        let by_language = diff.languages.iter().map(html_diff_language).collect();
 
         let html = TrendHtmlReport {
-            from_date: report.from.clone(),
+            from_date: diff.from,
             from_label: format!(
                 "health {} ({:.1})",
                 report.health.baseline_grade, report.health.baseline_score
             ),
-            to_date: report.to.clone(),
+            to_date: diff.to,
             to_label: format!("health {} ({:.1})", report.to_grade, report.to_score),
             health_model: health_model_display_name(&report.health.model),
             metrics,
@@ -1157,51 +1137,17 @@ impl HtmlOutput {
         report: &crate::insight::trend::TrendReport,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        let d = &report.delta;
-        let make_metric =
-            |label: &str, dv: &crate::insight::DeltaValue<usize>| -> HtmlTrendMetric {
-                let signed = dv.signed_delta();
-                HtmlTrendMetric {
-                    label: label.to_string(),
-                    from_value: dv.from,
-                    to_value: dv.to,
-                    signed_delta: signed,
-                    delta_display: if signed >= 0 {
-                        format!("+{signed}")
-                    } else {
-                        format!("{signed}")
-                    },
-                    percent_display: format!("{:+.1}%", dv.percent),
-                }
-            };
-
-        let metrics = vec![
-            make_metric("Files", &d.files),
-            make_metric("Code", &d.code),
-            make_metric("Comments", &d.comment),
-            make_metric("Blank", &d.blank),
-            make_metric("Complexity", &d.complexity),
-            make_metric("Functions", &d.functions),
-        ];
-
-        let by_language: Vec<HtmlLanguageTrend> = report
-            .by_language
+        let trend = TrendPresentation::from_report(report);
+        let metrics = trend
+            .metric_rows
             .iter()
-            .map(|lt| {
-                let signed = lt.code.signed_delta();
-                HtmlLanguageTrend {
-                    language: lt.language.clone(),
-                    status: lt.status.to_string(),
-                    code_from: lt.code.from,
-                    code_to: lt.code.to,
-                    code_delta: signed,
-                    code_delta_display: if signed >= 0 {
-                        format!("+{signed}")
-                    } else {
-                        format!("{signed}")
-                    },
-                }
-            })
+            .filter(|metric| metric.name != "Lines")
+            .map(|metric| html_trend_metric(metric, "Code"))
+            .collect();
+        let by_language = trend
+            .language_rows
+            .iter()
+            .map(html_trend_language)
             .collect();
 
         // The history chart needs at least two points to be a line.
@@ -1222,10 +1168,10 @@ impl HtmlOutput {
         };
 
         let html = TrendHtmlReport {
-            from_date: report.from.timestamp.format("%Y-%m-%d").to_string(),
-            from_label: report.from.label.as_deref().unwrap_or("").to_string(),
-            to_date: report.to.timestamp.format("%Y-%m-%d").to_string(),
-            to_label: report.to.label.as_deref().unwrap_or("").to_string(),
+            from_date: trend.from_date,
+            from_label: trend.from_label,
+            to_date: trend.to_date,
+            to_label: trend.to_label,
             health_model: String::new(),
             metrics,
             by_language,

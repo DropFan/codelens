@@ -20,14 +20,18 @@ pub(crate) struct DiffMetricPresentation {
     pub before: usize,
     pub after: usize,
     pub delta: i64,
+    pub delta_text: String,
+    pub percent_text: String,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct DiffLanguagePresentation {
     pub language: String,
+    pub status: String,
     pub code_before: usize,
     pub code_after: usize,
     pub code_delta: i64,
+    pub code_delta_text: String,
 }
 
 impl DiffPresentation {
@@ -41,11 +45,16 @@ impl DiffPresentation {
             ("Functions", &delta.functions),
         ]
         .into_iter()
-        .map(|(label, value)| DiffMetricPresentation {
-            label,
-            before: value.from,
-            after: value.to,
-            delta: value.signed_delta(),
+        .map(|(label, value)| {
+            let delta = value.signed_delta();
+            DiffMetricPresentation {
+                label,
+                before: value.from,
+                after: value.to,
+                delta,
+                delta_text: signed_label(delta),
+                percent_text: format!("{:+.1}%", value.percent),
+            }
         })
         .collect();
         let languages = report
@@ -53,9 +62,11 @@ impl DiffPresentation {
             .iter()
             .map(|language| DiffLanguagePresentation {
                 language: language.language.clone(),
+                status: language.status.to_string(),
                 code_before: language.code.from,
                 code_after: language.code.to,
                 code_delta: language.code.signed_delta(),
+                code_delta_text: signed_label(language.code.signed_delta()),
             })
             .collect();
 
@@ -67,5 +78,13 @@ impl DiffPresentation {
             metrics,
             languages,
         }
+    }
+}
+
+fn signed_label(delta: i64) -> String {
+    if delta >= 0 {
+        format!("+{delta}")
+    } else {
+        delta.to_string()
     }
 }

@@ -14,6 +14,7 @@ pub(crate) struct HotspotPresentation {
 #[derive(Debug, Clone)]
 pub(crate) struct HotspotFilePresentation {
     pub path: String,
+    pub language: String,
     pub commits: usize,
     pub lines_added: usize,
     pub lines_deleted: usize,
@@ -21,7 +22,9 @@ pub(crate) struct HotspotFilePresentation {
     pub age: String,
     pub authors: String,
     pub score: String,
+    pub score_percent: u32,
     pub risk: RiskLevel,
+    pub knowledge_island: Option<HotspotKnowledgeIslandPresentation>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,7 @@ impl From<&FileHotspot> for HotspotFilePresentation {
     fn from(file: &FileHotspot) -> Self {
         Self {
             path: file.path.display().to_string(),
+            language: file.language.clone(),
             commits: file.churn.commits,
             lines_added: file.churn.lines_added,
             lines_deleted: file.churn.lines_deleted,
@@ -87,7 +91,9 @@ impl From<&FileHotspot> for HotspotFilePresentation {
                 None => "-".into(),
             },
             score: format!("{:.2}", file.hotspot_score),
+            score_percent: (file.hotspot_score * 100.0) as u32,
             risk: file.risk,
+            knowledge_island: HotspotKnowledgeIslandPresentation::from_file(file),
         }
     }
 }

@@ -7,6 +7,8 @@ pub(crate) struct CouplingPresentation {
     pub period: String,
     pub total_commits: usize,
     pub focus: Option<String>,
+    pub skipped_large_commits: usize,
+    pub excluded_test_files: usize,
     pub filter_notes: Vec<CouplingFilterPresentation>,
     pub rows: Vec<CouplingPairPresentation>,
 }
@@ -21,6 +23,9 @@ pub(crate) enum CouplingFilterPresentation {
 pub(crate) struct CouplingPairPresentation {
     pub file_a: String,
     pub file_b: String,
+    pub shared_commits: usize,
+    pub commits_a: usize,
+    pub commits_b: usize,
     pub shared: String,
     pub degree: f64,
     pub degree_text: String,
@@ -46,6 +51,9 @@ impl CouplingPresentation {
             .map(|pair| CouplingPairPresentation {
                 file_a: pair.file_a.display().to_string(),
                 file_b: pair.file_b.display().to_string(),
+                shared_commits: pair.shared_commits,
+                commits_a: pair.commits_a,
+                commits_b: pair.commits_b,
                 shared: format!(
                     "{} ({}/{})",
                     pair.shared_commits, pair.commits_a, pair.commits_b
@@ -59,6 +67,8 @@ impl CouplingPresentation {
             period: report.since.clone(),
             total_commits: report.total_commits,
             focus: report.focus.as_ref().map(|path| path.display().to_string()),
+            skipped_large_commits: report.skipped_large_commits,
+            excluded_test_files: report.excluded_test_files,
             filter_notes,
             rows,
         }
