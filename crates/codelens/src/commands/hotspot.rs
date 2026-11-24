@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
 use codelens_core::analyze;
-use codelens_core::git::{self, GitClient};
+use codelens_core::git::{self, CommitRecord, GitClient};
 use codelens_core::insight::hotspot;
 use codelens_core::output::Report;
 use codelens_core::Config;
@@ -76,21 +76,8 @@ pub(crate) fn analyze_hotspots(
     let first_path = paths.first().context("No analysis path provided")?;
     let git_client = GitClient::detect(first_path).context("Not a git repository")?;
     let since = git::parse_since(&query.since);
-    let mut result = analyze(paths, config).context("Analysis failed")?;
-
-    // Git numstat paths are repo-root-relative; analysis paths are relative
-    // to the walk root (or absolute). Align them before joining metrics.
-    rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
-
-    // One log walk yields both churn and author-ownership data.
+    let result = analyze(paths, config).context("Analysis failed")?;
     let commits = git_client.commit_log(&since)?;
-    let churns = git::churn_from_commits(&commits);
-    let authors = git::aggregate_authors(&commits);
-    let mut report = hotspot::analyze(&churns, &result, &query.since, commits.len(), query.top_n);
-    hotspot::attach_knowledge(&mut report, &authors);
-
-    // File age is report data, so failure must not masquerade as a complete
-    // report with every age missing.
     let first_commits = git_client
         .first_commit_times()
         .context("Failed to read file age history")?;
@@ -98,10 +85,52 @@ pub(crate) fn analyze_hotspots(
         .duration_since(std::time::UNIX_EPOCH)
         .context("System clock is before the Unix epoch")?
         .as_secs() as i64;
-    hotspot::attach_ages(&mut report, &first_commits, now_ts);
+
+    analyze_hotspots_from_history(
+        &result,
+        &git_client,
+        &commits,
+        query,
+        Some(&first_commits),
+        Some(now_ts),
+        config,
+    )
+}
+
+/// Build a hotspot report from an existing code scan and commit log.
+///
+/// The CLI requires file-age enrichment before calling this service. The
+/// default HTML dashboard may omit it when full-history lookup fails, while
+/// still retaining churn, ownership, and coupling sections.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn analyze_hotspots_from_history(
+    analysis: &codelens_core::AnalysisResult,
+    git_client: &GitClient,
+    commits: &[CommitRecord],
+    query: &HotspotQuery,
+    first_commits: Option<&HashMap<PathBuf, i64>>,
+    now_ts: Option<i64>,
+    config: &Config,
+) -> Result<HotspotRun> {
+    let mut result = analysis.clone();
+
+    // Git numstat paths are repo-root-relative; analysis paths are relative
+    // to the walk root (or absolute). Align them before joining metrics.
+    rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+
+    // One log walk yields both churn and author-ownership data.
+    let churns = git::churn_from_commits(commits);
+    let authors = git::aggregate_authors(commits);
+    let mut report = hotspot::analyze(&churns, &result, &query.since, commits.len(), query.top_n);
+    hotspot::attach_knowledge(&mut report, &authors);
+
+    if let (Some(first_commits), Some(now_ts)) = (first_commits, now_ts) {
+        hotspot::attach_ages(&mut report, first_commits, now_ts);
+    }
 
     if query.functions {
-        attach_function_hotspots(&mut report, &git_client, &since, config)?;
+        let since = git::parse_since(&query.since);
+        attach_function_hotspots(&mut report, git_client, &since, config)?;
     }
 
     Ok(HotspotRun {

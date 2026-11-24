@@ -9,7 +9,7 @@ use colored::Colorize;
 
 use codelens_core::analyze;
 use codelens_core::analyzer::test_code::is_test_path;
-use codelens_core::git::{self, GitClient};
+use codelens_core::git::{self, CommitRecord, GitClient};
 use codelens_core::insight::coupling;
 use codelens_core::output::Report;
 use codelens_core::Config;
@@ -96,10 +96,26 @@ pub(crate) fn analyze_coupling(
     let first_path = paths.first().context("No analysis path provided")?;
     let git_client = GitClient::detect(first_path).context("Not a git repository")?;
     let since = git::parse_since(&query.since);
+    let result = analyze(paths, config).context("Analysis failed")?;
+    let commits = git_client.commit_log(&since)?;
+    Ok(analyze_coupling_from_history(
+        &result,
+        &git_client,
+        &commits,
+        query,
+    ))
+}
 
+/// Build a coupling report from an existing code scan and commit log.
+pub(crate) fn analyze_coupling_from_history(
+    analysis: &codelens_core::AnalysisResult,
+    git_client: &GitClient,
+    commits: &[CommitRecord],
+    query: &CouplingQuery,
+) -> CouplingRun {
     // Restrict pairing to the files present in the current tree (after
     // filters), so deleted files and excluded directories stay out.
-    let mut result = analyze(paths, config).context("Analysis failed")?;
+    let mut result = analysis.clone();
     rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
     let mut universe: BTreeSet<PathBuf> = result
         .files
@@ -114,8 +130,6 @@ pub(crate) fn analyze_coupling(
     let (include_tests, excluded_test_files) =
         apply_test_filter(&mut universe, query.include_tests, query.focus.as_deref());
 
-    let commits = git_client.commit_log(&since)?;
-
     let opts = coupling::CouplingOptions {
         min_shared: query.min_shared,
         min_degree: query.min_coupling,
@@ -123,13 +137,13 @@ pub(crate) fn analyze_coupling(
         top_n: query.top_n,
         focus: query.focus.clone(),
     };
-    let mut report = coupling::analyze(&commits, Some(&universe), &query.since, &opts);
+    let mut report = coupling::analyze(commits, Some(&universe), &query.since, &opts);
     report.excluded_test_files = excluded_test_files;
-    Ok(CouplingRun {
+    CouplingRun {
         report,
         tests_included_for_focus: include_tests && !query.include_tests,
         history_is_empty: commits.is_empty(),
-    })
+    }
 }
 
 /// Drop test files from the pairing universe unless they are included.

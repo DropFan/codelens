@@ -8,7 +8,6 @@ pub(crate) mod health;
 pub(crate) mod hotspot;
 pub(crate) mod trend;
 
-use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -70,7 +69,8 @@ pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
     };
 
     if config.output.format == codelens_core::config::OutputFormatType::Html {
-        let insights = collect_default_html_insights(&paths, &combined.analysis, health_top_n);
+        let insights =
+            collect_default_html_insights(&paths, &combined.analysis, &config, health_top_n);
         write_combined_html_dashboard(&combined, &insights, &config.output)?;
     } else {
         write_report(Report::Combined(Box::new(combined)), &config.output)?;
@@ -90,11 +90,11 @@ struct DefaultHtmlInsights {
 fn collect_default_html_insights(
     paths: &[PathBuf],
     analysis: &codelens_core::AnalysisResult,
+    config: &Config,
     top_n: usize,
 ) -> DefaultHtmlInsights {
-    use codelens_core::analyzer::test_code::is_test_path;
     use codelens_core::git;
-    use codelens_core::insight::{coupling, hotspot, trend};
+    use codelens_core::insight::trend;
 
     const HISTORY_WINDOW: &str = "90d";
 
@@ -114,55 +114,43 @@ fn collect_default_html_insights(
             let since = git::parse_since(HISTORY_WINDOW);
             match git_client.commit_log(&since) {
                 Ok(commits) => {
-                    let mut history_analysis = analysis.clone();
-                    rewrite_paths_repo_relative(
-                        &mut history_analysis.files,
-                        git_client.repo_path(),
-                    );
-
-                    let churns = git::churn_from_commits(&commits);
-                    let authors = git::aggregate_authors(&commits);
-                    let mut hotspot_report = hotspot::analyze(
-                        &churns,
-                        &history_analysis,
-                        HISTORY_WINDOW,
-                        commits.len(),
+                    let first_commits = git_client.first_commit_times().ok();
+                    let now_ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|duration| duration.as_secs() as i64);
+                    let hotspot_query = hotspot::HotspotQuery {
+                        since: HISTORY_WINDOW.to_string(),
                         top_n,
-                    );
-                    hotspot::attach_knowledge(&mut hotspot_report, &authors);
-                    if let Ok(first_commits) = git_client.first_commit_times() {
-                        let now_ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|duration| duration.as_secs() as i64)
-                            .unwrap_or(0);
-                        if now_ts > 0 {
-                            hotspot::attach_ages(&mut hotspot_report, &first_commits, now_ts);
+                        functions: false,
+                    };
+                    match hotspot::analyze_hotspots_from_history(
+                        analysis,
+                        &git_client,
+                        &commits,
+                        &hotspot_query,
+                        first_commits.as_ref(),
+                        now_ts,
+                        config,
+                    ) {
+                        Ok(run) => insights.hotspot = Some(run.report),
+                        Err(error) => {
+                            insights.git_history_note =
+                                format!("Hotspot analysis could not be completed: {error}");
                         }
                     }
 
-                    let mut universe: BTreeSet<PathBuf> = history_analysis
-                        .files
-                        .iter()
-                        .map(|file| {
-                            file.path
-                                .strip_prefix("./")
-                                .unwrap_or(&file.path)
-                                .to_path_buf()
-                        })
-                        .collect();
-                    let before_test_filter = universe.len();
-                    universe.retain(|path| !is_test_path(path));
-                    let excluded_test_files = before_test_filter - universe.len();
-                    let options = coupling::CouplingOptions {
+                    let coupling_query = coupling::CouplingQuery {
                         top_n,
-                        ..coupling::CouplingOptions::default()
+                        ..coupling::CouplingQuery::default()
                     };
-                    let mut coupling_report =
-                        coupling::analyze(&commits, Some(&universe), HISTORY_WINDOW, &options);
-                    coupling_report.excluded_test_files = excluded_test_files;
-
-                    insights.hotspot = Some(hotspot_report);
-                    insights.coupling = Some(coupling_report);
+                    let run = coupling::analyze_coupling_from_history(
+                        analysis,
+                        &git_client,
+                        &commits,
+                        &coupling_query,
+                    );
+                    insights.coupling = Some(run.report);
                 }
                 Err(error) => {
                     insights.git_history_note =
@@ -636,6 +624,53 @@ mod tests {
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).unwrap()
+    }
+
+    #[test]
+    fn default_html_insights_keep_shared_hotspot_and_coupling_sections() {
+        use std::process::Command;
+
+        let repository = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(repository.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repository.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(repository.path().join("b.rs"), "fn b() {}\n").unwrap();
+        git(&["add", "a.rs", "b.rs"]);
+        git(&["commit", "-m", "initial"]);
+        std::fs::write(
+            repository.path().join("a.rs"),
+            "fn a() { println!(\"a\"); }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repository.path().join("b.rs"),
+            "fn b() { println!(\"b\"); }\n",
+        )
+        .unwrap();
+        git(&["add", "a.rs", "b.rs"]);
+        git(&["commit", "-m", "change together"]);
+
+        let config = Config::default();
+        let paths = vec![repository.path().to_path_buf()];
+        let analysis = codelens_core::analyze(&paths, &config).unwrap();
+        let insights = collect_default_html_insights(&paths, &analysis, &config, 20);
+
+        assert!(insights.hotspot.is_some());
+        assert!(insights.coupling.is_some());
     }
 
     fn partial(toml_src: &str) -> PartialConfig {
