@@ -57,6 +57,16 @@
             </div>
         </section>
 
+        {% if focus.is_some() %}
+        <p class="hint">Focused on: <strong>{{ focus.as_ref().unwrap() }}</strong></p>
+        {% endif %}
+        {% if skipped_large_commits > 0 %}
+        <p class="hint">{{ skipped_large_commits }} bulk commit(s) were excluded from pair counting.</p>
+        {% endif %}
+        {% if excluded_test_files > 0 %}
+        <p class="hint">{{ excluded_test_files }} test file(s) were excluded from this report.</p>
+        {% endif %}
+
         {% if !pairs.is_empty() %}
         <section>
             <h2 style="margin-bottom: 1rem">Coupled File Pairs</h2>

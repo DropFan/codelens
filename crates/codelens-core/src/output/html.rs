@@ -240,6 +240,19 @@ struct HtmlFileHotspot {
     risk: String,
 }
 
+struct HtmlFunctionHotspot {
+    name: String,
+    start_line: usize,
+    end_line: usize,
+    commits: usize,
+    cyclomatic: usize,
+}
+
+struct HtmlFunctionHotspotFile {
+    path: String,
+    functions: Vec<HtmlFunctionHotspot>,
+}
+
 #[derive(Template)]
 #[template(path = "hotspot.html")]
 struct HotspotHtmlReport {
@@ -247,6 +260,7 @@ struct HotspotHtmlReport {
     since: String,
     total_commits: usize,
     files: Vec<HtmlFileHotspot>,
+    function_files: Vec<HtmlFunctionHotspotFile>,
 }
 
 // ── Coupling ─────────────────────────────────────────────
@@ -267,6 +281,9 @@ struct CouplingHtmlReport {
     generated_at: String,
     since: String,
     total_commits: usize,
+    focus: Option<String>,
+    skipped_large_commits: usize,
+    excluded_test_files: usize,
     pairs: Vec<HtmlCouplingPair>,
 }
 
@@ -992,6 +1009,27 @@ impl HtmlOutput {
                     risk: h.risk.to_string(),
                 })
                 .collect(),
+            function_files: report
+                .files
+                .iter()
+                .filter_map(|file| {
+                    file.functions
+                        .as_ref()
+                        .map(|functions| HtmlFunctionHotspotFile {
+                            path: file.path.display().to_string(),
+                            functions: functions
+                                .iter()
+                                .map(|function| HtmlFunctionHotspot {
+                                    name: function.name.clone(),
+                                    start_line: function.start_line,
+                                    end_line: function.end_line,
+                                    commits: function.commits,
+                                    cyclomatic: function.cyclomatic,
+                                })
+                                .collect(),
+                        })
+                })
+                .collect(),
         };
         write!(writer, "{}", html.render()?)?;
         Ok(())
@@ -1006,6 +1044,9 @@ impl HtmlOutput {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             since: report.since.clone(),
             total_commits: report.total_commits,
+            focus: report.focus.as_ref().map(|path| path.display().to_string()),
+            skipped_large_commits: report.skipped_large_commits,
+            excluded_test_files: report.excluded_test_files,
             pairs: report
                 .pairs
                 .iter()
@@ -1270,6 +1311,79 @@ mod tests {
     use crate::output::{OutputFormat, OutputOptions, Report};
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn hotspot_html_preserves_function_breakdown() {
+        use crate::analyzer::stats::Complexity;
+        use crate::insight::hotspot::{
+            ChurnMetrics, FileHotspot, FunctionHotspot, HotspotReport, RiskLevel,
+        };
+
+        let report = HotspotReport {
+            files: vec![FileHotspot {
+                path: PathBuf::from("src/lib.rs"),
+                language: "Rust".into(),
+                churn: ChurnMetrics {
+                    commits: 3,
+                    lines_added: 10,
+                    lines_deleted: 2,
+                    lines_churn: 12,
+                },
+                complexity: Complexity::default(),
+                hotspot_score: 0.5,
+                risk: RiskLevel::Medium,
+                age_days: None,
+                knowledge: None,
+                functions: Some(vec![FunctionHotspot {
+                    name: "analyze".into(),
+                    start_line: 10,
+                    end_line: 20,
+                    commits: 3,
+                    cyclomatic: 7,
+                }]),
+            }],
+            since: "90d".into(),
+            total_commits: 3,
+        };
+        let mut output = Vec::new();
+        HtmlOutput::new()
+            .write(
+                &Report::Hotspot(report),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("Function Hotspots (approximate spans)"));
+        assert!(html.contains("analyze"));
+        assert!(html.contains("10-20"));
+    }
+
+    #[test]
+    fn coupling_html_preserves_focus_and_filter_counts() {
+        use crate::insight::coupling::CouplingReport;
+
+        let report = CouplingReport {
+            pairs: vec![],
+            since: "90d".into(),
+            total_commits: 4,
+            skipped_large_commits: 2,
+            excluded_test_files: 5,
+            focus: Some(PathBuf::from("src/lib.rs")),
+        };
+        let mut output = Vec::new();
+        HtmlOutput::new()
+            .write(
+                &Report::Coupling(report),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let html = String::from_utf8(output).unwrap();
+        assert!(html.contains("Focused on: <strong>src/lib.rs</strong>"));
+        assert!(html.contains("2 bulk commit(s) were excluded"));
+        assert!(html.contains("5 test file(s) were excluded"));
+    }
 
     fn representative_combined_report() -> crate::output::format::CombinedReport {
         let files = vec![FileStats {

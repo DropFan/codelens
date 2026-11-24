@@ -166,7 +166,7 @@ impl CsvOutput {
     ) -> Result<()> {
         writeln!(
             writer,
-            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Authors,MainAuthor,Ownership,KnowledgeIsland,Score,Risk"
+            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Authors,MainAuthor,Ownership,KnowledgeIsland,Score,Risk,Function,FunctionStartLine,FunctionEndLine,FunctionCommits,FunctionCC"
         )?;
         for file in &report.files {
             let age = file.age_days.map(|d| d.to_string()).unwrap_or_default();
@@ -179,23 +179,51 @@ impl CsvOutput {
                 ),
                 None => Default::default(),
             };
-            writeln!(
-                writer,
-                "{},{},{},{},{},{},{},{},{},{},{},{:.2},{}",
-                csv_field(&file.path.display().to_string()),
-                file.churn.commits,
-                file.churn.lines_added,
-                file.churn.lines_deleted,
-                file.churn.lines_churn,
-                file.complexity.cyclomatic,
-                age,
-                authors,
-                csv_field(&main_author),
-                ownership,
-                island,
-                file.hotspot_score,
-                file.risk,
-            )?;
+            let mut write_row =
+                |function: Option<&crate::insight::hotspot::FunctionHotspot>| -> Result<()> {
+                    let (name, start, end, commits, complexity) = function
+                        .map(|function| {
+                            (
+                                csv_field(&function.name),
+                                function.start_line.to_string(),
+                                function.end_line.to_string(),
+                                function.commits.to_string(),
+                                function.cyclomatic.to_string(),
+                            )
+                        })
+                        .unwrap_or_default();
+                    writeln!(
+                        writer,
+                        "{},{},{},{},{},{},{},{},{},{},{},{:.2},{},{},{},{},{},{}",
+                        csv_field(&file.path.display().to_string()),
+                        file.churn.commits,
+                        file.churn.lines_added,
+                        file.churn.lines_deleted,
+                        file.churn.lines_churn,
+                        file.complexity.cyclomatic,
+                        age,
+                        authors,
+                        csv_field(&main_author),
+                        ownership,
+                        island,
+                        file.hotspot_score,
+                        file.risk,
+                        name,
+                        start,
+                        end,
+                        commits,
+                        complexity,
+                    )?;
+                    Ok(())
+                };
+            let functions = file.functions.as_deref().unwrap_or(&[]);
+            if functions.is_empty() {
+                write_row(None)?;
+            } else {
+                for function in functions {
+                    write_row(Some(function))?;
+                }
+            }
         }
         Ok(())
     }
@@ -208,18 +236,34 @@ impl CsvOutput {
     ) -> Result<()> {
         writeln!(
             writer,
-            "FileA,FileB,SharedCommits,CommitsA,CommitsB,Coupling"
+            "FileA,FileB,SharedCommits,CommitsA,CommitsB,Coupling,Focus,SkippedBulkCommits,ExcludedTestFiles"
         )?;
+        let focus = report
+            .focus
+            .as_ref()
+            .map(|path| csv_field(&path.display().to_string()))
+            .unwrap_or_default();
+        if report.pairs.is_empty() {
+            writeln!(
+                writer,
+                ",,,,,,{},{},{}",
+                focus, report.skipped_large_commits, report.excluded_test_files
+            )?;
+            return Ok(());
+        }
         for pair in &report.pairs {
             writeln!(
                 writer,
-                "{},{},{},{},{},{:.1}",
+                "{},{},{},{},{},{:.1},{},{},{}",
                 csv_field(&pair.file_a.display().to_string()),
                 csv_field(&pair.file_b.display().to_string()),
                 pair.shared_commits,
                 pair.commits_a,
                 pair.commits_b,
                 pair.degree,
+                focus,
+                report.skipped_large_commits,
+                report.excluded_test_files,
             )?;
         }
         Ok(())
@@ -346,6 +390,10 @@ mod tests {
     use super::Report;
     use super::*;
     use crate::analyzer::stats::{FileStats, LineStats, Summary};
+    use crate::insight::coupling::{CouplingPair, CouplingReport};
+    use crate::insight::hotspot::{
+        ChurnMetrics, FileHotspot, FunctionHotspot, HotspotReport, RiskLevel,
+    };
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -456,5 +504,77 @@ mod tests {
 
         // 1 header + 2 languages = 3 lines
         assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn hotspot_csv_flattens_function_details_without_dropping_them() {
+        let report = HotspotReport {
+            files: vec![FileHotspot {
+                path: PathBuf::from("src/lib.rs"),
+                language: "Rust".into(),
+                churn: ChurnMetrics {
+                    commits: 3,
+                    lines_added: 10,
+                    lines_deleted: 2,
+                    lines_churn: 12,
+                },
+                complexity: Default::default(),
+                hotspot_score: 0.5,
+                risk: RiskLevel::Medium,
+                age_days: None,
+                knowledge: None,
+                functions: Some(vec![FunctionHotspot {
+                    name: "analyze".into(),
+                    start_line: 10,
+                    end_line: 20,
+                    commits: 3,
+                    cyclomatic: 7,
+                }]),
+            }],
+            since: "90d".into(),
+            total_commits: 3,
+        };
+        let mut output = Vec::new();
+        CsvOutput::new()
+            .write(
+                &Report::Hotspot(report),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let csv = String::from_utf8(output).unwrap();
+        assert!(csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("Function,FunctionStartLine,FunctionEndLine,FunctionCommits,FunctionCC"));
+        assert!(csv.contains(",analyze,10,20,3,7\n"));
+    }
+
+    #[test]
+    fn coupling_csv_preserves_filters_even_without_pairs() {
+        let report = CouplingReport {
+            pairs: Vec::<CouplingPair>::new(),
+            since: "90d".into(),
+            total_commits: 4,
+            skipped_large_commits: 2,
+            excluded_test_files: 5,
+            focus: Some(PathBuf::from("src/lib.rs")),
+        };
+        let mut output = Vec::new();
+        CsvOutput::new()
+            .write(
+                &Report::Coupling(report),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let csv = String::from_utf8(output).unwrap();
+        assert!(csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("Focus,SkippedBulkCommits,ExcludedTestFiles"));
+        assert!(csv.contains(",src/lib.rs,2,5\n"));
     }
 }
