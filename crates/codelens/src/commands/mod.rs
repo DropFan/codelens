@@ -1,6 +1,7 @@
 //! Subcommand implementations and the shared CLI plumbing they build on:
 //! config loading/merging, report writing, and git path normalization.
 
+pub(crate) mod compare;
 pub(crate) mod coupling;
 pub(crate) mod diff;
 pub(crate) mod estimate;
@@ -377,85 +378,6 @@ pub(crate) fn build_config(cli: &Cli) -> Result<Config> {
     ))
 }
 
-/// Materialize `reference` in a temporary worktree and analyze the same
-/// locations there; file paths come back repo-root-relative.
-fn analyze_at_git_ref(
-    git_client: &GitClient,
-    reference: &str,
-    paths: &[PathBuf],
-    config: &Config,
-) -> Result<codelens_core::AnalysisResult> {
-    if !git_client.rev_exists(reference) {
-        anyhow::bail!("'{reference}' is not a git ref in this repository");
-    }
-
-    let worktree = git_client.temp_worktree(reference)?;
-    // A path that does not exist in that tree must be a hard error:
-    // falling back to the whole tree would compare mismatched scopes and
-    // fabricate a project-level "regression" with zero regressed files.
-    let repo_root = std::fs::canonicalize(git_client.repo_path())
-        .unwrap_or_else(|_| git_client.repo_path().to_path_buf());
-    let mut mapped: Vec<PathBuf> = Vec::with_capacity(paths.len());
-    for p in paths {
-        let inside = std::fs::canonicalize(p).ok().and_then(|abs| {
-            abs.strip_prefix(&repo_root)
-                .ok()
-                .map(|rel| worktree.path().join(rel))
-        });
-        match inside.filter(|m| m.exists()) {
-            Some(m) => mapped.push(m),
-            None => anyhow::bail!(
-                "path '{}' does not exist in '{reference}'; \
-                 compare a path that exists in both trees",
-                p.display()
-            ),
-        }
-    }
-    let mut result = analyze(&mapped, config).context("Analysis of the git ref failed")?;
-    rewrite_analysis_paths_repo_relative(&mut result, worktree.path());
-    Ok(result)
-}
-
-/// Drop files living inside git submodules and rebuild the summary.
-/// Ref comparisons need this symmetrically on both sides: temporary
-/// worktrees never materialize submodules, the real tree does.
-fn drop_submodule_files(result: &mut codelens_core::AnalysisResult, submodules: &[PathBuf]) {
-    if submodules.is_empty() {
-        return;
-    }
-    result.files.retain(|f| {
-        let p = f.path.strip_prefix("./").unwrap_or(&f.path);
-        !submodules.iter().any(|s| p.starts_with(s))
-    });
-    // Rebuilding from file stats cannot know whether duplication was
-    // collected — carry the flag over or measured trees would silently
-    // read as unmeasured downstream. ULOC must survive the rebuild too;
-    // the pre-filter value is an approximation (lines of the dropped
-    // submodule files are still counted in it), but losing it entirely
-    // would zero the Duplication dimension's input.
-    let dup_scanned = result.summary.dup_scanned;
-    let uloc = result.summary.uloc;
-    let inline_test_regions_scanned = result.summary.inline_test_regions_scanned;
-    let mut health_regions = std::mem::take(&mut result.summary.health_regions);
-    let retained_paths: std::collections::HashSet<PathBuf> = result
-        .files
-        .iter()
-        .map(|file| {
-            file.path
-                .strip_prefix("./")
-                .unwrap_or(&file.path)
-                .to_path_buf()
-        })
-        .collect();
-    health_regions
-        .retain(|path, _| retained_paths.contains(path.strip_prefix("./").unwrap_or(path)));
-    result.summary = codelens_core::Summary::from_file_stats(&result.files);
-    result.summary.dup_scanned = dup_scanned;
-    result.summary.uloc = uloc;
-    result.summary.inline_test_regions_scanned = inline_test_regions_scanned;
-    result.summary.health_regions = health_regions;
-}
-
 /// Scoring model matching an analysis: when duplication was not
 /// collected the Duplication dimension is excluded (its weight
 /// redistributed) instead of scoring the absent data as clean.
@@ -479,33 +401,6 @@ pub(crate) fn rewrite_paths_repo_relative(
             }
         }
     }
-}
-
-/// Rewrite both physical file paths and v2 health-region keys. Health and
-/// diff reports must keep the two collections aligned after normalization.
-pub(crate) fn rewrite_analysis_paths_repo_relative(
-    result: &mut codelens_core::AnalysisResult,
-    repo_root: &Path,
-) {
-    rewrite_paths_repo_relative(&mut result.files, repo_root);
-
-    let repo_root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
-    let regions = std::mem::take(&mut result.summary.health_regions);
-    result.summary.health_regions = regions
-        .into_iter()
-        .map(|(path, stats)| {
-            let path = std::fs::canonicalize(&path)
-                .ok()
-                .and_then(|absolute| {
-                    absolute
-                        .strip_prefix(&repo_root)
-                        .ok()
-                        .map(Path::to_path_buf)
-                })
-                .unwrap_or(path);
-            (path, stats)
-        })
-        .collect();
 }
 
 /// Parse "jsp:html,tpl:php" into (extension, language) pairs.
@@ -819,7 +714,7 @@ mod tests {
             error_files: 0,
         };
 
-        drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
+        compare::drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
         assert_eq!(result.files.len(), 1);
         assert!(
             !result.summary.dup_scanned,
@@ -834,7 +729,7 @@ mod tests {
 
         // And the measured state survives too.
         result.summary.dup_scanned = true;
-        drop_submodule_files(&mut result, &[PathBuf::from("other")]);
+        compare::drop_submodule_files(&mut result, &[PathBuf::from("other")]);
         assert!(result.summary.dup_scanned);
     }
 
@@ -861,7 +756,7 @@ mod tests {
             error_files: 0,
         };
 
-        rewrite_analysis_paths_repo_relative(&mut result, dir.path());
+        compare::rewrite_analysis_paths_repo_relative(&mut result, dir.path());
 
         assert_eq!(result.files[0].path, PathBuf::from("src/lib.rs"));
         assert!(result
@@ -894,7 +789,7 @@ mod tests {
             error_files: 0,
         };
 
-        drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
+        compare::drop_submodule_files(&mut result, &[PathBuf::from("vendor/sub")]);
         assert_eq!(
             result.summary.uloc, 42,
             "summary rebuild must not zero out the measured ULOC"

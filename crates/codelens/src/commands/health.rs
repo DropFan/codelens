@@ -14,8 +14,8 @@ use codelens_core::insight::{health, trend};
 use codelens_core::output::Report;
 
 use super::{
-    analyze_at_git_ref, drop_submodule_files, load_partial_config, resolve_config,
-    rewrite_analysis_paths_repo_relative, scoring_model_for, write_report,
+    compare::{analysis_is_valid, analyze_at_git_ref, prepare_comparison},
+    load_partial_config, resolve_config, scoring_model_for, write_report,
 };
 use crate::cli;
 
@@ -34,56 +34,37 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
-    // A health score computed from an incomplete tree is not a valid gate
-    // result. Fail before scoring or writing a misleading partial report.
-    if result.error_files > 0 {
-        eprintln!(
-            "{}: analysis skipped {} file(s) because they could not be read or analyzed",
-            "gate failed".red().bold(),
-            result.error_files,
-        );
-        return Ok(ExitCode::FAILURE);
-    }
-    if result.summary.total_files == 0 {
-        eprintln!(
-            "{}: analysis found no files matching the requested paths and filters",
-            "gate failed".red().bold(),
-        );
+    if !analysis_is_valid("worktree", &result) {
         return Ok(ExitCode::FAILURE);
     }
     let top_n = config.output.top_n.unwrap_or(10);
 
     let regression = if let Some(baseline_ref) = &args.baseline {
-        // Normalize current paths to repo-root-relative so they line up
-        // with the baseline tree regardless of the working directory.
         let git_client = GitClient::detect(&args.paths[0]).ok();
-        if let Some(client) = &git_client {
-            rewrite_analysis_paths_repo_relative(&mut result, client.repo_path());
-        }
-        let (mut baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
-        // Worktree-materialized baselines never contain submodules;
-        // exclude them on both sides for a like-for-like comparison.
-        if let Some(client) = &git_client {
-            let submodules = client.submodule_paths();
-            drop_submodule_files(&mut result, &submodules);
-            drop_submodule_files(&mut baseline_result, &submodules);
-        }
-        // Compare with the Duplication dimension only when BOTH sides
-        // measured it — an unmeasured side's zero duplicate counts would
-        // otherwise fabricate phantom regressions or improvements. Old
-        // snapshots without the flag take the safe unmeasured path.
-        // This joint model scopes the comparison ONLY; the main report
-        // below keeps the current analysis's own measurement scope.
-        let compare_model = scoring_model_for(
-            config.health_model,
-            result.summary.dup_scanned && baseline_result.summary.dup_scanned,
-        );
-        Some(health::compare_with_baseline(
-            &baseline_result,
-            &result,
+        let (baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        let submodules = git_client
+            .as_ref()
+            .map(GitClient::submodule_paths)
+            .unwrap_or_default();
+        let Some(prepared) = prepare_comparison(
+            baseline_result,
+            &label,
+            result,
+            "worktree",
+            git_client.as_ref().map(GitClient::repo_path),
+            &submodules,
+        ) else {
+            return Ok(ExitCode::FAILURE);
+        };
+        let compare_model = prepared.scoring_model(config.health_model);
+        let comparison = health::compare_with_baseline(
+            &prepared.baseline,
+            &prepared.current,
             compare_model.as_ref(),
             &label,
-        ))
+        );
+        result = prepared.current;
+        Some(comparison)
     } else {
         None
     };
@@ -220,18 +201,16 @@ mod tests {
         }
         std::fs::write(dir.path().join("dup.py"), src).unwrap();
 
-        // Baseline snapshot whose analysis skipped duplication collection.
-        let files: Vec<codelens_core::FileStats> = Vec::new();
-        let mut summary = codelens_core::Summary::from_file_stats(&files);
-        summary.dup_scanned = false;
-        let baseline = codelens_core::AnalysisResult {
-            files,
-            summary,
-            elapsed: std::time::Duration::from_millis(1),
-            scanned_files: 0,
-            skipped_files: 0,
-            error_files: 0,
+        // Valid baseline snapshot whose analysis skipped duplication
+        // collection. It differs only in measurement scope, so an early
+        // completeness failure cannot make this test pass accidentally.
+        let baseline_config = Config {
+            no_dup_scan: true,
+            ..Config::default()
         };
+        let baseline = analyze(&[dir.path()], &baseline_config).unwrap();
+        assert!(!baseline.summary.dup_scanned);
+        assert!(baseline.summary.total_files > 0);
         trend::save_snapshot(dir.path(), baseline, None, None, None).unwrap();
 
         let cli = cli::Cli::try_parse_from([
@@ -256,6 +235,46 @@ mod tests {
             format!("{:?}", ExitCode::FAILURE),
             "measured duplication must keep failing the gate no matter \
              how the baseline snapshot was collected"
+        );
+    }
+
+    #[test]
+    fn empty_baseline_is_rejected_even_without_a_gate_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("current.rs"), "fn current() {}\n").unwrap();
+        trend::save_snapshot(
+            dir.path(),
+            codelens_core::AnalysisResult {
+                files: Vec::new(),
+                summary: codelens_core::Summary::default(),
+                elapsed: std::time::Duration::ZERO,
+                scanned_files: 0,
+                skipped_files: 0,
+                error_files: 0,
+            },
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--baseline",
+            "latest",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+
+        assert_eq!(
+            format!("{:?}", run_health(args, &cli.advanced).unwrap()),
+            format!("{:?}", ExitCode::FAILURE)
         );
     }
 
