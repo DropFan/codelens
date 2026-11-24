@@ -441,26 +441,35 @@ fn report_output_options(output: &codelens_core::config::OutputConfig) -> Output
 }
 
 fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
-    let output_options = report_output_options(output);
-    let formatter = create_output(output.format);
+    write_report_targets(&report, std::iter::once(output))
+}
 
-    // Quiet suppresses terminal output only; an explicit -O file is still written
-    if output.quiet && output.file.is_none() {
-        return Ok(());
-    }
+fn write_report_targets<'a>(
+    report: &Report,
+    outputs: impl IntoIterator<Item = &'a codelens_core::config::OutputConfig>,
+) -> Result<()> {
+    for output in outputs {
+        let output_options = report_output_options(output);
+        let formatter = create_output(output.format);
 
-    if let Some(ref path) = output.file {
-        let file = File::create(path).context("Failed to create output file")?;
-        let mut writer = BufWriter::new(file);
-        formatter.write(&report, &output_options, &mut writer)?;
-        writer.flush()?;
-        if !output.quiet {
-            println!("Output written to: {}", path.display().to_string().green());
+        // Quiet suppresses terminal output only; an explicit -O file is still written.
+        if output.quiet && output.file.is_none() {
+            continue;
         }
-    } else {
-        let stdout = io::stdout();
-        let mut writer = stdout.lock();
-        formatter.write(&report, &output_options, &mut writer)?;
+
+        if let Some(ref path) = output.file {
+            let file = File::create(path).context("Failed to create output file")?;
+            let mut writer = BufWriter::new(file);
+            formatter.write(report, &output_options, &mut writer)?;
+            writer.flush()?;
+            if !output.quiet {
+                println!("Output written to: {}", path.display().to_string().green());
+            }
+        } else {
+            let stdout = io::stdout();
+            let mut writer = stdout.lock();
+            formatter.write(report, &output_options, &mut writer)?;
+        }
     }
     Ok(())
 }
@@ -826,6 +835,59 @@ mod tests {
 
         output.show_git_info = false;
         assert!(!report_output_options(&output).show_git_info);
+    }
+
+    #[test]
+    fn one_report_can_be_written_to_multiple_format_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let analysis = codelens_core::AnalysisResult {
+            files: Vec::new(),
+            summary: codelens_core::Summary::default(),
+            elapsed: std::time::Duration::ZERO,
+            scanned_files: 0,
+            skipped_files: 0,
+            error_files: 0,
+        };
+        let health = codelens_core::insight::health::score(
+            &analysis,
+            &codelens_core::insight::scoring::default::DefaultModel::default(),
+            10,
+        );
+        let report = Report::Health(health);
+        let outputs = [
+            (
+                codelens_core::config::OutputFormatType::Markdown,
+                dir.path().join("health.md"),
+            ),
+            (
+                codelens_core::config::OutputFormatType::Json,
+                dir.path().join("health.json"),
+            ),
+            (
+                codelens_core::config::OutputFormatType::Badge,
+                dir.path().join("badge.json"),
+            ),
+        ]
+        .map(|(format, file)| codelens_core::config::OutputConfig {
+            format,
+            file: Some(file),
+            quiet: true,
+            ..Default::default()
+        });
+
+        write_report_targets(&report, outputs.iter()).unwrap();
+
+        assert!(std::fs::read_to_string(dir.path().join("health.md"))
+            .unwrap()
+            .contains("Code Health Report"));
+        assert!(serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(dir.path().join("health.json")).unwrap()
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(dir.path().join("badge.json")).unwrap()
+        )
+        .is_ok());
     }
 
     #[test]
