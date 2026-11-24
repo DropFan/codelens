@@ -6,13 +6,19 @@
 //! return compact JSON strings mirroring the shape of the `-f json` CLI
 //! output.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
+use anyhow::Context;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::Deserialize;
 
+use codelens_core::filter::{Filter, FilterChain};
 use codelens_core::insight::health;
 use codelens_core::insight::scoring::HealthModelVersion;
 use codelens_core::{analyze, Config};
@@ -23,6 +29,113 @@ fn default_config() -> Config {
     config.walker.threads = num_cpus::get();
     config.filter.smart_exclude = true;
     config
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceEntryState {
+    path: PathBuf,
+    kind: u8,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceState {
+    entries: Vec<WorkspaceEntryState>,
+}
+
+impl WorkspaceState {
+    fn capture(root: &Path, config: &Config) -> std::io::Result<Self> {
+        let filter = FilterChain::new(config).map_err(std::io::Error::other)?;
+        let mut entries = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+
+        while let Some(path) = pending.pop() {
+            let metadata = fs::symlink_metadata(&path)?;
+            let file_type = metadata.file_type();
+            entries.push(WorkspaceEntryState {
+                path: path.clone(),
+                kind: if file_type.is_dir() {
+                    0
+                } else if file_type.is_file() {
+                    1
+                } else {
+                    2
+                },
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            });
+
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let mut children = fs::read_dir(&path)?.collect::<std::io::Result<Vec<_>>>()?;
+            children.sort_by_key(|entry| entry.path());
+            for child in children.into_iter().rev() {
+                let child_path = child.path();
+                let child_type = child.file_type()?;
+                if child_type.is_dir() && !filter.should_include(&child_path, true) {
+                    continue;
+                }
+                pending.push(child_path);
+            }
+        }
+
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(Self { entries })
+    }
+}
+
+struct CachedAnalysis {
+    state: WorkspaceState,
+    result: Arc<codelens_core::AnalysisResult>,
+}
+
+#[derive(Default)]
+struct AnalysisCache {
+    entries: HashMap<PathBuf, CachedAnalysis>,
+}
+
+impl AnalysisCache {
+    const MAX_ENTRIES: usize = 8;
+
+    fn analysis(
+        &mut self,
+        path: &Path,
+        config: &Config,
+    ) -> anyhow::Result<Arc<codelens_core::AnalysisResult>> {
+        let key = fs::canonicalize(path)
+            .with_context(|| format!("analysis path does not exist: {}", path.display()))?;
+        let before = WorkspaceState::capture(&key, config).ok();
+
+        if let (Some(state), Some(cached)) = (before.as_ref(), self.entries.get(&key)) {
+            if &cached.state == state {
+                return Ok(Arc::clone(&cached.result));
+            }
+        }
+        self.entries.remove(&key);
+
+        let result = Arc::new(analyze(std::slice::from_ref(&key), config)?);
+        let after = WorkspaceState::capture(&key, config).ok();
+        if let (Some(before), Some(after)) = (before, after) {
+            if before == after {
+                if self.entries.len() >= Self::MAX_ENTRIES {
+                    if let Some(oldest) = self.entries.keys().next().cloned() {
+                        self.entries.remove(&oldest);
+                    }
+                }
+                self.entries.insert(
+                    key,
+                    CachedAnalysis {
+                        state: after,
+                        result: Arc::clone(&result),
+                    },
+                );
+            }
+        }
+        Ok(result)
+    }
 }
 
 /// Run blocking analysis work off the async runtime; errors come back as
@@ -127,6 +240,7 @@ pub struct FileArgs {
 #[derive(Clone)]
 pub struct CodelensServer {
     config: Config,
+    cache: Arc<Mutex<AnalysisCache>>,
 }
 
 impl Default for CodelensServer {
@@ -201,11 +315,15 @@ impl CodelensServer {
     pub fn new() -> Self {
         Self {
             config: default_config(),
+            cache: Arc::new(Mutex::new(AnalysisCache::default())),
         }
     }
 
     pub fn with_config(config: Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            cache: Arc::new(Mutex::new(AnalysisCache::default())),
+        }
     }
 
     #[tool(
@@ -213,8 +331,13 @@ impl CodelensServer {
     )]
     async fn repo_overview(&self, Parameters(args): Parameters<PathArgs>) -> String {
         let config = self.config.clone();
+        let cache = Arc::clone(&self.cache);
         run_blocking(move || {
-            let result = analyze(&[arg_path(args.path)], &config)?;
+            let path = arg_path(args.path);
+            let result = cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
+                .analysis(&path, &config)?;
             Ok(serde_json::to_string(&result.summary)?)
         })
         .await
@@ -225,13 +348,18 @@ impl CodelensServer {
     )]
     async fn code_health(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
         let config = self.config.clone();
+        let cache = Arc::clone(&self.cache);
         run_blocking(move || {
             let GitWindowArgs {
                 path,
                 since: _,
                 top,
             } = args;
-            let result = analyze(&[arg_path(path)], &config)?;
+            let path = arg_path(path);
+            let result = cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
+                .analysis(&path, &config)?;
             let report = health_report(&result, top.unwrap_or(10), config.health_model);
             Ok(serde_json::to_string(&report)?)
         })
@@ -243,10 +371,34 @@ impl CodelensServer {
     )]
     async fn hotspots(&self, Parameters(args): Parameters<HotspotArgs>) -> String {
         let config = self.config.clone();
+        let cache = Arc::clone(&self.cache);
         run_blocking(move || {
             let path = arg_path(args.path.clone());
             let query = hotspot_query_from_mcp(&args, &config);
-            let run = crate::commands::hotspot::analyze_hotspots(&[path], &config, &query)?;
+            let result = cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
+                .analysis(&path, &config)?;
+            let git_client =
+                codelens_core::GitClient::detect(&path).context("Not a git repository")?;
+            let since = codelens_core::git::parse_since(&query.since);
+            let commits = git_client.commit_log(&since)?;
+            let first_commits = git_client
+                .first_commit_times()
+                .context("Failed to read file age history")?;
+            let now_ts = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .context("System clock is before the Unix epoch")?
+                .as_secs() as i64;
+            let run = crate::commands::hotspot::analyze_hotspots_from_history(
+                &result,
+                &git_client,
+                &commits,
+                &query,
+                Some(&first_commits),
+                Some(now_ts),
+                &config,
+            )?;
             Ok(serde_json::to_string(&run.report)?)
         })
         .await
@@ -257,10 +409,24 @@ impl CodelensServer {
     )]
     async fn change_coupling(&self, Parameters(args): Parameters<CouplingArgs>) -> String {
         let config = self.config.clone();
+        let cache = Arc::clone(&self.cache);
         run_blocking(move || {
             let path = arg_path(args.path.clone());
             let query = coupling_query_from_mcp(&args, &config);
-            let run = crate::commands::coupling::analyze_coupling(&[path], &config, &query)?;
+            let result = cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
+                .analysis(&path, &config)?;
+            let git_client =
+                codelens_core::GitClient::detect(&path).context("Not a git repository")?;
+            let since = codelens_core::git::parse_since(&query.since);
+            let commits = git_client.commit_log(&since)?;
+            let run = crate::commands::coupling::analyze_coupling_from_history(
+                &result,
+                &git_client,
+                &commits,
+                &query,
+            );
             Ok(serde_json::to_string(&run.report)?)
         })
         .await
@@ -271,8 +437,13 @@ impl CodelensServer {
     )]
     async fn file_metrics(&self, Parameters(args): Parameters<FileArgs>) -> String {
         let config = self.config.clone();
+        let cache = Arc::clone(&self.cache);
         run_blocking(move || {
-            let result = analyze(&[PathBuf::from(&args.file)], &config)?;
+            let path = PathBuf::from(&args.file);
+            let result = cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
+                .analysis(&path, &config)?;
             let Some(stats) = result.files.first() else {
                 anyhow::bail!("file not recognized as source code: {}", args.file);
             };
@@ -506,5 +677,48 @@ mod tests {
         assert_eq!(report.grade.to_string(), "F");
         assert_eq!(report.assessment.to_string(), "insufficient-data");
         assert!(report.dimensions.is_empty());
+    }
+
+    #[test]
+    fn analysis_cache_reuses_stable_trees_and_invalidates_workspace_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "pub fn first() {}\n").unwrap();
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+
+        let config = default_config();
+        let mut cache = AnalysisCache::default();
+        let first = cache.analysis(dir.path(), &config).unwrap();
+        let reused = cache.analysis(dir.path(), &config).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &reused));
+
+        std::fs::write(&source, "pub fn first() {}\npub fn second() {}\n").unwrap();
+        let changed = cache.analysis(dir.path(), &config).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &changed));
+        assert_eq!(changed.summary.complexity.functions, 2);
+
+        std::fs::write(empty.join("new.rs"), "pub fn added() {}\n").unwrap();
+        let added = cache.analysis(dir.path(), &config).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&changed, &added));
+        assert_eq!(added.summary.total_files, 2);
+    }
+
+    #[test]
+    fn analysis_cache_reuses_repeated_file_scans() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "pub fn cached() {}\n").unwrap();
+
+        let config = default_config();
+        let mut cache = AnalysisCache::default();
+        let first = cache.analysis(&source, &config).unwrap();
+        let reused = cache.analysis(&source, &config).unwrap();
+
+        assert_eq!(cache.entries.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(&first, &reused));
+        assert_eq!(reused.summary.total_files, 1);
     }
 }
