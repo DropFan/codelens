@@ -71,25 +71,98 @@ pub(crate) fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> 
     // Full history feeds the HTML chart and JSON consumers; losing it
     // (e.g. one unreadable snapshot) never blocks the comparison.
     report.history = trend::history(&project_root).unwrap_or_default();
-    let output_config = trend_output_config(args);
-    write_report(Report::Trend(report), &output_config)
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
+    write_report(Report::Trend(report), &config.output)
 }
 
-/// Trend's list/diff paths don't run an analysis; build output settings
-/// directly from CLI args.
-fn trend_output_config(args: &cli::TrendArgs) -> codelens_core::config::OutputConfig {
-    let mut output = codelens_core::config::OutputConfig::default();
-    if let Some(format) = args.output.format {
-        output.format = format.into();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use codelens_core::insight::trend::save_snapshot;
+
+    fn empty_analysis() -> codelens_core::AnalysisResult {
+        codelens_core::AnalysisResult {
+            summary: codelens_core::Summary::default(),
+            files: vec![],
+            elapsed: std::time::Duration::ZERO,
+            scanned_files: 0,
+            skipped_files: 0,
+            error_files: 0,
+        }
     }
-    if let Some(ref path) = args.output.output_file {
-        output.file = Some(path.clone());
+
+    #[test]
+    fn compare_merges_config_file_then_cli_output_overrides() {
+        let project = tempfile::tempdir().unwrap();
+        save_snapshot(
+            project.path(),
+            empty_analysis(),
+            Some("before".into()),
+            None,
+            None,
+        )
+        .unwrap();
+        save_snapshot(
+            project.path(),
+            empty_analysis(),
+            Some("after".into()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let config_output = project.path().join("from-config.json");
+        let config_path = project.path().join("codelens.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "output = \"json\"\noutput_file = \"{}\"\n",
+                config_output.display()
+            ),
+        )
+        .unwrap();
+
+        let cli = crate::cli::Cli::try_parse_from([
+            "codelens",
+            "trend",
+            project.path().to_str().unwrap(),
+            "--compare",
+            "latest~1",
+            "latest",
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .unwrap();
+        let crate::cli::Command::Trend(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected trend command");
+        };
+        run_trend(args, &cli.advanced).unwrap();
+        let json = std::fs::read_to_string(&config_output).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&json).is_ok());
+
+        let cli_output = project.path().join("from-cli.md");
+        let cli = crate::cli::Cli::try_parse_from([
+            "codelens",
+            "trend",
+            project.path().to_str().unwrap(),
+            "--compare",
+            "latest~1",
+            "latest",
+            "--config",
+            config_path.to_str().unwrap(),
+            "-f",
+            "markdown",
+            "-O",
+            cli_output.to_str().unwrap(),
+        ])
+        .unwrap();
+        let crate::cli::Command::Trend(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected trend command");
+        };
+        run_trend(args, &cli.advanced).unwrap();
+        let markdown = std::fs::read_to_string(cli_output).unwrap();
+        assert!(markdown.starts_with("# Trend Report"));
     }
-    if let Some(sort) = args.output.sort {
-        output.sort_by = sort.into();
-    }
-    output.summary_only = args.output.summary;
-    output.top_n = args.output.top;
-    output.quiet = args.output.quiet;
-    output
 }
