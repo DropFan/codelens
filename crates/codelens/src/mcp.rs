@@ -4,9 +4,7 @@
 //! (Claude Code, Cursor, ...) can query repository statistics, health
 //! scores, hotspots, and change coupling before editing code. Tools
 //! return compact JSON strings mirroring the shape of the `-f json` CLI
-//! output. Known divergence: `change_coupling` here pairs ALL files in
-//! history (no tree restriction, test files included), while the CLI
-//! default excludes test files.
+//! output.
 
 use std::path::PathBuf;
 
@@ -16,7 +14,7 @@ use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::Deserialize;
 
 use codelens_core::insight::scoring::HealthModelVersion;
-use codelens_core::insight::{coupling, health, hotspot};
+use codelens_core::insight::{health, hotspot};
 use codelens_core::{analyze, Config, GitClient};
 
 /// Analysis defaults matching the CLI (smart excludes, gitignore, all cores).
@@ -56,12 +54,45 @@ pub struct GitWindowArgs {
     #[serde(default)]
     pub path: Option<String>,
     /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
-    /// Only honored by hotspots and change_coupling; code_health ignores it.
+    /// Only honored by hotspots; code_health ignores it.
     #[serde(default)]
     pub since: Option<String>,
     /// Maximum entries to return; defaults to 10.
     #[serde(default)]
     pub top: Option<usize>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct CouplingArgs {
+    /// Directory to analyze; only files under this path that survive the
+    /// configured filters are eligible for coupling results.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Maximum pairs to return. Overrides the server configuration; defaults
+    /// to the configured top value, then 20.
+    #[serde(default)]
+    pub top: Option<usize>,
+    /// Only return pairs involving this repo-relative file. A test file
+    /// automatically enables test files.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// Minimum number of shared commits; defaults to 5.
+    #[serde(default)]
+    pub min_shared: Option<usize>,
+    /// Minimum coupling percentage; defaults to 30.
+    #[serde(default)]
+    pub min_coupling: Option<f64>,
+    /// Ignore commits touching more files than this; defaults to 30.
+    #[serde(default)]
+    pub max_changeset: Option<usize>,
+    /// Include test files. Tests are excluded by default unless focus points
+    /// to a test file.
+    #[serde(default)]
+    pub include_tests: Option<bool>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -93,6 +124,37 @@ fn health_report(
 ) -> codelens_core::insight::health::HealthReport {
     let model = crate::commands::scoring_model_for(version, result.summary.dup_scanned);
     health::score(result, model.as_ref(), top_n)
+}
+
+fn query_from_mcp(
+    args: &CouplingArgs,
+    config: &Config,
+) -> crate::commands::coupling::CouplingQuery {
+    let mut query = crate::commands::coupling::CouplingQuery::default();
+    query.top_n = config.output.top_n.unwrap_or(query.top_n);
+
+    if let Some(since) = &args.since {
+        query.since.clone_from(since);
+    }
+    if let Some(top) = args.top {
+        query.top_n = top;
+    }
+    if let Some(focus) = &args.focus {
+        query.focus = Some(PathBuf::from(focus));
+    }
+    if let Some(min_shared) = args.min_shared {
+        query.min_shared = min_shared;
+    }
+    if let Some(min_coupling) = args.min_coupling {
+        query.min_coupling = min_coupling;
+    }
+    if let Some(max_changeset) = args.max_changeset {
+        query.max_changeset = max_changeset;
+    }
+    if let Some(include_tests) = args.include_tests {
+        query.include_tests = include_tests;
+    }
+    query
 }
 
 #[tool_router]
@@ -168,21 +230,15 @@ impl CodelensServer {
     }
 
     #[tool(
-        description = "Change coupling: file pairs that keep changing in the same commits (hidden dependencies). Requires a git repository. Use to learn what else usually changes when a given area changes."
+        description = "Change coupling: file pairs that keep changing in the same commits (hidden dependencies). Requires a git repository. The path limits eligible files to the current filtered scan tree; deleted and out-of-scope files are excluded. Tests are excluded by default, include_tests restores them, and focusing a test file includes tests automatically. Supports since, top, focus, min_shared, min_coupling, and max_changeset. Use to learn what else usually changes when a given area changes."
     )]
-    async fn change_coupling(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
+    async fn change_coupling(&self, Parameters(args): Parameters<CouplingArgs>) -> String {
+        let config = self.config.clone();
         run_blocking(move || {
-            let path = arg_path(args.path);
-            let since_arg = args.since.unwrap_or_else(|| "90d".to_string());
-            let since = codelens_core::git::parse_since(&since_arg);
-            let git_client = GitClient::detect(&path)?;
-            let commits = git_client.commit_log(&since)?;
-            let opts = coupling::CouplingOptions {
-                top_n: args.top.unwrap_or(10),
-                ..coupling::CouplingOptions::default()
-            };
-            let report = coupling::analyze(&commits, None, &since_arg, &opts);
-            Ok(serde_json::to_string(&report)?)
+            let path = arg_path(args.path.clone());
+            let query = query_from_mcp(&args, &config);
+            let run = crate::commands::coupling::analyze_coupling(&[path], &config, &query)?;
+            Ok(serde_json::to_string(&run.report)?)
         })
         .await
     }
@@ -243,6 +299,7 @@ pub fn run(config: Config) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
     use codelens_core::{AnalysisResult, Summary};
     use std::time::Duration;
 
@@ -274,6 +331,106 @@ mod tests {
         assert_eq!(
             health_report(&empty_result(true), 10, HealthModelVersion::V1).model,
             "default"
+        );
+    }
+
+    fn empty_coupling_args() -> CouplingArgs {
+        CouplingArgs {
+            path: None,
+            since: None,
+            top: None,
+            focus: None,
+            min_shared: None,
+            min_coupling: None,
+            max_changeset: None,
+            include_tests: None,
+        }
+    }
+
+    #[test]
+    fn coupling_arguments_override_server_config_then_defaults() {
+        let mut config = Config::default();
+        config.output.top_n = Some(7);
+        assert_eq!(query_from_mcp(&empty_coupling_args(), &config).top_n, 7);
+
+        let args = CouplingArgs {
+            top: Some(3),
+            min_shared: Some(2),
+            min_coupling: Some(40.0),
+            max_changeset: Some(12),
+            include_tests: Some(true),
+            ..empty_coupling_args()
+        };
+        let query = query_from_mcp(&args, &config);
+        assert_eq!(query.top_n, 3);
+        assert_eq!(query.min_shared, 2);
+        assert_eq!(query.min_coupling, 40.0);
+        assert_eq!(query.max_changeset, 12);
+        assert!(query.include_tests);
+
+        config.output.top_n = None;
+        assert_eq!(query_from_mcp(&empty_coupling_args(), &config).top_n, 20);
+    }
+
+    #[test]
+    fn cli_and_mcp_coupling_return_the_same_report() {
+        let repo = crate::commands::coupling::tests::coupling_fixture();
+        let path = repo.path().join("src");
+        let focus = "src/a_test.rs";
+
+        let cli = crate::cli::Cli::try_parse_from([
+            "codelens",
+            "coupling",
+            path.to_str().unwrap(),
+            "--since",
+            "2000-01-01",
+            "--for",
+            focus,
+            "--min-shared",
+            "1",
+            "--min-coupling",
+            "0",
+            "--max-changeset",
+            "30",
+            "--top",
+            "1",
+        ])
+        .unwrap();
+        let crate::cli::Command::Coupling(cli_args) = cli.command.unwrap() else {
+            panic!("expected coupling command");
+        };
+        let mut cli_config = crate::commands::coupling::tests::fixture_config();
+        cli_config.output.top_n = Some(1);
+        let cli_query = crate::commands::coupling::query_from_cli(&cli_args, &cli_config);
+        let cli_report =
+            crate::commands::coupling::analyze_coupling(&cli_args.paths, &cli_config, &cli_query)
+                .unwrap()
+                .report;
+
+        let mut mcp_config = crate::commands::coupling::tests::fixture_config();
+        mcp_config.output.top_n = Some(9);
+        let mcp_args = CouplingArgs {
+            path: Some(path.to_string_lossy().into_owned()),
+            since: Some("2000-01-01".to_string()),
+            top: Some(1),
+            focus: Some(focus.to_string()),
+            min_shared: Some(1),
+            min_coupling: Some(0.0),
+            max_changeset: Some(30),
+            include_tests: Some(false),
+        };
+        let mcp_query = query_from_mcp(&mcp_args, &mcp_config);
+        let mcp_report = crate::commands::coupling::analyze_coupling(
+            &[arg_path(mcp_args.path)],
+            &mcp_config,
+            &mcp_query,
+        )
+        .unwrap()
+        .report;
+
+        assert_eq!(
+            serde_json::to_value(cli_report).unwrap(),
+            serde_json::to_value(mcp_report).unwrap()
         );
     }
 
