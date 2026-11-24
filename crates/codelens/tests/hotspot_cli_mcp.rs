@@ -233,8 +233,9 @@ fn cli_and_mcp_hotspot_json_match_for_scope_filters_top_and_functions() {
         .unwrap()
         .iter()
         .all(|file| {
-            file["path"].as_str().unwrap().starts_with("src/")
-                && file["path"] != "src/filtered.rs"
+            let file_path = Path::new(file["path"].as_str().unwrap());
+            file_path.starts_with(Path::new("src"))
+                && file_path != Path::new("src/filtered.rs")
                 && file["functions"]
                     .as_array()
                     .is_some_and(|items| !items.is_empty())
