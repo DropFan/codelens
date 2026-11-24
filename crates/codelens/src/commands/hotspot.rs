@@ -12,53 +12,102 @@ use codelens_core::analyze;
 use codelens_core::git::{self, GitClient};
 use codelens_core::insight::hotspot;
 use codelens_core::output::Report;
+use codelens_core::Config;
 
 use super::{load_partial_config, resolve_config, rewrite_paths_repo_relative, write_report};
 use crate::cli;
 
+pub(crate) const DEFAULT_HOTSPOT_TOP: usize = 20;
+
+#[derive(Debug, Clone)]
+pub(crate) struct HotspotQuery {
+    pub(crate) since: String,
+    pub(crate) top_n: usize,
+    pub(crate) functions: bool,
+}
+
+impl Default for HotspotQuery {
+    fn default() -> Self {
+        Self {
+            since: "90d".to_string(),
+            top_n: DEFAULT_HOTSPOT_TOP,
+            functions: false,
+        }
+    }
+}
+
+pub(crate) struct HotspotRun {
+    pub(crate) report: codelens_core::insight::hotspot::HotspotReport,
+    pub(crate) history_is_empty: bool,
+}
+
 pub(crate) fn run_hotspot(args: &cli::HotspotArgs, advanced: &cli::AdvancedArgs) -> Result<()> {
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
-    let git_client = GitClient::detect(&args.paths[0]).context("Not a git repository")?;
-    let since = git::parse_since(&args.since);
-    let mut result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let query = query_from_cli(args, &config);
+    let run = analyze_hotspots(&args.paths, &config, &query)?;
 
-    // git numstat paths are repo-root-relative; analysis paths are relative
-    // to the walk root (or absolute). Rewrite them so the two sides match
-    // even when running from a subdirectory or with absolute paths.
-    rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
-
-    // One log walk yields both churn and author-ownership data.
-    let commits = git_client.commit_log(&since)?;
-    let churns = git::churn_from_commits(&commits);
-    let authors = git::aggregate_authors(&commits);
-    let total_commits = commits.len();
-    if total_commits == 0 {
+    if run.history_is_empty {
         eprintln!(
             "{}: no commits found since '{}'; check the --since format (e.g. 30d, 4w, 6m, 1y, YYYY-MM-DD)",
             "warning".yellow().bold(),
             args.since
         );
     }
-    let top_n = config.output.top_n.unwrap_or(20);
-    let mut report = hotspot::analyze(&churns, &result, &args.since, total_commits, top_n);
+    write_report(Report::Hotspot(run.report), &config.output)
+}
+
+pub(crate) fn query_from_cli(args: &cli::HotspotArgs, config: &Config) -> HotspotQuery {
+    HotspotQuery {
+        since: args.since.clone(),
+        top_n: config.output.top_n.unwrap_or(DEFAULT_HOTSPOT_TOP),
+        functions: args.functions,
+    }
+}
+
+/// Analyze change hotspots with identical scope, filtering, history, and
+/// enrichment semantics for every frontend. Presentation and protocol details
+/// stay with the caller.
+pub(crate) fn analyze_hotspots(
+    paths: &[PathBuf],
+    config: &Config,
+    query: &HotspotQuery,
+) -> Result<HotspotRun> {
+    let first_path = paths.first().context("No analysis path provided")?;
+    let git_client = GitClient::detect(first_path).context("Not a git repository")?;
+    let since = git::parse_since(&query.since);
+    let mut result = analyze(paths, config).context("Analysis failed")?;
+
+    // Git numstat paths are repo-root-relative; analysis paths are relative
+    // to the walk root (or absolute). Align them before joining metrics.
+    rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
+
+    // One log walk yields both churn and author-ownership data.
+    let commits = git_client.commit_log(&since)?;
+    let churns = git::churn_from_commits(&commits);
+    let authors = git::aggregate_authors(&commits);
+    let mut report = hotspot::analyze(&churns, &result, &query.since, commits.len(), query.top_n);
     hotspot::attach_knowledge(&mut report, &authors);
 
-    // Age enrichment walks the full history; a failure here (or a clock
-    // before the epoch) only costs the Age column, never the report.
-    if let Ok(first_commits) = git_client.first_commit_times() {
-        let now_ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        if now_ts > 0 {
-            hotspot::attach_ages(&mut report, &first_commits, now_ts);
-        }
+    // File age is report data, so failure must not masquerade as a complete
+    // report with every age missing.
+    let first_commits = git_client
+        .first_commit_times()
+        .context("Failed to read file age history")?;
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("System clock is before the Unix epoch")?
+        .as_secs() as i64;
+    hotspot::attach_ages(&mut report, &first_commits, now_ts);
+
+    if query.functions {
+        attach_function_hotspots(&mut report, &git_client, &since, config)?;
     }
-    if args.functions {
-        attach_function_hotspots(&mut report, &git_client, &since, &config)?;
-    }
-    write_report(Report::Hotspot(report), &config.output)
+
+    Ok(HotspotRun {
+        history_is_empty: commits.is_empty(),
+        report,
+    })
 }
 
 /// Break the top hotspot files down to function level: intersect each
@@ -103,9 +152,8 @@ fn attach_function_hotspots(
         .iter()
         .map(|(_, path, _, _, _)| path.clone())
         .collect();
-    // Function enrichment is best-effort: preserve the file-level report if
-    // Git history cannot be read, matching the previous per-file behavior.
-    let hunks_by_path = batch_file_commit_hunks(&repo_root, &paths, since).unwrap_or_default();
+    let hunks_by_path = batch_file_commit_hunks(&repo_root, &paths, since)
+        .context("Failed to read function-level Git history")?;
 
     for (index, path, content, spans, lang) in candidates {
         let Some(hunks) = hunks_by_path.get(&path) else {
@@ -361,6 +409,7 @@ mod tests {
 
     use codelens_core::insight::hotspot::{ChurnMetrics, FileHotspot, HotspotReport, RiskLevel};
     use codelens_core::{Complexity, Config};
+    use std::fs;
 
     fn git(dir: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -380,6 +429,127 @@ mod tests {
         git(dir, &["config", "user.email", "test@test.com"]);
         git(dir, &["config", "user.name", "Test"]);
         git(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    fn commit_all(dir: &Path, message: &str) {
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-m", message]);
+    }
+
+    fn hotspot_fixture() -> tempfile::TempDir {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::create_dir_all(temp.path().join("outside")).unwrap();
+
+        for path in ["src/alpha.rs", "src/beta.rs", "src/filtered.rs"] {
+            fs::write(
+                temp.path().join(path),
+                "pub fn score(value: usize) -> usize {\n    if value > 10 { value * 2 } else { value + 1 }\n}\n",
+            )
+            .unwrap();
+        }
+        fs::write(
+            temp.path().join("outside/ignored.rs"),
+            "pub fn outside(value: usize) -> usize { value + 1 }\n",
+        )
+        .unwrap();
+        commit_all(temp.path(), "initial files");
+
+        for index in 0..3 {
+            fs::write(
+                temp.path().join("src/alpha.rs"),
+                format!(
+                    "pub fn score(value: usize) -> usize {{\n    if value > {} {{ value * 2 }} else {{ value + 1 }}\n}}\n",
+                    10 + index
+                ),
+            )
+            .unwrap();
+            if index < 2 {
+                fs::write(
+                    temp.path().join("src/beta.rs"),
+                    format!(
+                        "pub fn score(value: usize) -> usize {{\n    if value > {} {{ value * 3 }} else {{ value + 2 }}\n}}\n",
+                        20 + index
+                    ),
+                )
+                .unwrap();
+            }
+            fs::write(
+                temp.path().join("src/filtered.rs"),
+                format!("pub fn filtered() -> usize {{ {index} }}\n"),
+            )
+            .unwrap();
+            fs::write(
+                temp.path().join("outside/ignored.rs"),
+                format!("pub fn outside() -> usize {{ {index} }}\n"),
+            )
+            .unwrap();
+            commit_all(temp.path(), &format!("change {index}"));
+        }
+        temp
+    }
+
+    #[test]
+    fn shared_analysis_unifies_scope_filters_empty_history_top_and_functions() {
+        let repo = hotspot_fixture();
+        let mut config = Config::default();
+        config.walker.threads = 1;
+        config.filter.exclude_files = vec![r"filtered[.]rs$".to_string()];
+
+        let path = repo.path().join("src");
+        let detailed = analyze_hotspots(
+            std::slice::from_ref(&path),
+            &config,
+            &HotspotQuery {
+                since: "2000-01-01".to_string(),
+                top_n: 1,
+                functions: true,
+            },
+        )
+        .unwrap();
+
+        assert!(!detailed.history_is_empty);
+        assert_eq!(detailed.report.files.len(), 1);
+        let top = &detailed.report.files[0];
+        assert!(top.path.starts_with("src"));
+        assert_ne!(top.path, Path::new("src/filtered.rs"));
+        assert!(top.age_days.is_some());
+        assert!(top.knowledge.is_some());
+        assert!(top
+            .functions
+            .as_ref()
+            .is_some_and(|items| !items.is_empty()));
+
+        let all = analyze_hotspots(
+            std::slice::from_ref(&path),
+            &config,
+            &HotspotQuery {
+                since: "2000-01-01".to_string(),
+                top_n: DEFAULT_HOTSPOT_TOP,
+                functions: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(all.report.files.len(), 2);
+        assert!(all
+            .report
+            .files
+            .iter()
+            .all(|file| file.path.starts_with("src")));
+
+        let empty = analyze_hotspots(
+            &[path],
+            &config,
+            &HotspotQuery {
+                since: "2030-01-01".to_string(),
+                ..HotspotQuery::default()
+            },
+        )
+        .unwrap();
+        assert!(empty.history_is_empty);
+        assert_eq!(empty.report.total_commits, 0);
+        assert!(empty.report.files.is_empty());
     }
 
     #[test]

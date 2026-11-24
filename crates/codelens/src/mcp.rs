@@ -13,9 +13,9 @@ use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
 use serde::Deserialize;
 
+use codelens_core::insight::health;
 use codelens_core::insight::scoring::HealthModelVersion;
-use codelens_core::insight::{health, hotspot};
-use codelens_core::{analyze, Config, GitClient};
+use codelens_core::{analyze, Config};
 
 /// Analysis defaults matching the CLI (smart excludes, gitignore, all cores).
 fn default_config() -> Config {
@@ -53,13 +53,35 @@ pub struct GitWindowArgs {
     /// Directory inside the git repository; defaults to the current directory.
     #[serde(default)]
     pub path: Option<String>,
-    /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
-    /// Only honored by hotspots; code_health ignores it.
+    /// Reserved time window argument; kept for MCP input compatibility even
+    /// though code_health currently ignores it.
+    #[allow(dead_code)]
     #[serde(default)]
     pub since: Option<String>,
     /// Maximum entries to return; defaults to 10.
     #[serde(default)]
     pub top: Option<usize>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct HotspotArgs {
+    /// Directory inside the git repository; defaults to the current directory.
+    /// Only files under this path that survive the configured filters are
+    /// eligible for hotspot results.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Maximum entries to return. Overrides the server configuration; defaults
+    /// to the configured top value, then 20.
+    #[serde(default)]
+    pub top: Option<usize>,
+    /// Break top files down to function-level hotspots using batched Git
+    /// history reads; defaults to false.
+    #[serde(default)]
+    pub functions: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -126,7 +148,7 @@ fn health_report(
     health::score(result, model.as_ref(), top_n)
 }
 
-fn query_from_mcp(
+fn coupling_query_from_mcp(
     args: &CouplingArgs,
     config: &Config,
 ) -> crate::commands::coupling::CouplingQuery {
@@ -154,6 +176,23 @@ fn query_from_mcp(
     if let Some(include_tests) = args.include_tests {
         query.include_tests = include_tests;
     }
+    query
+}
+
+fn hotspot_query_from_mcp(
+    args: &HotspotArgs,
+    config: &Config,
+) -> crate::commands::hotspot::HotspotQuery {
+    let mut query = crate::commands::hotspot::HotspotQuery::default();
+    query.top_n = config.output.top_n.unwrap_or(query.top_n);
+
+    if let Some(since) = &args.since {
+        query.since.clone_from(since);
+    }
+    if let Some(top) = args.top {
+        query.top_n = top;
+    }
+    query.functions = args.functions;
     query
 }
 
@@ -187,44 +226,28 @@ impl CodelensServer {
     async fn code_health(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
         let config = self.config.clone();
         run_blocking(move || {
-            let result = analyze(&[arg_path(args.path)], &config)?;
-            let report = health_report(&result, args.top.unwrap_or(10), config.health_model);
+            let GitWindowArgs {
+                path,
+                since: _,
+                top,
+            } = args;
+            let result = analyze(&[arg_path(path)], &config)?;
+            let report = health_report(&result, top.unwrap_or(10), config.health_model);
             Ok(serde_json::to_string(&report)?)
         })
         .await
     }
 
     #[tool(
-        description = "Change hotspots: files that are both complex and frequently changed (the likeliest bug sources), with code age and author concentration (knowledge islands: risky files effectively one person knows). Requires a git repository. Use to gauge risk before touching a file."
+        description = "Change hotspots: files that are both complex and frequently changed (the likeliest bug sources), with code age and author concentration (knowledge islands: risky files effectively one person knows). Requires a git repository. The path limits results to the current filtered scan tree. Supports since, top, and functions; functions adds an approximate function-level breakdown using batched Git history reads. Use to gauge risk before touching a file."
     )]
-    async fn hotspots(&self, Parameters(args): Parameters<GitWindowArgs>) -> String {
+    async fn hotspots(&self, Parameters(args): Parameters<HotspotArgs>) -> String {
         let config = self.config.clone();
         run_blocking(move || {
-            let path = arg_path(args.path);
-            let since_arg = args.since.unwrap_or_else(|| "90d".to_string());
-            let since = codelens_core::git::parse_since(&since_arg);
-            let git_client = GitClient::detect(&path)?;
-            let mut result = analyze(&[path], &config)?;
-            // Git paths are repo-root-relative; align the analysis side so
-            // churn/knowledge joins work when `path` is a subdirectory.
-            crate::commands::rewrite_paths_repo_relative(&mut result.files, git_client.repo_path());
-            let commits = git_client.commit_log(&since)?;
-            let churns = codelens_core::git::churn_from_commits(&commits);
-            let authors = codelens_core::git::aggregate_authors(&commits);
-            let total = commits.len();
-            let mut report =
-                hotspot::analyze(&churns, &result, &since_arg, total, args.top.unwrap_or(10));
-            hotspot::attach_knowledge(&mut report, &authors);
-            if let Ok(first_commits) = git_client.first_commit_times() {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                if now > 0 {
-                    hotspot::attach_ages(&mut report, &first_commits, now);
-                }
-            }
-            Ok(serde_json::to_string(&report)?)
+            let path = arg_path(args.path.clone());
+            let query = hotspot_query_from_mcp(&args, &config);
+            let run = crate::commands::hotspot::analyze_hotspots(&[path], &config, &query)?;
+            Ok(serde_json::to_string(&run.report)?)
         })
         .await
     }
@@ -236,7 +259,7 @@ impl CodelensServer {
         let config = self.config.clone();
         run_blocking(move || {
             let path = arg_path(args.path.clone());
-            let query = query_from_mcp(&args, &config);
+            let query = coupling_query_from_mcp(&args, &config);
             let run = crate::commands::coupling::analyze_coupling(&[path], &config, &query)?;
             Ok(serde_json::to_string(&run.report)?)
         })
@@ -347,11 +370,50 @@ mod tests {
         }
     }
 
+    fn empty_hotspot_args() -> HotspotArgs {
+        HotspotArgs {
+            path: None,
+            since: None,
+            top: None,
+            functions: false,
+        }
+    }
+
+    #[test]
+    fn hotspot_arguments_override_server_config_then_defaults() {
+        let mut config = Config::default();
+        config.output.top_n = Some(7);
+        let configured = hotspot_query_from_mcp(&empty_hotspot_args(), &config);
+        assert_eq!(configured.top_n, 7);
+        assert_eq!(configured.since, "90d");
+        assert!(!configured.functions);
+
+        let args = HotspotArgs {
+            since: Some("30d".to_string()),
+            top: Some(3),
+            functions: true,
+            ..empty_hotspot_args()
+        };
+        let overridden = hotspot_query_from_mcp(&args, &config);
+        assert_eq!(overridden.top_n, 3);
+        assert_eq!(overridden.since, "30d");
+        assert!(overridden.functions);
+
+        config.output.top_n = None;
+        assert_eq!(
+            hotspot_query_from_mcp(&empty_hotspot_args(), &config).top_n,
+            crate::commands::hotspot::DEFAULT_HOTSPOT_TOP
+        );
+    }
+
     #[test]
     fn coupling_arguments_override_server_config_then_defaults() {
         let mut config = Config::default();
         config.output.top_n = Some(7);
-        assert_eq!(query_from_mcp(&empty_coupling_args(), &config).top_n, 7);
+        assert_eq!(
+            coupling_query_from_mcp(&empty_coupling_args(), &config).top_n,
+            7
+        );
 
         let args = CouplingArgs {
             top: Some(3),
@@ -361,7 +423,7 @@ mod tests {
             include_tests: Some(true),
             ..empty_coupling_args()
         };
-        let query = query_from_mcp(&args, &config);
+        let query = coupling_query_from_mcp(&args, &config);
         assert_eq!(query.top_n, 3);
         assert_eq!(query.min_shared, 2);
         assert_eq!(query.min_coupling, 40.0);
@@ -369,7 +431,10 @@ mod tests {
         assert!(query.include_tests);
 
         config.output.top_n = None;
-        assert_eq!(query_from_mcp(&empty_coupling_args(), &config).top_n, 20);
+        assert_eq!(
+            coupling_query_from_mcp(&empty_coupling_args(), &config).top_n,
+            20
+        );
     }
 
     #[test]
@@ -419,7 +484,7 @@ mod tests {
             max_changeset: Some(30),
             include_tests: Some(false),
         };
-        let mcp_query = query_from_mcp(&mcp_args, &mcp_config);
+        let mcp_query = coupling_query_from_mcp(&mcp_args, &mcp_config);
         let mcp_report = crate::commands::coupling::analyze_coupling(
             &[arg_path(mcp_args.path)],
             &mcp_config,

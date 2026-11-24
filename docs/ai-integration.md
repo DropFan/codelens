@@ -24,11 +24,17 @@ claude mcp add codelens -- codelens mcp
 |------|------|
 | `repo_overview` | 仓库概览：文件/行数/语言分布/复杂度/测试占比/token 估算 |
 | `code_health` | 健康报告：项目评分（A-F）、六维度得分（含重复度）、最差目录与文件 |
-| `hotspots` | 变更热点：又复杂又频繁改动的文件（最可能出 bug），含代码年龄与作者集中度（知识孤岛标记） |
+| `hotspots` | 变更热点：又复杂又频繁改动的文件（最可能出 bug），含代码年龄、作者集中度和可选的函数级明细。与 CLI 使用相同的扫描范围、配置过滤和 Git 历史语义 |
 | `change_coupling` | 变更耦合：总是一起改的文件对（改 A 通常还要改 B）。与 CLI 使用相同的扫描范围、配置过滤和测试文件规则 |
 | `file_metrics` | 单文件指标：行数、圈/认知复杂度、嵌套深度、健康分 |
 
 典型用法：代理在改一个文件前先查 `hotspots` 和 `change_coupling`，知道"这个文件风险多高、动它会牵连谁"；改完后用 `code_health` 确认没有劣化。
+
+`hotspots` 支持 `path`、`since`、`top` 和 `functions`。`path` 会限制可进入结果的
+当前文件，并应用 MCP 启动时合并的配置过滤；`functions=true` 会使用与 CLI
+`--functions` 相同的批量 Git 历史读取，返回近似的函数级热点。单次调用的 `top`
+优先于 MCP 启动配置，启动配置再优先于内置默认值 20。时间窗口内没有提交时仍返回
+合法的空报告；CLI 会额外在 stderr 显示提示，MCP 保持紧凑 JSON。
 
 `change_coupling` 支持 `path`、`since`、`top`、`focus`、`min_shared`、
 `min_coupling`、`max_changeset` 和 `include_tests`。`path` 会限制可进入结果的当前文件；
