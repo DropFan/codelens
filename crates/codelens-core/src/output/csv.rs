@@ -5,7 +5,10 @@ use std::io::Write;
 use crate::analyzer::stats::AnalysisResult;
 use crate::error::Result;
 
-use super::format::{OutputFormat, OutputOptions, Report};
+use super::format::{
+    EstimationComparisonPresentation, EstimationPresentation, OutputFormat, OutputOptions, Report,
+    COST_LABEL, EFFORT_LABEL, PEOPLE_LABEL, SCHEDULE_LABEL, TOTAL_SLOC_LABEL,
+};
 
 /// CSV output formatter.
 pub struct CsvOutput;
@@ -346,19 +349,53 @@ impl CsvOutput {
     fn write_estimation(
         &self,
         report: &crate::insight::estimation::EstimationReport,
-        _options: &OutputOptions,
+        options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "Language,Code,Effort(PM),Cost")?;
-        for lang in &report.by_language {
+        let estimation = EstimationPresentation::from_report(report, options);
+        writeln!(
+            writer,
+            "Model,{TOTAL_SLOC_LABEL},{EFFORT_LABEL},{SCHEDULE_LABEL},{PEOPLE_LABEL},{COST_LABEL},Language,Language Code,Language {EFFORT_LABEL},Language {COST_LABEL},Parameters"
+        )?;
+        let params = estimation
+            .params
+            .iter()
+            .map(|param| format!("{}={}", param.key, param.value))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let mut write_row = |language: Option<&super::format::EstimationLanguagePresentation>| {
+            let (name, code, effort, cost) = language
+                .map(|language| {
+                    (
+                        csv_field(&language.language),
+                        language.code_lines.to_string(),
+                        language.effort_months.clone(),
+                        language.cost.clone(),
+                    )
+                })
+                .unwrap_or_default();
             writeln!(
                 writer,
-                "{},{},{:.2},{:.2}",
-                csv_field(&lang.language),
-                lang.code_lines,
-                lang.effort_months,
-                lang.cost,
-            )?;
+                "{},{},{},{},{},{},{},{},{},{},{}",
+                csv_field(&estimation.model),
+                estimation.total_sloc,
+                estimation.effort_months,
+                estimation.schedule_months,
+                estimation.people_required,
+                estimation.estimated_cost,
+                name,
+                code,
+                effort,
+                cost,
+                csv_field(&params),
+            )
+        };
+        if estimation.languages.is_empty() {
+            write_row(None)?;
+        } else {
+            for language in &estimation.languages {
+                write_row(Some(language))?;
+            }
         }
         Ok(())
     }
@@ -368,17 +405,28 @@ impl CsvOutput {
         report: &crate::insight::estimation::EstimationComparison,
         writer: &mut dyn Write,
     ) -> Result<()> {
-        writeln!(writer, "Model,SLOC,Effort(PM),Schedule(M),People,Cost")?;
-        for r in &report.reports {
+        let estimation = EstimationComparisonPresentation::from_report(report);
+        writeln!(
+            writer,
+            "Model,{TOTAL_SLOC_LABEL},{EFFORT_LABEL},{SCHEDULE_LABEL},{PEOPLE_LABEL},{COST_LABEL},Parameters"
+        )?;
+        for r in &estimation.reports {
+            let params = r
+                .params
+                .iter()
+                .map(|param| format!("{}={}", param.key, param.value))
+                .collect::<Vec<_>>()
+                .join("; ");
             writeln!(
                 writer,
-                "{},{},{:.2},{:.2},{:.2},{:.2}",
+                "{},{},{},{},{},{},{}",
                 csv_field(&r.model),
                 r.total_sloc,
                 r.effort_months,
                 r.schedule_months,
                 r.people_required,
                 r.estimated_cost,
+                csv_field(&params),
             )?;
         }
         Ok(())

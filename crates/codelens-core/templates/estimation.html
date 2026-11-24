@@ -79,12 +79,16 @@
                 <div class="label">Total SLOC</div>
             </div>
             <div class="stat-card">
+                <div class="value">{{ effort_months }}</div>
+                <div class="label">Effort (Person-Months)</div>
+            </div>
+            <div class="stat-card">
                 <div class="value" style="color: var(--accent-green)">${{ estimated_cost }}</div>
-                <div class="label">Estimated Cost</div>
+                <div class="label">Estimated Cost (USD)</div>
             </div>
             <div class="stat-card">
                 <div class="value" style="color: var(--accent-yellow)">{{ schedule_months }}</div>
-                <div class="label">Schedule (months)</div>
+                <div class="label">Schedule (Months)</div>
             </div>
             <div class="stat-card">
                 <div class="value" style="color: var(--accent-purple)">{{ people_required }}</div>
@@ -108,7 +112,7 @@
             <h2>By Language</h2>
             <table>
                 <thead>
-                    <tr><th>Language</th><th>Code Lines</th><th>Effort (PM)</th><th>Cost</th><th>Share</th></tr>
+                    <tr><th>Language</th><th>Code Lines</th><th>Effort (Person-Months)</th><th>Estimated Cost (USD)</th><th>Share</th></tr>
                 </thead>
                 <tbody>
                 {% for lang in by_language %}

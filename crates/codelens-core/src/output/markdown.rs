@@ -9,8 +9,9 @@ use std::io::Write;
 
 use super::format::{
     CouplingFilterPresentation, CouplingPresentation, OutputFormat, OutputOptions, Report,
-    TrendPresentation,
+    TrendPresentation, COST_LABEL, EFFORT_LABEL, PEOPLE_LABEL, SCHEDULE_LABEL, TOTAL_SLOC_LABEL,
 };
+use super::format::{EstimationComparisonPresentation, EstimationPresentation};
 use crate::error::Result;
 
 /// Markdown output formatter.
@@ -189,50 +190,51 @@ impl MarkdownOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationPresentation::from_report(report, options);
         writeln!(writer, "# Cost Estimation Report")?;
         writeln!(writer)?;
-        writeln!(writer, "**Model:** {}", report.model)?;
+        writeln!(writer, "**Model:** {}", estimation.model)?;
         writeln!(writer)?;
         writeln!(writer, "## Summary")?;
         writeln!(writer)?;
         writeln!(writer, "| Metric | Value |")?;
         writeln!(writer, "|--------|-------|")?;
-        writeln!(writer, "| Total SLOC | {} |", report.total_sloc)?;
-        writeln!(writer, "| Estimated Cost | ${:.2} |", report.estimated_cost)?;
+        writeln!(writer, "| {TOTAL_SLOC_LABEL} | {} |", estimation.total_sloc)?;
+        writeln!(writer, "| {EFFORT_LABEL} | {} |", estimation.effort_months)?;
         writeln!(
             writer,
-            "| Schedule Effort | {:.2} months |",
-            report.schedule_months
+            "| {SCHEDULE_LABEL} | {} |",
+            estimation.schedule_months
         )?;
         writeln!(
             writer,
-            "| People Required | {:.2} |",
-            report.people_required
+            "| {PEOPLE_LABEL} | {} |",
+            estimation.people_required
         )?;
+        writeln!(writer, "| {COST_LABEL} | ${} |", estimation.estimated_cost)?;
         writeln!(writer)?;
-        if !options.summary_only && !report.by_language.is_empty() {
+        if !estimation.languages.is_empty() {
             writeln!(writer, "## By Language")?;
             writeln!(writer)?;
-            writeln!(writer, "| Language | Code | Effort (PM) | Cost |")?;
+            writeln!(
+                writer,
+                "| Language | Code | {EFFORT_LABEL} | {COST_LABEL} |"
+            )?;
             writeln!(writer, "|----------|------|-------------|------|")?;
-            let mut langs = report.by_language.iter().collect::<Vec<_>>();
-            if let Some(n) = options.top_n {
-                langs.truncate(n);
-            }
-            for lang in langs {
+            for lang in &estimation.languages {
                 writeln!(
                     writer,
-                    "| {} | {} | {:.2} | ${:.2} |",
+                    "| {} | {} | {} | ${} |",
                     lang.language, lang.code_lines, lang.effort_months, lang.cost,
                 )?;
             }
             writeln!(writer)?;
         }
         writeln!(writer, "---")?;
-        let params_str: Vec<String> = report
+        let params_str: Vec<String> = estimation
             .params
             .iter()
-            .map(|(k, v)| format!("{k}: {v}"))
+            .map(|param| format!("{}: {}", param.key, param.value))
             .collect();
         writeln!(writer, "*{}*", params_str.join(" | "))?;
         Ok(())
@@ -243,9 +245,10 @@ impl MarkdownOutput {
         report: &crate::insight::estimation::EstimationComparison,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationComparisonPresentation::from_report(report);
         writeln!(writer, "# Cost Estimation Comparison")?;
         writeln!(writer)?;
-        writeln!(writer, "**Total SLOC:** {}", report.total_sloc)?;
+        writeln!(writer, "**{TOTAL_SLOC_LABEL}:** {}", estimation.total_sloc)?;
         writeln!(
             writer,
             "**Scope:** all counted SLOC, including tests and recognized documentation/configuration files."
@@ -257,27 +260,27 @@ impl MarkdownOutput {
         writeln!(writer)?;
         writeln!(
             writer,
-            "| Model | Effort (PM) | Schedule (M) | People | Cost |"
+            "| Model | {EFFORT_LABEL} | {SCHEDULE_LABEL} | {PEOPLE_LABEL} | {COST_LABEL} |"
         )?;
         writeln!(
             writer,
             "|-------|-------------|--------------|--------|------|"
         )?;
-        for r in &report.reports {
+        for r in &estimation.reports {
             writeln!(
                 writer,
-                "| {} | {:.2} | {:.2} | {:.2} | ${:.2} |",
+                "| {} | {} | {} | {} | ${} |",
                 r.model, r.effort_months, r.schedule_months, r.people_required, r.estimated_cost,
             )?;
         }
         writeln!(writer)?;
         writeln!(writer, "## Calculation Assumptions")?;
         writeln!(writer)?;
-        for report in &report.reports {
+        for report in &estimation.reports {
             let params = report
                 .params
                 .iter()
-                .map(|(key, value)| format!("{key}: {value}"))
+                .map(|param| format!("{}: {}", param.key, param.value))
                 .collect::<Vec<_>>()
                 .join("; ");
             writeln!(writer, "- **{}:** {}", report.model, params)?;

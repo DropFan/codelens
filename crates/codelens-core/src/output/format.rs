@@ -15,6 +15,7 @@ use crate::insight::Grade;
 
 mod coupling;
 mod diff;
+mod estimation;
 mod health_regression;
 mod hotspot;
 mod trend;
@@ -23,6 +24,10 @@ pub(crate) use coupling::{
     CouplingFilterPresentation, CouplingPairPresentation, CouplingPresentation,
 };
 pub(crate) use diff::{DiffLanguagePresentation, DiffMetricPresentation, DiffPresentation};
+pub(crate) use estimation::{
+    EstimationComparisonPresentation, EstimationLanguagePresentation, EstimationPresentation,
+    COST_LABEL, EFFORT_LABEL, PEOPLE_LABEL, SCHEDULE_LABEL, TOTAL_SLOC_LABEL,
+};
 pub(crate) use health_regression::{
     health_model_display_name, HealthLanguageChangePresentation, HealthRegressedFilePresentation,
     HealthRegressionPresentation, HealthRegressionVerdict,

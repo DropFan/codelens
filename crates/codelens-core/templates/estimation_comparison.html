@@ -87,10 +87,10 @@
                 <thead>
                     <tr>
                         <th>Model</th>
-                        <th>Effort (PM)</th>
-                        <th>Schedule (M)</th>
-                        <th>People</th>
-                        <th>Cost</th>
+                        <th>Effort (Person-Months)</th>
+                        <th>Schedule (Months)</th>
+                        <th>People Required</th>
+                        <th>Estimated Cost (USD)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -105,6 +105,13 @@
                 {% endfor %}
                 </tbody>
             </table>
+        </section>
+
+        <section>
+            <h2>Calculation Assumptions</h2>
+            {% for r in rows %}
+            <p><strong>{{ r.model }}:</strong> {% for param in r.params %}{{ param.key }}: {{ param.value }}{% if !loop.last %}; {% endif %}{% endfor %}</p>
+            {% endfor %}
         </section>
 
         <footer>

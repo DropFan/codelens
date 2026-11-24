@@ -11,9 +11,9 @@ use crate::insight::scoring::HealthDimension;
 use crate::insight::Grade;
 
 use super::format::{
-    health_model_display_name, AnalysisPresentation, HealthDirectoryPresentation,
-    HealthFilePresentation, HealthLanguagePresentation, HealthPresentation, OutputFormat,
-    OutputOptions, Report,
+    health_model_display_name, AnalysisPresentation, EstimationComparisonPresentation,
+    EstimationPresentation, HealthDirectoryPresentation, HealthFilePresentation,
+    HealthLanguagePresentation, HealthPresentation, OutputFormat, OutputOptions, Report,
 };
 
 // ── Analysis (existing) ──────────────────────────────────
@@ -353,6 +353,7 @@ struct EstimationHtmlReport {
     generated_at: String,
     model: String,
     total_sloc: usize,
+    effort_months: String,
     estimated_cost: String,
     schedule_months: String,
     people_required: String,
@@ -369,6 +370,7 @@ struct HtmlComparisonRow {
     people_required: String,
     estimated_cost: String,
     cost_raw: f64,
+    params: Vec<HtmlEstimationParam>,
 }
 
 struct HtmlCombinedEstimationRow {
@@ -572,7 +574,7 @@ impl OutputFormat for HtmlOutput {
             Report::Coupling(report) => self.write_coupling(report, writer),
             Report::Diff(report) => self.write_diff(report, writer),
             Report::Trend(report) => self.write_trend(report, writer),
-            Report::Estimation(report) => self.write_estimation(report, writer),
+            Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
             }
@@ -644,19 +646,20 @@ impl HtmlOutput {
         let priority_files = worst_files.iter().take(3).cloned().collect();
         let mut traditional_estimation_rows = Vec::new();
         let mut locomo_estimation_rows = Vec::new();
-        for report in &estimation.reports {
+        let estimation_view = EstimationComparisonPresentation::from_report(estimation);
+        for report in &estimation_view.reports {
             let row = HtmlCombinedEstimationRow {
                 model: report.model.clone(),
-                effort_months: format!("{:.2}", report.effort_months),
-                schedule_months: format!("{:.2}", report.schedule_months),
-                people_required: format!("{:.2}", report.people_required),
-                estimated_cost: format!("{:.2}", report.estimated_cost),
+                effort_months: report.effort_months.clone(),
+                schedule_months: report.schedule_months.clone(),
+                people_required: report.people_required.clone(),
+                estimated_cost: report.estimated_cost.clone(),
                 params: report
                     .params
                     .iter()
-                    .map(|(key, value)| HtmlEstimationParam {
-                        key: key.clone(),
-                        value: value.clone(),
+                    .map(|param| HtmlEstimationParam {
+                        key: param.key.clone(),
+                        value: param.value.clone(),
                     })
                     .collect(),
             };
@@ -1236,33 +1239,36 @@ impl HtmlOutput {
     fn write_estimation(
         &self,
         report: &crate::insight::estimation::EstimationReport,
+        options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationPresentation::from_report(report, options);
         let html = EstimationHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            model: report.model.clone(),
-            total_sloc: report.total_sloc,
-            estimated_cost: format!("{:.2}", report.estimated_cost),
-            schedule_months: format!("{:.2}", report.schedule_months),
-            people_required: format!("{:.2}", report.people_required),
-            by_language: report
-                .by_language
+            model: estimation.model,
+            total_sloc: estimation.total_sloc,
+            effort_months: estimation.effort_months,
+            estimated_cost: estimation.estimated_cost,
+            schedule_months: estimation.schedule_months,
+            people_required: estimation.people_required,
+            by_language: estimation
+                .languages
                 .iter()
                 .map(|l| HtmlLanguageEstimation {
                     language: l.language.clone(),
                     code_lines: l.code_lines,
-                    effort_months: format!("{:.2}", l.effort_months),
-                    cost: format!("{:.2}", l.cost),
-                    cost_raw: l.cost,
-                    effort_raw: l.effort_months,
+                    effort_months: l.effort_months.clone(),
+                    cost: l.cost.clone(),
+                    cost_raw: l.cost_raw,
+                    effort_raw: l.effort_months_raw,
                 })
                 .collect(),
-            params: report
+            params: estimation
                 .params
                 .iter()
-                .map(|(k, v)| HtmlEstimationParam {
-                    key: k.clone(),
-                    value: v.clone(),
+                .map(|param| HtmlEstimationParam {
+                    key: param.key.clone(),
+                    value: param.value.clone(),
                 })
                 .collect(),
         };
@@ -1275,19 +1281,28 @@ impl HtmlOutput {
         report: &crate::insight::estimation::EstimationComparison,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationComparisonPresentation::from_report(report);
         let html = EstimationComparisonHtmlReport {
             generated_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            total_sloc: report.total_sloc,
-            rows: report
+            total_sloc: estimation.total_sloc,
+            rows: estimation
                 .reports
                 .iter()
                 .map(|r| HtmlComparisonRow {
                     model: r.model.clone(),
-                    effort_months: format!("{:.2}", r.effort_months),
-                    schedule_months: format!("{:.2}", r.schedule_months),
-                    people_required: format!("{:.2}", r.people_required),
-                    estimated_cost: format!("{:.2}", r.estimated_cost),
-                    cost_raw: r.estimated_cost,
+                    effort_months: r.effort_months.clone(),
+                    schedule_months: r.schedule_months.clone(),
+                    people_required: r.people_required.clone(),
+                    estimated_cost: r.estimated_cost.clone(),
+                    cost_raw: r.estimated_cost_raw,
+                    params: r
+                        .params
+                        .iter()
+                        .map(|param| HtmlEstimationParam {
+                            key: param.key.clone(),
+                            value: param.value.clone(),
+                        })
+                        .collect(),
                 })
                 .collect(),
         };

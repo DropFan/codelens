@@ -13,7 +13,9 @@ use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement
 use super::format::{
     CouplingFilterPresentation, CouplingPairPresentation, CouplingPresentation, OutputFormat,
     OutputOptions, Report, TrendLanguagePresentation, TrendMetricPresentation, TrendPresentation,
+    COST_LABEL, EFFORT_LABEL, PEOPLE_LABEL, SCHEDULE_LABEL, TOTAL_SLOC_LABEL,
 };
+use super::format::{EstimationComparisonPresentation, EstimationPresentation};
 use crate::error::Result;
 
 /// Console output formatter.
@@ -338,22 +340,13 @@ impl ConsoleOutput {
         }
     }
 
-    fn format_cost(cost: f64) -> String {
-        if cost >= 1_000_000.0 {
-            format!("{:.2}M", cost / 1_000_000.0)
-        } else if cost >= 1_000.0 {
-            format!("{:.0}", cost)
-        } else {
-            format!("{:.2}", cost)
-        }
-    }
-
     fn write_estimation(
         &self,
         report: &crate::insight::estimation::EstimationReport,
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationPresentation::from_report(report, options);
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(
@@ -363,7 +356,7 @@ impl ConsoleOutput {
         )?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(writer)?;
-        writeln!(writer, "  Model: {}", report.model.bold())?;
+        writeln!(writer, "  Model: {}", estimation.model.bold())?;
         writeln!(writer)?;
 
         let mut table = Table::new();
@@ -375,25 +368,29 @@ impl ConsoleOutput {
             Cell::new("Value").add_attribute(Attribute::Bold),
         ]);
         table.add_row(vec![
-            Cell::new("Total SLOC"),
-            Cell::new(Self::format_number(report.total_sloc)).fg(Color::Cyan),
+            Cell::new(TOTAL_SLOC_LABEL),
+            Cell::new(&estimation.total_sloc_display).fg(Color::Cyan),
         ]);
         table.add_row(vec![
-            Cell::new("Estimated Cost to Develop"),
-            Cell::new(format!("${}", Self::format_cost(report.estimated_cost))).fg(Color::Green),
+            Cell::new(EFFORT_LABEL),
+            Cell::new(&estimation.effort_months),
         ]);
         table.add_row(vec![
-            Cell::new("Estimated Schedule Effort"),
-            Cell::new(format!("{:.2} months", report.schedule_months)).fg(Color::Yellow),
+            Cell::new(SCHEDULE_LABEL),
+            Cell::new(&estimation.schedule_months).fg(Color::Yellow),
         ]);
         table.add_row(vec![
-            Cell::new("Estimated People Required"),
-            Cell::new(format!("{:.2}", report.people_required)).fg(Color::Magenta),
+            Cell::new(PEOPLE_LABEL),
+            Cell::new(&estimation.people_required).fg(Color::Magenta),
+        ]);
+        table.add_row(vec![
+            Cell::new(COST_LABEL),
+            Cell::new(format!("${}", estimation.estimated_cost)).fg(Color::Green),
         ]);
         writeln!(writer, "{table}")?;
         writeln!(writer)?;
 
-        if !options.summary_only && !report.by_language.is_empty() {
+        if !estimation.languages.is_empty() {
             writeln!(writer, "{}", "By Language".bold())?;
             writeln!(writer)?;
             let mut lang_table = Table::new();
@@ -403,19 +400,15 @@ impl ConsoleOutput {
             lang_table.set_header(vec![
                 Cell::new("Language").add_attribute(Attribute::Bold),
                 Cell::new("Code").add_attribute(Attribute::Bold),
-                Cell::new("Effort (PM)").add_attribute(Attribute::Bold),
-                Cell::new("Cost").add_attribute(Attribute::Bold),
+                Cell::new(EFFORT_LABEL).add_attribute(Attribute::Bold),
+                Cell::new(COST_LABEL).add_attribute(Attribute::Bold),
             ]);
-            let mut langs = report.by_language.iter().collect::<Vec<_>>();
-            if let Some(n) = options.top_n {
-                langs.truncate(n);
-            }
-            for lang in langs {
+            for lang in &estimation.languages {
                 lang_table.add_row(vec![
                     Cell::new(&lang.language).fg(Color::Cyan),
-                    Cell::new(Self::format_number(lang.code_lines)),
-                    Cell::new(format!("{:.2}", lang.effort_months)),
-                    Cell::new(format!("${}", Self::format_cost(lang.cost))).fg(Color::Green),
+                    Cell::new(&lang.code_lines_display),
+                    Cell::new(&lang.effort_months),
+                    Cell::new(format!("${}", lang.cost)).fg(Color::Green),
                 ]);
             }
             writeln!(writer, "{lang_table}")?;
@@ -423,8 +416,12 @@ impl ConsoleOutput {
         }
 
         writeln!(writer, "{}", "─".repeat(60).dimmed())?;
-        for (key, val) in &report.params {
-            write!(writer, "{}  ", format!("{key}: {val}").dimmed())?;
+        for param in &estimation.params {
+            write!(
+                writer,
+                "{}  ",
+                format!("{}: {}", param.key, param.value).dimmed()
+            )?;
         }
         writeln!(writer)?;
 
@@ -436,6 +433,7 @@ impl ConsoleOutput {
         report: &crate::insight::estimation::EstimationComparison,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        let estimation = EstimationComparisonPresentation::from_report(report);
         writeln!(writer)?;
         writeln!(writer, "{}", "═".repeat(60).dimmed())?;
         writeln!(
@@ -448,7 +446,7 @@ impl ConsoleOutput {
         writeln!(
             writer,
             "  Total SLOC: {}",
-            Self::format_number(report.total_sloc).bold()
+            estimation.total_sloc_display.bold()
         )?;
         writeln!(
             writer,
@@ -466,18 +464,18 @@ impl ConsoleOutput {
             .set_content_arrangement(ContentArrangement::Dynamic);
         table.set_header(vec![
             Cell::new("Model").add_attribute(Attribute::Bold),
-            Cell::new("Effort (PM)").add_attribute(Attribute::Bold),
-            Cell::new("Schedule (M)").add_attribute(Attribute::Bold),
-            Cell::new("People").add_attribute(Attribute::Bold),
-            Cell::new("Cost").add_attribute(Attribute::Bold),
+            Cell::new(EFFORT_LABEL).add_attribute(Attribute::Bold),
+            Cell::new(SCHEDULE_LABEL).add_attribute(Attribute::Bold),
+            Cell::new(PEOPLE_LABEL).add_attribute(Attribute::Bold),
+            Cell::new(COST_LABEL).add_attribute(Attribute::Bold),
         ]);
-        for r in &report.reports {
+        for r in &estimation.reports {
             table.add_row(vec![
                 Cell::new(&r.model).fg(Color::Cyan),
-                Cell::new(format!("{:.2}", r.effort_months)),
-                Cell::new(format!("{:.2}", r.schedule_months)).fg(Color::Yellow),
-                Cell::new(format!("{:.2}", r.people_required)).fg(Color::Magenta),
-                Cell::new(format!("${}", Self::format_cost(r.estimated_cost))).fg(Color::Green),
+                Cell::new(&r.effort_months),
+                Cell::new(&r.schedule_months).fg(Color::Yellow),
+                Cell::new(&r.people_required).fg(Color::Magenta),
+                Cell::new(format!("${}", r.estimated_cost)).fg(Color::Green),
             ]);
         }
         writeln!(writer, "{table}")?;
@@ -485,8 +483,12 @@ impl ConsoleOutput {
 
         // Per-model parameter summary
         writeln!(writer, "{}", "─".repeat(60).dimmed())?;
-        for r in &report.reports {
-            let params: Vec<String> = r.params.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        for r in &estimation.reports {
+            let params: Vec<String> = r
+                .params
+                .iter()
+                .map(|param| format!("{}={}", param.key, param.value))
+                .collect();
             writeln!(
                 writer,
                 "{}",

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use codelens_core::analyzer::stats::{AnalysisResult, Complexity, FileStats, LineStats, Summary};
 use codelens_core::insight::diff::DiffReport;
+use codelens_core::insight::estimation::{EstimationReport, LanguageEstimation};
 use codelens_core::insight::health::{
     Confidence, DimensionScore, DirectoryHealth, FileHealth, FileRegression, HealthAssessment,
     HealthReport, HealthScope, LanguageHealth, LanguageHealthChange, LanguageHealthChangeStatus,
@@ -569,5 +570,59 @@ fn diff_optional_groups_stay_absent_and_estimates_keep_the_existing_verdict() {
         assert!(!output.contains("Language Health Changes"));
         assert!(!output.contains("By Language"));
         assert!(!output.contains("Improved files"));
+    }
+}
+
+#[test]
+fn estimation_formats_share_fields_labels_and_precision() {
+    let report = EstimationReport {
+        model: "Test Model".to_string(),
+        total_sloc: 1_234,
+        effort_months: 1.234,
+        schedule_months: 2.345,
+        people_required: 3.456,
+        estimated_cost: 4_567.891,
+        by_language: vec![LanguageEstimation {
+            language: "Rust".to_string(),
+            code_lines: 1_234,
+            effort_months: 1.234,
+            cost: 4_567.891,
+        }],
+        params: vec![("Mode".to_string(), "nominal".to_string())],
+    };
+    let options = OutputOptions {
+        colorize: false,
+        ..Default::default()
+    };
+
+    for output in [
+        render(
+            &ConsoleOutput::new(),
+            Report::Estimation(report.clone()),
+            &options,
+        ),
+        render(
+            &MarkdownOutput::new(),
+            Report::Estimation(report.clone()),
+            &options,
+        ),
+        render(
+            &HtmlOutput::new(),
+            Report::Estimation(report.clone()),
+            &options,
+        ),
+        render(&CsvOutput::new(), Report::Estimation(report), &options),
+    ] {
+        for label in [
+            "Effort (Person-Months)",
+            "Schedule (Months)",
+            "People Required",
+            "Estimated Cost (USD)",
+        ] {
+            assert!(output.contains(label), "missing {label:?} in {output}");
+        }
+        for value in ["1.23", "2.35", "3.46", "4567.89"] {
+            assert!(output.contains(value), "missing {value:?} in {output}");
+        }
     }
 }
