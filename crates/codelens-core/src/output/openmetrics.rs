@@ -40,6 +40,10 @@ impl OutputFormat for OpenMetricsOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(
+            crate::config::OutputFormatType::OpenMetrics,
+            report,
+        )?;
         match report {
             Report::Analysis(result) => write_analysis(result, writer)?,
             Report::Combined(combined) => {

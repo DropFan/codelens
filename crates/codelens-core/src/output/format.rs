@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use crate::analyzer::stats::AnalysisResult;
-use crate::config::SortBy;
+use crate::config::{OutputFormatType, SortBy};
 use crate::error::Result;
 use crate::insight::coupling::CouplingReport;
 use crate::insight::diff::DiffReport;
@@ -52,6 +52,125 @@ pub enum Report {
     /// Default-command bundle: stats + health + estimation as ONE document,
     /// so machine formats (JSON/HTML/CSV) stay parseable.
     Combined(Box<CombinedReport>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportKind {
+    Analysis,
+    Health,
+    Hotspot,
+    Coupling,
+    Trend,
+    Diff,
+    Estimation,
+    EstimationComparison,
+    Combined,
+}
+
+impl ReportKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Analysis => "analysis",
+            Self::Health => "health",
+            Self::Hotspot => "hotspot",
+            Self::Coupling => "coupling",
+            Self::Trend => "trend",
+            Self::Diff => "diff",
+            Self::Estimation => "estimation",
+            Self::EstimationComparison => "estimation comparison",
+            Self::Combined => "combined",
+        }
+    }
+}
+
+impl Report {
+    pub(crate) fn kind(&self) -> ReportKind {
+        match self {
+            Self::Analysis(_) => ReportKind::Analysis,
+            Self::Health(_) => ReportKind::Health,
+            Self::Hotspot(_) => ReportKind::Hotspot,
+            Self::Coupling(_) => ReportKind::Coupling,
+            Self::Trend(_) => ReportKind::Trend,
+            Self::Diff(_) => ReportKind::Diff,
+            Self::Estimation(_) => ReportKind::Estimation,
+            Self::EstimationComparison(_) => ReportKind::EstimationComparison,
+            Self::Combined(_) => ReportKind::Combined,
+        }
+    }
+}
+
+/// Semantic fidelity promised by a report/format pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatCapability {
+    FullReport,
+    AggregateProjection(&'static str),
+    Unsupported(&'static str),
+}
+
+pub(crate) fn report_format_capability(
+    format: OutputFormatType,
+    report: ReportKind,
+) -> FormatCapability {
+    use FormatCapability::{AggregateProjection, FullReport, Unsupported};
+    use OutputFormatType::{Badge, Console, Csv, Html, Json, Markdown, OpenMetrics, Sarif};
+    use ReportKind::{
+        Analysis, Combined, Coupling, Diff, Estimation, EstimationComparison, Health, Hotspot,
+        Trend,
+    };
+
+    match format {
+        Console | Json | Markdown | Html => FullReport,
+        Csv => match report {
+            Hotspot | Coupling | Estimation | EstimationComparison => FullReport,
+            Analysis => AggregateProjection("selected language/file/directory table"),
+            Health => AggregateProjection("worst-file table"),
+            Trend => AggregateProjection("metric delta table"),
+            Diff => AggregateProjection("health and metric delta table"),
+            Combined => AggregateProjection("analysis table; health and estimation omitted"),
+        },
+        OpenMetrics => AggregateProjection("scrape-oriented numeric metrics"),
+        Badge => AggregateProjection("one shields.io badge value"),
+        Sarif => match report {
+            Health | Hotspot | Coupling | Diff | Combined => {
+                AggregateProjection("actionable findings")
+            }
+            Analysis | Trend | Estimation | EstimationComparison => {
+                Unsupported("report has no SARIF finding semantics")
+            }
+        },
+    }
+}
+
+pub(crate) fn validate_report_format(
+    format: OutputFormatType,
+    report: &Report,
+) -> Result<FormatCapability> {
+    let capability = report_format_capability(format, report.kind());
+    if let FormatCapability::Unsupported(reason) = capability {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "{} reports are not supported by {} output: {reason}",
+                report.kind().name(),
+                format_name(format)
+            ),
+        )
+        .into());
+    }
+    Ok(capability)
+}
+
+fn format_name(format: OutputFormatType) -> &'static str {
+    match format {
+        OutputFormatType::Console => "console",
+        OutputFormatType::Json => "json",
+        OutputFormatType::Csv => "csv",
+        OutputFormatType::Markdown => "markdown",
+        OutputFormatType::Html => "html",
+        OutputFormatType::OpenMetrics => "openmetrics",
+        OutputFormatType::Badge => "badge",
+        OutputFormatType::Sarif => "sarif",
+    }
 }
 
 /// The default command's combined output.
@@ -458,5 +577,56 @@ mod tests {
         assert_eq!(options.top_n, Some(10));
         assert!(!options.colorize);
         assert!(options.show_git_info);
+    }
+
+    #[test]
+    fn report_format_matrix_covers_full_projection_and_unsupported_semantics() {
+        assert_eq!(
+            report_format_capability(OutputFormatType::Json, ReportKind::Combined),
+            FormatCapability::FullReport
+        );
+        assert_eq!(
+            report_format_capability(OutputFormatType::Csv, ReportKind::Combined),
+            FormatCapability::AggregateProjection("analysis table; health and estimation omitted")
+        );
+        assert_eq!(
+            report_format_capability(OutputFormatType::Sarif, ReportKind::Trend),
+            FormatCapability::Unsupported("report has no SARIF finding semantics")
+        );
+    }
+
+    #[test]
+    fn every_report_and_format_pair_has_an_explicit_capability() {
+        let formats = [
+            OutputFormatType::Console,
+            OutputFormatType::Json,
+            OutputFormatType::Csv,
+            OutputFormatType::Markdown,
+            OutputFormatType::Html,
+            OutputFormatType::OpenMetrics,
+            OutputFormatType::Badge,
+            OutputFormatType::Sarif,
+        ];
+        let reports = [
+            ReportKind::Analysis,
+            ReportKind::Health,
+            ReportKind::Hotspot,
+            ReportKind::Coupling,
+            ReportKind::Trend,
+            ReportKind::Diff,
+            ReportKind::Estimation,
+            ReportKind::EstimationComparison,
+            ReportKind::Combined,
+        ];
+
+        let capabilities = formats
+            .into_iter()
+            .flat_map(|format| {
+                reports
+                    .into_iter()
+                    .map(move |report| report_format_capability(format, report))
+            })
+            .count();
+        assert_eq!(capabilities, formats.len() * reports.len());
     }
 }

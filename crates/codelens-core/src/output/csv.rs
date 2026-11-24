@@ -41,6 +41,7 @@ impl OutputFormat for CsvOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(crate::config::OutputFormatType::Csv, report)?;
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),
@@ -48,10 +49,7 @@ impl OutputFormat for CsvOutput {
             Report::Coupling(report) => self.write_coupling(report, options, writer),
             Report::Trend(report) => self.write_trend(report, options, writer),
             Report::Diff(report) => self.write_diff(report, options, writer),
-            // CSV can't hold three differently-shaped tables in one file;
-            // emit the analysis table only (health/estimation are available
-            // via their subcommands).
-            Report::Combined(combined) => self.write_analysis(&combined.analysis, options, writer),
+            Report::Combined(combined) => self.write_combined(combined, options, writer),
             Report::Estimation(report) => self.write_estimation(report, options, writer),
             Report::EstimationComparison(report) => {
                 self.write_estimation_comparison(report, writer)
@@ -169,7 +167,7 @@ impl CsvOutput {
     ) -> Result<()> {
         writeln!(
             writer,
-            "File,Commits,Added,Deleted,Churn,CC,AgeDays,Authors,MainAuthor,Ownership,KnowledgeIsland,Score,Risk,Function,FunctionStartLine,FunctionEndLine,FunctionCommits,FunctionCC"
+            "Period,TotalCommits,File,Commits,Added,Deleted,Churn,CC,AgeDays,Authors,MainAuthor,Ownership,KnowledgeIsland,Score,Risk,Function,FunctionStartLine,FunctionEndLine,FunctionCommits,FunctionCC"
         )?;
         for file in &report.files {
             let age = file.age_days.map(|d| d.to_string()).unwrap_or_default();
@@ -197,7 +195,9 @@ impl CsvOutput {
                         .unwrap_or_default();
                     writeln!(
                         writer,
-                        "{},{},{},{},{},{},{},{},{},{},{},{:.2},{},{},{},{},{},{}",
+                        "{},{},{},{},{},{},{},{},{},{},{},{},{},{:.2},{},{},{},{},{},{}",
+                        csv_field(&report.since),
+                        report.total_commits,
                         csv_field(&file.path.display().to_string()),
                         file.churn.commits,
                         file.churn.lines_added,
@@ -239,7 +239,7 @@ impl CsvOutput {
     ) -> Result<()> {
         writeln!(
             writer,
-            "FileA,FileB,SharedCommits,CommitsA,CommitsB,Coupling,Focus,SkippedBulkCommits,ExcludedTestFiles"
+            "Period,TotalCommits,FileA,FileB,SharedCommits,CommitsA,CommitsB,Coupling,Focus,SkippedBulkCommits,ExcludedTestFiles"
         )?;
         let focus = report
             .focus
@@ -249,15 +249,21 @@ impl CsvOutput {
         if report.pairs.is_empty() {
             writeln!(
                 writer,
-                ",,,,,,{},{},{}",
-                focus, report.skipped_large_commits, report.excluded_test_files
+                "{},{},,,,,,,{},{},{}",
+                csv_field(&report.since),
+                report.total_commits,
+                focus,
+                report.skipped_large_commits,
+                report.excluded_test_files
             )?;
             return Ok(());
         }
         for pair in &report.pairs {
             writeln!(
                 writer,
-                "{},{},{},{},{},{:.1},{},{},{}",
+                "{},{},{},{},{},{},{},{:.1},{},{},{}",
+                csv_field(&report.since),
+                report.total_commits,
                 csv_field(&pair.file_a.display().to_string()),
                 csv_field(&pair.file_b.display().to_string()),
                 pair.shared_commits,
@@ -268,6 +274,28 @@ impl CsvOutput {
                 report.skipped_large_commits,
                 report.excluded_test_files,
             )?;
+        }
+        Ok(())
+    }
+
+    fn write_combined(
+        &self,
+        report: &super::format::CombinedReport,
+        options: &OutputOptions,
+        writer: &mut dyn Write,
+    ) -> Result<()> {
+        let mut analysis = Vec::new();
+        self.write_analysis(&report.analysis, options, &mut analysis)?;
+        let analysis = String::from_utf8(analysis).expect("CSV output is always UTF-8");
+        for (index, line) in analysis.lines().enumerate() {
+            if index == 0 {
+                writeln!(
+                    writer,
+                    "ReportProjection (analysis only; health and estimation omitted),{line}"
+                )?;
+            } else {
+                writeln!(writer, "analysis,{line}")?;
+            }
         }
         Ok(())
     }
@@ -624,5 +652,41 @@ mod tests {
             .unwrap()
             .ends_with("Focus,SkippedBulkCommits,ExcludedTestFiles"));
         assert!(csv.contains(",src/lib.rs,2,5\n"));
+        let mut lines = csv.lines();
+        assert_eq!(
+            lines.next().unwrap().split(',').count(),
+            lines.next().unwrap().split(',').count()
+        );
+    }
+
+    #[test]
+    fn combined_csv_identifies_its_analysis_only_projection() {
+        use crate::insight::estimation::EstimationComparison;
+        use crate::insight::health;
+        use crate::insight::scoring::default::DefaultModel;
+
+        let analysis = make_test_result();
+        let health = health::score(&analysis, &DefaultModel::default(), 10);
+        let combined = super::super::format::CombinedReport {
+            analysis,
+            health,
+            estimation: EstimationComparison {
+                total_sloc: 120,
+                reports: vec![],
+            },
+        };
+        let mut output = Vec::new();
+        CsvOutput::new()
+            .write(
+                &Report::Combined(Box::new(combined)),
+                &OutputOptions::default(),
+                &mut output,
+            )
+            .unwrap();
+        let csv = String::from_utf8(output).unwrap();
+        assert!(csv.starts_with(
+            "ReportProjection (analysis only; health and estimation omitted),Language"
+        ));
+        assert!(csv.contains("analysis,Rust"));
     }
 }

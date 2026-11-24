@@ -92,6 +92,7 @@ impl OutputFormat for BadgeOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(crate::config::OutputFormatType::Badge, report)?;
         let badge = match report {
             // The health grade is the badge with the most signal
             Report::Health(r) => health_badge(r),

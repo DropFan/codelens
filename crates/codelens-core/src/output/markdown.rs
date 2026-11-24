@@ -45,6 +45,7 @@ impl OutputFormat for MarkdownOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(crate::config::OutputFormatType::Markdown, report)?;
         match report {
             Report::Analysis(result) => self.write_analysis(result, options, writer),
             Report::Health(report) => self.write_health(report, options, writer),

@@ -47,7 +47,7 @@ pub enum Error {
     DirectoryNotFound { path: PathBuf },
 
     /// Output write error.
-    #[error("failed to write output")]
+    #[error("failed to write output: {0}")]
     OutputWrite(#[from] std::io::Error),
 
     /// Template render error.

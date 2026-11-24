@@ -77,6 +77,7 @@ impl OutputFormat for ConsoleOutput {
         options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(crate::config::OutputFormatType::Console, report)?;
         if options.colorize {
             return self.write_report(report, options, writer);
         }

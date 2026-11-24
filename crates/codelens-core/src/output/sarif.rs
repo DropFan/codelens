@@ -45,6 +45,7 @@ impl OutputFormat for SarifOutput {
         _options: &OutputOptions,
         writer: &mut dyn Write,
     ) -> Result<()> {
+        super::format::validate_report_format(crate::config::OutputFormatType::Sarif, report)?;
         let results = match report {
             Report::Health(health) => health_results(health),
             Report::Combined(combined) => health_results(&combined.health),
@@ -353,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sarif_empty_run_for_stats() {
+    fn analysis_reports_are_explicitly_unsupported_by_sarif() {
         use crate::analyzer::stats::Summary;
         let result = crate::AnalysisResult {
             files: vec![],
@@ -364,14 +365,16 @@ mod tests {
             error_files: 0,
         };
         let mut buf = Vec::new();
-        SarifOutput::new()
+        let error = SarifOutput::new()
             .write(
                 &Report::Analysis(result),
                 &OutputOptions::default(),
                 &mut buf,
             )
-            .unwrap();
-        let doc: Value = serde_json::from_slice(&buf).unwrap();
-        assert!(doc["runs"][0]["results"].as_array().unwrap().is_empty());
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("analysis reports are not supported by sarif output"));
+        assert!(buf.is_empty());
     }
 }
