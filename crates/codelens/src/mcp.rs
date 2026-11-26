@@ -171,7 +171,8 @@ pub struct GitWindowArgs {
     #[allow(dead_code)]
     #[serde(default)]
     pub since: Option<String>,
-    /// Maximum entries to return; defaults to 10.
+    /// Maximum entries to return. Overrides the server configuration; defaults
+    /// to the configured top value, then 10.
     #[serde(default)]
     pub top: Option<usize>,
 }
@@ -262,6 +263,10 @@ fn health_report(
     health::score(result, model.as_ref(), top_n)
 }
 
+fn health_top_n(args: &GitWindowArgs, config: &Config) -> usize {
+    args.top.or(config.output.top_n).unwrap_or(10)
+}
+
 fn coupling_query_from_mcp(
     args: &CouplingArgs,
     config: &Config,
@@ -350,17 +355,18 @@ impl CodelensServer {
         let config = self.config.clone();
         let cache = Arc::clone(&self.cache);
         run_blocking(move || {
+            let top_n = health_top_n(&args, &config);
             let GitWindowArgs {
                 path,
                 since: _,
-                top,
+                top: _,
             } = args;
             let path = arg_path(path);
             let result = cache
                 .lock()
                 .map_err(|_| anyhow::anyhow!("analysis cache lock was poisoned"))?
                 .analysis(&path, &config)?;
-            let report = health_report(&result, top.unwrap_or(10), config.health_model);
+            let report = health_report(&result, top_n, config.health_model);
             Ok(serde_json::to_string(&report)?)
         })
         .await
@@ -548,6 +554,30 @@ mod tests {
             top: None,
             functions: false,
         }
+    }
+
+    fn empty_health_args() -> GitWindowArgs {
+        GitWindowArgs {
+            path: None,
+            since: None,
+            top: None,
+        }
+    }
+
+    #[test]
+    fn health_arguments_override_server_config_then_defaults() {
+        let mut config = Config::default();
+        config.output.top_n = Some(7);
+        assert_eq!(health_top_n(&empty_health_args(), &config), 7);
+
+        let args = GitWindowArgs {
+            top: Some(3),
+            ..empty_health_args()
+        };
+        assert_eq!(health_top_n(&args, &config), 3);
+
+        config.output.top_n = None;
+        assert_eq!(health_top_n(&empty_health_args(), &config), 10);
     }
 
     #[test]
