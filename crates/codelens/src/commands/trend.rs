@@ -45,7 +45,7 @@ pub(crate) fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> 
         // numbers stay comparable with `codelens` output.
         let partial = load_partial_config(advanced)?;
         let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
-        let result = analyze(&[&project_root], &config).context("Analysis failed")?;
+        let result = analyze(&args.paths, &config).context("Analysis failed")?;
         let (git_commit, git_branch) = GitClient::detect(&project_root)
             .and_then(|c| c.repo_info())
             .map(|info| (info.commit, info.branch))
@@ -164,5 +164,45 @@ mod tests {
         run_trend(args, &cli.advanced).unwrap();
         let markdown = std::fs::read_to_string(cli_output).unwrap();
         assert!(markdown.starts_with("# Trend Report"));
+    }
+
+    #[test]
+    fn save_analyzes_every_requested_path() {
+        let project = tempfile::tempdir().unwrap();
+        let first = project.path().join("first");
+        let second = project.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join("first.rs"), "fn first() {}\n").unwrap();
+        std::fs::write(second.join("second.rs"), "fn second() {}\n").unwrap();
+
+        let cli = crate::cli::Cli::try_parse_from([
+            "codelens",
+            "trend",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+            "--save",
+            "--no-config",
+        ])
+        .unwrap();
+        let crate::cli::Command::Trend(args) = cli.command.as_ref().unwrap() else {
+            panic!("expected trend command");
+        };
+
+        run_trend(args, &cli.advanced).unwrap();
+
+        let path = trend::resolve_snapshot(&first, "latest").unwrap();
+        let snapshot = trend::load_snapshot(&path).unwrap();
+        assert_eq!(snapshot.result.summary.total_files, 2);
+        assert!(snapshot
+            .result
+            .files
+            .iter()
+            .any(|stats| stats.path.ends_with("first.rs")));
+        assert!(snapshot
+            .result
+            .files
+            .iter()
+            .any(|stats| stats.path.ends_with("second.rs")));
     }
 }
