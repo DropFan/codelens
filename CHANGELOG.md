@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- HTML combined reports now include change hotspots, coupling, trend history,
+  light/dark themes, clearer risk guidance, and project links
+- `health --emit FORMAT=FILE` can write multiple output formats from one
+  analysis and comparison result
+
+### Changed
+- CLI and MCP hotspot/coupling analysis now share the same scan scope,
+  filtering, history, test-file, threshold, and top-limit semantics
+- Human-readable report formats share presentation data and declare whether
+  each report/format pair is full-fidelity, an aggregate projection, or
+  unsupported
+- The GitHub Action generates Markdown, JSON, and badge results from one scan
+  when the installed CLI supports `--emit`
+
+### Fixed
+- Codelens-owned `.codelens/` state is never counted as source, including with
+  `--all` or when passed directly
+- Multiple analysis paths isolate their Linguist attributes and deduplicate
+  lexically or physically equivalent inputs
+- Git-based analysis rejects paths from different repositories instead of
+  silently combining unrelated history
+- Trend snapshots include every requested path, keep paths portable when a
+  project moves, merge output configuration consistently, and reject
+  comparisons whose recorded analysis scopes differ
+- The GitHub Action rejects `fail-on-regression: true` without a baseline
+
+### Performance
+- MCP analysis results are reused while the filtered workspace state remains
+  unchanged and are invalidated after relevant file-system changes
+- Hotspot and coupling workflows reuse Git history, batch function-history
+  reads, stream file-age aggregation, and avoid repeated full scans
+
 ## [0.3.1] - 2026-11-18
 
 ### Added
