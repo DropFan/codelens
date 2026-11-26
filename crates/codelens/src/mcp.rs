@@ -6,22 +6,27 @@
 //! return compact JSON strings mirroring the shape of the `-f json` CLI
 //! output.
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use anyhow::Context;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerConfig};
-use rmcp::{schemars, tool, tool_handler, tool_router, ServerHandler};
-use serde::Deserialize;
+use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 
-use codelens_core::filter::{Filter, FilterChain};
 use codelens_core::insight::health;
 use codelens_core::insight::scoring::HealthModelVersion;
-use codelens_core::{analyze, Config};
+use codelens_core::Config;
+
+mod cache;
+mod request;
+
+use cache::AnalysisCache;
+use request::{
+    arg_path, coupling_query_from_mcp, health_top_n, hotspot_query_from_mcp, CouplingArgs,
+    FileArgs, GitWindowArgs, HotspotArgs, PathArgs,
+};
 
 /// Analysis defaults matching the CLI (smart excludes, gitignore, all cores).
 fn default_config() -> Config {
@@ -29,113 +34,6 @@ fn default_config() -> Config {
     config.walker.threads = num_cpus::get();
     config.filter.smart_exclude = true;
     config
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WorkspaceEntryState {
-    path: PathBuf,
-    kind: u8,
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WorkspaceState {
-    entries: Vec<WorkspaceEntryState>,
-}
-
-impl WorkspaceState {
-    fn capture(root: &Path, config: &Config) -> std::io::Result<Self> {
-        let filter = FilterChain::new(config).map_err(std::io::Error::other)?;
-        let mut entries = Vec::new();
-        let mut pending = vec![root.to_path_buf()];
-
-        while let Some(path) = pending.pop() {
-            let metadata = fs::symlink_metadata(&path)?;
-            let file_type = metadata.file_type();
-            entries.push(WorkspaceEntryState {
-                path: path.clone(),
-                kind: if file_type.is_dir() {
-                    0
-                } else if file_type.is_file() {
-                    1
-                } else {
-                    2
-                },
-                len: metadata.len(),
-                modified: metadata.modified().ok(),
-            });
-
-            if !file_type.is_dir() {
-                continue;
-            }
-
-            let mut children = fs::read_dir(&path)?.collect::<std::io::Result<Vec<_>>>()?;
-            children.sort_by_key(|entry| entry.path());
-            for child in children.into_iter().rev() {
-                let child_path = child.path();
-                let child_type = child.file_type()?;
-                if child_type.is_dir() && !filter.should_include(&child_path, true) {
-                    continue;
-                }
-                pending.push(child_path);
-            }
-        }
-
-        entries.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(Self { entries })
-    }
-}
-
-struct CachedAnalysis {
-    state: WorkspaceState,
-    result: Arc<codelens_core::AnalysisResult>,
-}
-
-#[derive(Default)]
-struct AnalysisCache {
-    entries: HashMap<PathBuf, CachedAnalysis>,
-}
-
-impl AnalysisCache {
-    const MAX_ENTRIES: usize = 8;
-
-    fn analysis(
-        &mut self,
-        path: &Path,
-        config: &Config,
-    ) -> anyhow::Result<Arc<codelens_core::AnalysisResult>> {
-        let key = fs::canonicalize(path)
-            .with_context(|| format!("analysis path does not exist: {}", path.display()))?;
-        let before = WorkspaceState::capture(&key, config).ok();
-
-        if let (Some(state), Some(cached)) = (before.as_ref(), self.entries.get(&key)) {
-            if &cached.state == state {
-                return Ok(Arc::clone(&cached.result));
-            }
-        }
-        self.entries.remove(&key);
-
-        let result = Arc::new(analyze(std::slice::from_ref(&key), config)?);
-        let after = WorkspaceState::capture(&key, config).ok();
-        if let (Some(before), Some(after)) = (before, after) {
-            if before == after {
-                if self.entries.len() >= Self::MAX_ENTRIES {
-                    if let Some(oldest) = self.entries.keys().next().cloned() {
-                        self.entries.remove(&oldest);
-                    }
-                }
-                self.entries.insert(
-                    key,
-                    CachedAnalysis {
-                        state: after,
-                        result: Arc::clone(&result),
-                    },
-                );
-            }
-        }
-        Ok(result)
-    }
 }
 
 /// Run blocking analysis work off the async runtime; errors come back as
@@ -152,92 +50,6 @@ where
     }
 }
 
-#[derive(Deserialize, schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-pub struct PathArgs {
-    /// Directory to analyze; defaults to the current directory.
-    #[serde(default)]
-    pub path: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-pub struct GitWindowArgs {
-    /// Directory inside the git repository; defaults to the current directory.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Reserved time window argument; kept for MCP input compatibility even
-    /// though code_health currently ignores it.
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub since: Option<String>,
-    /// Maximum entries to return. Overrides the server configuration; defaults
-    /// to the configured top value, then 10.
-    #[serde(default)]
-    pub top: Option<usize>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-pub struct HotspotArgs {
-    /// Directory inside the git repository; defaults to the current directory.
-    /// Only files under this path that survive the configured filters are
-    /// eligible for hotspot results.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
-    #[serde(default)]
-    pub since: Option<String>,
-    /// Maximum entries to return. Overrides the server configuration; defaults
-    /// to the configured top value, then 20.
-    #[serde(default)]
-    pub top: Option<usize>,
-    /// Break top files down to function-level hotspots using batched Git
-    /// history reads; defaults to false.
-    #[serde(default)]
-    pub functions: bool,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-pub struct CouplingArgs {
-    /// Directory to analyze; only files under this path that survive the
-    /// configured filters are eligible for coupling results.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Time window like "30d", "6m", "1y", or YYYY-MM-DD; defaults to "90d".
-    #[serde(default)]
-    pub since: Option<String>,
-    /// Maximum pairs to return. Overrides the server configuration; defaults
-    /// to the configured top value, then 20.
-    #[serde(default)]
-    pub top: Option<usize>,
-    /// Only return pairs involving this repo-relative file. A test file
-    /// automatically enables test files.
-    #[serde(default)]
-    pub focus: Option<String>,
-    /// Minimum number of shared commits; defaults to 5.
-    #[serde(default)]
-    pub min_shared: Option<usize>,
-    /// Minimum coupling percentage; defaults to 30.
-    #[serde(default)]
-    pub min_coupling: Option<f64>,
-    /// Ignore commits touching more files than this; defaults to 30.
-    #[serde(default)]
-    pub max_changeset: Option<usize>,
-    /// Include test files. Tests are excluded by default unless focus points
-    /// to a test file.
-    #[serde(default)]
-    pub include_tests: Option<bool>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-pub struct FileArgs {
-    /// Path of one source file to inspect.
-    pub file: String,
-}
-
 #[derive(Clone)]
 pub struct CodelensServer {
     config: Config,
@@ -250,10 +62,6 @@ impl Default for CodelensServer {
     }
 }
 
-fn arg_path(path: Option<String>) -> PathBuf {
-    PathBuf::from(path.unwrap_or_else(|| ".".to_string()))
-}
-
 fn health_report(
     result: &codelens_core::AnalysisResult,
     top_n: usize,
@@ -261,58 +69,6 @@ fn health_report(
 ) -> codelens_core::insight::health::HealthReport {
     let model = crate::commands::scoring_model_for(version, result.summary.dup_scanned);
     health::score(result, model.as_ref(), top_n)
-}
-
-fn health_top_n(args: &GitWindowArgs, config: &Config) -> usize {
-    args.top.or(config.output.top_n).unwrap_or(10)
-}
-
-fn coupling_query_from_mcp(
-    args: &CouplingArgs,
-    config: &Config,
-) -> crate::commands::coupling::CouplingQuery {
-    let mut query = crate::commands::coupling::CouplingQuery::default();
-    query.top_n = config.output.top_n.unwrap_or(query.top_n);
-
-    if let Some(since) = &args.since {
-        query.since.clone_from(since);
-    }
-    if let Some(top) = args.top {
-        query.top_n = top;
-    }
-    if let Some(focus) = &args.focus {
-        query.focus = Some(PathBuf::from(focus));
-    }
-    if let Some(min_shared) = args.min_shared {
-        query.min_shared = min_shared;
-    }
-    if let Some(min_coupling) = args.min_coupling {
-        query.min_coupling = min_coupling;
-    }
-    if let Some(max_changeset) = args.max_changeset {
-        query.max_changeset = max_changeset;
-    }
-    if let Some(include_tests) = args.include_tests {
-        query.include_tests = include_tests;
-    }
-    query
-}
-
-fn hotspot_query_from_mcp(
-    args: &HotspotArgs,
-    config: &Config,
-) -> crate::commands::hotspot::HotspotQuery {
-    let mut query = crate::commands::hotspot::HotspotQuery::default();
-    query.top_n = config.output.top_n.unwrap_or(query.top_n);
-
-    if let Some(since) = &args.since {
-        query.since.clone_from(since);
-    }
-    if let Some(top) = args.top {
-        query.top_n = top;
-    }
-    query.functions = args.functions;
-    query
 }
 
 #[tool_router]
@@ -747,7 +503,7 @@ mod tests {
         let first = cache.analysis(&source, &config).unwrap();
         let reused = cache.analysis(&source, &config).unwrap();
 
-        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.len(), 1);
         assert!(std::sync::Arc::ptr_eq(&first, &reused));
         assert_eq!(reused.summary.total_files, 1);
     }
