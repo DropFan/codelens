@@ -271,7 +271,7 @@ render them from one scan. All formats in the table are accepted.
 ```yaml
 repos:
   - repo: https://github.com/DropFan/codelens
-    rev: v0.3.1-rust
+    rev: v0.4.0-rust
     hooks:
       - id: codelens-health
         args: ['--fail-under', 'C']

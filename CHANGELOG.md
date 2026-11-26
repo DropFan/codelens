@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
 ### Added
 - HTML combined reports now include change hotspots, coupling, trend history,
   light/dark themes, clearer risk guidance, and project links
