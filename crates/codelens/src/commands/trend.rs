@@ -50,9 +50,11 @@ pub(crate) fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> 
             .and_then(|c| c.repo_info())
             .map(|info| (info.commit, info.branch))
             .unwrap_or((None, None));
-        let path = trend::save_snapshot(
+        let path = trend::save_snapshot_with_scope(
             &project_root,
             result,
+            &args.paths,
+            &config,
             args.label.clone(),
             git_commit,
             git_branch,

@@ -78,6 +78,12 @@ pub enum Error {
     #[error("snapshot not found: {id}")]
     SnapshotNotFound { id: String },
 
+    /// Two analyses used different paths or analysis-affecting options.
+    #[error(
+        "analysis scope differs between {from} and {to}; use identical paths, filters, language mappings, Linguist settings, and duplication options"
+    )]
+    SnapshotScopeMismatch { from: String, to: String },
+
     /// Language definition file parse error.
     #[error("failed to parse language definitions")]
     LanguageParse(#[from] toml::de::Error),

@@ -45,6 +45,15 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
     let regression = if let Some(baseline_ref) = &args.baseline {
         let git_client = GitClient::detect(&args.paths[0]).ok();
         let baseline = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        if let Some(baseline_scope) = baseline.analysis_scope.as_ref() {
+            let current_scope = trend::analysis_scope(&args.paths[0], &args.paths, &config)?;
+            trend::ensure_compatible_analysis_scopes(
+                Some(baseline_scope),
+                Some(&current_scope),
+                &baseline.label,
+                "worktree",
+            )?;
+        }
         let portable_snapshot = baseline
             .snapshot_version
             .is_some_and(|version| version >= trend::PORTABLE_PATH_VERSION);
@@ -127,6 +136,7 @@ struct ResolvedBaseline {
     result: codelens_core::AnalysisResult,
     label: String,
     snapshot_version: Option<u32>,
+    analysis_scope: Option<trend::AnalysisScope>,
 }
 
 fn resolve_baseline(
@@ -146,6 +156,7 @@ fn resolve_baseline(
             result: snapshot.result,
             label: format!("snapshot {label}"),
             snapshot_version: Some(snapshot.version),
+            analysis_scope: snapshot.analysis_scope,
         });
     }
 
@@ -159,6 +170,7 @@ fn resolve_baseline(
         result,
         label: format!("git:{reference}"),
         snapshot_version: None,
+        analysis_scope: None,
     })
 }
 
@@ -350,8 +362,19 @@ mod tests {
         let unhealthy = include_str!("../../../codelens-core/src/output/html.rs");
         std::fs::write(original.join("src/a.rs"), healthy).unwrap();
         std::fs::write(original.join("src/b.rs"), unhealthy).unwrap();
-        let baseline = analyze(&[&original], &Config::default()).unwrap();
-        trend::save_snapshot(&original, baseline, None, None, None).unwrap();
+        let mut baseline_config = Config::default();
+        baseline_config.filter.smart_exclude = true;
+        let baseline = analyze(&[&original], &baseline_config).unwrap();
+        trend::save_snapshot_with_scope(
+            &original,
+            baseline,
+            &[&original],
+            &baseline_config,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         std::fs::rename(&original, &moved).unwrap();
         std::fs::write(moved.join("src/a.rs"), unhealthy).unwrap();
@@ -383,6 +406,50 @@ mod tests {
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
         assert_eq!(regressed.len(), 1);
         assert!(regressed[0]["path"].as_str().unwrap().ends_with("src/a.rs"));
+    }
+
+    #[test]
+    fn snapshot_baseline_rejects_changed_analysis_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("kept.rs"), "fn kept() {}\n").unwrap();
+        std::fs::write(
+            dir.path().join("excluded.rs"),
+            include_str!("../../../codelens-core/src/output/html.rs"),
+        )
+        .unwrap();
+
+        let save = cli::Cli::try_parse_from([
+            "codelens",
+            "trend",
+            dir.path().to_str().unwrap(),
+            "--save",
+            "--exclude-files",
+            "excluded[.]rs$",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Trend(args)) = &save.command else {
+            panic!("expected trend subcommand");
+        };
+        crate::commands::trend::run_trend(args, &save.advanced).unwrap();
+
+        let health = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            dir.path().to_str().unwrap(),
+            "--baseline",
+            "latest",
+            "--quiet",
+            "--no-config",
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &health.command else {
+            panic!("expected health subcommand");
+        };
+
+        let error = run_health(args, &health.advanced).unwrap_err();
+
+        assert!(error.to_string().contains("analysis scope differs"));
     }
 
     #[test]

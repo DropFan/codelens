@@ -205,6 +205,12 @@ a test file implies it.
 
 Save snapshots and compare codebase evolution over time. Snapshots are stored in `.codelens/snapshots/` and are never counted as source files. When multiple analysis paths are provided, all paths contribute to the snapshot and the snapshot is stored under the first path. Use `latest`, `latest~N`, or a date prefix like `2025-01-01` as references.
 
+New snapshots also record the analysis scope: input paths, file filters,
+language mappings and definitions, Linguist settings, and duplication options.
+Comparing two scoped snapshots, or using one as a health baseline, fails clearly
+when those inputs differ instead of reporting a false regression. Older
+snapshots without scope metadata remain compatible.
+
 ```bash
 codelens trend --save --label v1.0     # Save a labeled snapshot
 codelens trend                         # Compare latest two snapshots
