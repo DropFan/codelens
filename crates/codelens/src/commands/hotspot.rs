@@ -14,7 +14,10 @@ use codelens_core::insight::hotspot;
 use codelens_core::output::Report;
 use codelens_core::Config;
 
-use super::{load_partial_config, resolve_config, rewrite_paths_repo_relative, write_report};
+use super::{
+    git_client_for_paths, load_partial_config, resolve_config, rewrite_paths_repo_relative,
+    write_report,
+};
 use crate::cli;
 
 pub(crate) const DEFAULT_HOTSPOT_TOP: usize = 20;
@@ -73,8 +76,7 @@ pub(crate) fn analyze_hotspots(
     config: &Config,
     query: &HotspotQuery,
 ) -> Result<HotspotRun> {
-    let first_path = paths.first().context("No analysis path provided")?;
-    let git_client = GitClient::detect(first_path).context("Not a git repository")?;
+    let git_client = git_client_for_paths(paths)?;
     let since = git::parse_since(&query.since);
     let result = analyze(paths, config).context("Analysis failed")?;
     let commits = git_client.commit_log(&since)?;
@@ -579,6 +581,19 @@ mod tests {
         assert!(empty.history_is_empty);
         assert_eq!(empty.report.total_commits, 0);
         assert!(empty.report.files.is_empty());
+    }
+
+    #[test]
+    fn hotspot_rejects_paths_from_different_repositories() {
+        let first = hotspot_fixture();
+        let second = hotspot_fixture();
+        let paths = vec![first.path().join("src"), second.path().join("src")];
+
+        let error = analyze_hotspots(&paths, &Config::default(), &HotspotQuery::default())
+            .err()
+            .expect("cross-repository analysis must fail");
+
+        assert!(error.to_string().contains("same Git repository"));
     }
 
     #[test]

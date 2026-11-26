@@ -14,7 +14,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
 use codelens_core::config::{Config, PartialConfig};
@@ -110,7 +110,7 @@ fn collect_default_html_insights(
     };
     let mut insights = DefaultHtmlInsights::default();
 
-    match GitClient::detect(&lookup_path) {
+    match git_client_for_paths(paths) {
         Ok(git_client) => {
             let since = git::parse_since(HISTORY_WINDOW);
             match git_client.commit_log(&since) {
@@ -159,8 +159,10 @@ fn collect_default_html_insights(
                 }
             }
         }
-        Err(_) => {
-            insights.git_history_note = "Git history is unavailable. Run Codelens inside a Git repository to include hotspots and coupling.".to_string();
+        Err(error) => {
+            insights.git_history_note = format!(
+                "Git history is unavailable for this report: {error}. Run Codelens inside one Git repository to include hotspots and coupling."
+            );
         }
     }
 
@@ -208,6 +210,47 @@ fn collect_default_html_insights(
     }
 
     insights
+}
+
+/// Git-backed reports can combine multiple paths only when one repository
+/// owns every path. Otherwise a single commit log cannot describe the full
+/// analysis and returning partial history would be misleading.
+pub(crate) fn git_client_for_paths(paths: &[PathBuf]) -> Result<GitClient> {
+    let first_path = paths.first().context("No analysis path provided")?;
+    let first_lookup = if first_path.is_file() {
+        first_path.parent().unwrap_or_else(|| Path::new("."))
+    } else {
+        first_path.as_path()
+    };
+    let first = GitClient::detect(first_lookup).context("Not a git repository")?;
+    let expected = std::fs::canonicalize(first.repo_path())
+        .unwrap_or_else(|_| first.repo_path().to_path_buf());
+
+    for path in &paths[1..] {
+        let lookup = if path.is_file() {
+            path.parent().unwrap_or_else(|| Path::new("."))
+        } else {
+            path.as_path()
+        };
+        let client = GitClient::detect(lookup).with_context(|| {
+            format!(
+                "analysis path '{}' is not in a Git repository",
+                path.display()
+            )
+        })?;
+        let repository = std::fs::canonicalize(client.repo_path())
+            .unwrap_or_else(|_| client.repo_path().to_path_buf());
+        if repository != expected {
+            bail!(
+                "all analysis paths must belong to the same Git repository; '{}' belongs to '{}' instead of '{}'",
+                path.display(),
+                client.repo_path().display(),
+                first.repo_path().display(),
+            );
+        }
+    }
+
+    Ok(first)
 }
 
 pub(crate) fn list_languages(languages_file: Option<&Path>) -> Result<()> {
@@ -575,6 +618,28 @@ mod tests {
 
         assert!(insights.hotspot.is_some());
         assert!(insights.coupling.is_some());
+    }
+
+    #[test]
+    fn git_client_accepts_multiple_paths_in_one_repository() {
+        let repository = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repository.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let first = repository.path().join("first");
+        let second = repository.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+
+        let client = git_client_for_paths(&[first, second]).unwrap();
+
+        assert_eq!(
+            std::fs::canonicalize(client.repo_path()).unwrap(),
+            std::fs::canonicalize(repository.path()).unwrap()
+        );
     }
 
     fn partial(toml_src: &str) -> PartialConfig {

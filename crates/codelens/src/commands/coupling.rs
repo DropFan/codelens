@@ -14,7 +14,10 @@ use codelens_core::insight::coupling;
 use codelens_core::output::Report;
 use codelens_core::Config;
 
-use super::{load_partial_config, resolve_config, rewrite_paths_repo_relative, write_report};
+use super::{
+    git_client_for_paths, load_partial_config, resolve_config, rewrite_paths_repo_relative,
+    write_report,
+};
 use crate::cli;
 
 #[derive(Debug, Clone)]
@@ -93,8 +96,7 @@ pub(crate) fn analyze_coupling(
     config: &Config,
     query: &CouplingQuery,
 ) -> Result<CouplingRun> {
-    let first_path = paths.first().context("No analysis path provided")?;
-    let git_client = GitClient::detect(first_path).context("Not a git repository")?;
+    let git_client = git_client_for_paths(paths)?;
     let since = git::parse_since(&query.since);
     let result = analyze(paths, config).context("Analysis failed")?;
     let commits = git_client.commit_log(&since)?;
@@ -339,6 +341,19 @@ pub(crate) mod tests {
         assert!(empty.history_is_empty);
         assert_eq!(empty.report.total_commits, 0);
         assert!(empty.report.pairs.is_empty());
+    }
+
+    #[test]
+    fn coupling_rejects_paths_from_different_repositories() {
+        let first = coupling_fixture();
+        let second = coupling_fixture();
+        let paths = vec![first.path().join("src"), second.path().join("src")];
+
+        let error = analyze_coupling(&paths, &fixture_config(), &fixture_query())
+            .err()
+            .expect("cross-repository analysis must fail");
+
+        assert!(error.to_string().contains("same Git repository"));
     }
 
     #[test]
