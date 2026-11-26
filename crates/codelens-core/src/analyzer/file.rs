@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::Config;
 use crate::error::Result;
-use crate::language::LanguageRegistry;
+use crate::language::{Language, LanguageRegistry};
 
 use super::complexity::ComplexityAnalyzer;
 use super::counter;
@@ -156,40 +156,14 @@ impl FileAnalyzer {
         let normalized_path = super::normalize_path(path);
         let path = normalized_path.as_path();
 
-        // Linguist-vendored/-generated files don't count by default. --all
-        // includes them but still uses linguist-language overrides below.
-        if !self.include_all
-            && self
-                .linguists
-                .iter()
-                .any(|linguist| linguist.is_excluded(path))
-        {
+        if self.is_linguist_excluded(path) {
             return Ok(None);
         }
 
-        // Detect language: linguist-language override first, then
-        // extension/filename, then shebang fallback.
-        let linguist_lang = self
-            .linguists
-            .iter()
-            .find_map(|linguist| linguist.language_override(path))
-            .and_then(|name| self.registry.get(name));
-        let language =
-            match linguist_lang.or_else(|| self.registry.detect_with_content(path, content)) {
-                Some(lang) => lang,
-                None => return Ok(None),
-            };
-
-        // Apply the language filter (-l / config `lang`), case-insensitively
-        if let Some(ref allowed) = self.allowed_languages {
-            if !allowed.contains(&language.name.to_lowercase()) {
-                return Ok(None);
-            }
-        }
-
-        // Detect binary files: check first 10KB for null bytes
-        let check_len = content.len().min(BINARY_CHECK_LEN);
-        if content[..check_len].contains(&0) {
+        let Some(language) = self.detect_language(path, content) else {
+            return Ok(None);
+        };
+        if !self.language_is_allowed(&language) || is_binary(content) {
             return Ok(None);
         }
 
@@ -198,64 +172,101 @@ impl FileAnalyzer {
         let content = content
             .strip_prefix(b"\xEF\xBB\xBF".as_slice())
             .unwrap_or(content);
-
-        // Minified/generated file detection (--no-min-gen)
-        if self.no_min_gen && is_minified_or_generated(content) {
+        if self.should_skip_content(content) {
             return Ok(None);
         }
 
-        // Duplicate-content detection (--no-duplicates): first seen wins
-        if let Some(ref seen) = self.seen_hashes {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            content.hash(&mut hasher);
-            if !seen.lock().unwrap().insert(hasher.finish()) {
-                return Ok(None);
-            }
-        }
-
-        // Count lines using byte-level state machine
         let (trie, mask) = language.tokens();
         let lines: LineStats = counter::count_stats(content, trie, *mask);
-
-        // Apply line filters
-        if let Some(min) = self.min_lines {
-            if lines.total < min {
-                return Ok(None);
-            }
-        }
-        if let Some(max) = self.max_lines {
-            if lines.total > max {
-                return Ok(None);
-            }
+        if !self.line_count_is_allowed(lines.total) {
+            return Ok(None);
         }
 
-        // File size from content length
+        Ok(Some(self.build_file_stats(path, content, &language, lines)))
+    }
+
+    fn is_linguist_excluded(&self, path: &Path) -> bool {
+        // --all includes vendored/generated files but still retains language
+        // overrides from the same Linguist attributes.
+        !self.include_all
+            && self
+                .linguists
+                .iter()
+                .any(|linguist| linguist.is_excluded(path))
+    }
+
+    fn detect_language(&self, path: &Path, content: &[u8]) -> Option<Arc<Language>> {
+        // Linguist-language override first, then extension/filename, then
+        // shebang fallback.
+        self.linguists
+            .iter()
+            .find_map(|linguist| linguist.language_override(path))
+            .and_then(|name| self.registry.get(name))
+            .or_else(|| self.registry.detect_with_content(path, content))
+    }
+
+    fn language_is_allowed(&self, language: &Language) -> bool {
+        self.allowed_languages
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(&language.name.to_lowercase()))
+    }
+
+    fn should_skip_content(&self, content: &[u8]) -> bool {
+        if self.no_min_gen && is_minified_or_generated(content) {
+            return true;
+        }
+
+        let Some(seen) = &self.seen_hashes else {
+            return false;
+        };
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        content.hash(&mut hasher);
+        !seen.lock().unwrap().insert(hasher.finish())
+    }
+
+    fn line_count_is_allowed(&self, total: usize) -> bool {
+        self.min_lines.is_none_or(|min| total >= min)
+            && self.max_lines.is_none_or(|max| total <= max)
+    }
+
+    fn build_file_stats(
+        &self,
+        path: &Path,
+        content: &[u8],
+        language: &Language,
+        lines: LineStats,
+    ) -> FileStats {
         let size = content.len() as u64;
 
         // Analyze complexity (needs string representation)
         let text = String::from_utf8_lossy(content);
-        let complexity = self.complexity_analyzer.analyze(&text, &language);
+        let complexity = self.complexity_analyzer.analyze(&text, language);
 
         measurements::record_supplemental_metrics(
             path,
             content,
             &text,
-            &language,
+            language,
             &self.complexity_analyzer,
             self.inline_test_sink.as_deref(),
             self.dup_sink.as_deref(),
         );
 
-        Ok(Some(FileStats {
+        FileStats {
             path: path.to_path_buf(),
             language: language.name.clone(),
             lines,
             size,
             duplicate_lines: 0,
             complexity,
-        }))
+        }
     }
+}
+
+fn is_binary(content: &[u8]) -> bool {
+    let check_len = content.len().min(BINARY_CHECK_LEN);
+    content[..check_len].contains(&0)
 }
 
 #[cfg(test)]
