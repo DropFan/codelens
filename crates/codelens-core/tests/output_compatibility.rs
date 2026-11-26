@@ -278,7 +278,8 @@ fn analysis_human_outputs_keep_key_fields_in_order() {
         &HtmlOutput::new(),
         Report::Analysis(analysis_fixture()),
         &options,
-    );
+    )
+    .replace("\r\n", "\n");
     assert_in_order(
         &html,
         &[
