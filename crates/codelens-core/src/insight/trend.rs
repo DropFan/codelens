@@ -11,6 +11,10 @@ use crate::analyzer::stats::AnalysisResult;
 use crate::error::{Error, Result};
 use crate::insight::DeltaValue;
 
+/// Snapshots at or above this version store files relative to their snapshot
+/// root when possible, so moving the project does not break file identity.
+pub const PORTABLE_PATH_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     pub version: u32,
@@ -129,7 +133,7 @@ pub fn save_snapshot(
 
 fn save_snapshot_at(
     project_root: &Path,
-    result: AnalysisResult,
+    mut result: AnalysisResult,
     label: Option<String>,
     git_commit: Option<String>,
     git_branch: Option<String>,
@@ -149,8 +153,9 @@ fn save_snapshot_at(
         );
     }
 
+    make_paths_relative(&mut result, project_root);
     let snapshot = Snapshot {
-        version: 1,
+        version: PORTABLE_PATH_VERSION,
         timestamp: now,
         label,
         git_commit,
@@ -186,6 +191,25 @@ fn save_snapshot_at(
         }
     }
     unreachable!("the snapshot collision counter is unbounded")
+}
+
+fn make_paths_relative(result: &mut AnalysisResult, project_root: &Path) {
+    let root = fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let relative = |path: &Path| {
+        fs::canonicalize(path)
+            .ok()
+            .and_then(|absolute| absolute.strip_prefix(&root).ok().map(Path::to_path_buf))
+            .unwrap_or_else(|| path.to_path_buf())
+    };
+
+    for file in &mut result.files {
+        file.path = relative(&file.path);
+    }
+    let regions = std::mem::take(&mut result.summary.health_regions);
+    result.summary.health_regions = regions
+        .into_iter()
+        .map(|(path, stats)| (relative(&path), stats))
+        .collect();
 }
 
 pub fn list_snapshots(project_root: &Path) -> Result<Vec<SnapshotMeta>> {
@@ -417,6 +441,26 @@ mod tests {
         let metas = list_snapshots(dir.path()).unwrap();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].label.as_deref(), Some("v1.0"));
+    }
+
+    #[test]
+    fn saved_snapshot_paths_are_relative_to_the_project_root() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "fn value() {}\n").unwrap();
+        let result = crate::analyze(&[dir.path()], &crate::Config::default()).unwrap();
+
+        let path = save_snapshot(dir.path(), result, None, None, None).unwrap();
+        let snapshot = load_snapshot(&path).unwrap();
+
+        assert_eq!(snapshot.version, PORTABLE_PATH_VERSION);
+        assert_eq!(snapshot.result.files[0].path, Path::new("src/lib.rs"));
+        assert!(snapshot
+            .result
+            .summary
+            .health_regions
+            .keys()
+            .all(|path| !path.is_absolute()));
     }
 
     #[test]

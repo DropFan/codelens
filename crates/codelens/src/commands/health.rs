@@ -14,7 +14,10 @@ use codelens_core::insight::{health, trend};
 use codelens_core::output::Report;
 
 use super::{
-    compare::{analysis_is_valid, analyze_at_git_ref, prepare_comparison},
+    compare::{
+        analysis_is_valid, analyze_at_git_ref, prepare_comparison,
+        rewrite_analysis_paths_repo_relative,
+    },
     load_partial_config, resolve_config, scoring_model_for, write_report_targets,
 };
 use crate::cli;
@@ -41,17 +44,28 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
 
     let regression = if let Some(baseline_ref) = &args.baseline {
         let git_client = GitClient::detect(&args.paths[0]).ok();
-        let (baseline_result, label) = resolve_baseline(baseline_ref, &args.paths, &config)?;
-        let submodules = git_client
+        let baseline = resolve_baseline(baseline_ref, &args.paths, &config)?;
+        let portable_snapshot = baseline
+            .snapshot_version
+            .is_some_and(|version| version >= trend::PORTABLE_PATH_VERSION);
+        if portable_snapshot {
+            rewrite_analysis_paths_repo_relative(&mut result, &args.paths[0]);
+        }
+        let mut submodules = git_client
             .as_ref()
             .map(GitClient::submodule_paths)
             .unwrap_or_default();
+        if portable_snapshot {
+            submodules = submodules_relative_to(&submodules, git_client.as_ref(), &args.paths[0]);
+        }
         let Some(prepared) = prepare_comparison(
-            baseline_result,
-            &label,
+            baseline.result,
+            &baseline.label,
             result,
             "worktree",
-            git_client.as_ref().map(GitClient::repo_path),
+            (!portable_snapshot)
+                .then(|| git_client.as_ref().map(GitClient::repo_path))
+                .flatten(),
             &submodules,
         ) else {
             return Ok(ExitCode::FAILURE);
@@ -61,7 +75,7 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
             &prepared.baseline,
             &prepared.current,
             compare_model.as_ref(),
-            &label,
+            &baseline.label,
         );
         result = prepared.current;
         Some(comparison)
@@ -109,11 +123,17 @@ pub(crate) fn run_health(args: &cli::HealthArgs, advanced: &cli::AdvancedArgs) -
 ///
 /// Snapshot references ("latest", "latest~N", date prefixes) win; anything
 /// else is treated as a git ref and analyzed via a temporary worktree.
+struct ResolvedBaseline {
+    result: codelens_core::AnalysisResult,
+    label: String,
+    snapshot_version: Option<u32>,
+}
+
 fn resolve_baseline(
     reference: &str,
     paths: &[PathBuf],
     config: &Config,
-) -> Result<(codelens_core::AnalysisResult, String)> {
+) -> Result<ResolvedBaseline> {
     let project_root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
 
     if let Ok(snap_path) = trend::resolve_snapshot(&project_root, reference) {
@@ -122,7 +142,11 @@ fn resolve_baseline(
             .label
             .clone()
             .unwrap_or_else(|| snapshot.timestamp.format("%Y-%m-%d %H:%M").to_string());
-        return Ok((snapshot.result, format!("snapshot {label}")));
+        return Ok(ResolvedBaseline {
+            result: snapshot.result,
+            label: format!("snapshot {label}"),
+            snapshot_version: Some(snapshot.version),
+        });
     }
 
     let git_client = GitClient::detect(&project_root).with_context(|| {
@@ -131,7 +155,31 @@ fn resolve_baseline(
         )
     })?;
     let result = analyze_at_git_ref(&git_client, reference, paths, config)?;
-    Ok((result, format!("git:{reference}")))
+    Ok(ResolvedBaseline {
+        result,
+        label: format!("git:{reference}"),
+        snapshot_version: None,
+    })
+}
+
+fn submodules_relative_to(
+    submodules: &[PathBuf],
+    git_client: Option<&GitClient>,
+    project_root: &PathBuf,
+) -> Vec<PathBuf> {
+    let Some(git_client) = git_client else {
+        return Vec::new();
+    };
+    let root = std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.clone());
+    submodules
+        .iter()
+        .filter_map(|submodule| {
+            let absolute = git_client.repo_path().join(submodule);
+            std::fs::canonicalize(absolute)
+                .ok()
+                .and_then(|path| path.strip_prefix(&root).ok().map(PathBuf::from))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -290,6 +338,51 @@ mod tests {
             format!("{:?}", run_health(args, &cli.advanced).unwrap()),
             format!("{:?}", ExitCode::FAILURE)
         );
+    }
+
+    #[test]
+    fn snapshot_file_regressions_survive_project_moves() {
+        let parent = tempfile::tempdir().unwrap();
+        let original = parent.path().join("original");
+        let moved = parent.path().join("moved");
+        std::fs::create_dir_all(original.join("src")).unwrap();
+        let healthy = include_str!("../../../codelens-core/src/error.rs");
+        let unhealthy = include_str!("../../../codelens-core/src/output/html.rs");
+        std::fs::write(original.join("src/a.rs"), healthy).unwrap();
+        std::fs::write(original.join("src/b.rs"), unhealthy).unwrap();
+        let baseline = analyze(&[&original], &Config::default()).unwrap();
+        trend::save_snapshot(&original, baseline, None, None, None).unwrap();
+
+        std::fs::rename(&original, &moved).unwrap();
+        std::fs::write(moved.join("src/a.rs"), unhealthy).unwrap();
+        std::fs::write(moved.join("src/b.rs"), healthy).unwrap();
+        let output = parent.path().join("health.json");
+        let cli = cli::Cli::try_parse_from([
+            "codelens",
+            "health",
+            moved.to_str().unwrap(),
+            "--baseline",
+            "latest",
+            "--fail-on-regression",
+            "--no-config",
+            "-f",
+            "json",
+            "-O",
+            output.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Some(cli::Command::Health(args)) = &cli.command else {
+            panic!("expected health subcommand");
+        };
+
+        let code = run_health(args, &cli.advanced).unwrap();
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+        let regressed = report["regression"]["regressed_files"].as_array().unwrap();
+
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+        assert_eq!(regressed.len(), 1);
+        assert!(regressed[0]["path"].as_str().unwrap().ends_with("src/a.rs"));
     }
 
     #[test]
