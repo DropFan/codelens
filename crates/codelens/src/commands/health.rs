@@ -198,6 +198,7 @@ fn submodules_relative_to(
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::path::Path;
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -405,7 +406,8 @@ mod tests {
 
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
         assert_eq!(regressed.len(), 1);
-        assert!(regressed[0]["path"].as_str().unwrap().ends_with("src/a.rs"));
+        assert!(Path::new(regressed[0]["path"].as_str().unwrap())
+            .ends_with(Path::new("src").join("a.rs")));
     }
 
     #[test]

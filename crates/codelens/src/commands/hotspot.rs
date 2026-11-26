@@ -678,7 +678,7 @@ mod tests {
         init_repo(temp.path());
         let old = "diff --git 旧 路径[一].rs";
         let middle = "中间{路径}.rs";
-        let final_path = ":最终 路径.rs";
+        let final_path = "最终 路径[二].rs";
 
         std::fs::write(
             temp.path().join(old),

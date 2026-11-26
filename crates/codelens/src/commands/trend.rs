@@ -140,7 +140,7 @@ mod tests {
         std::fs::write(
             &config_path,
             format!(
-                "output = \"json\"\noutput_file = \"{}\"\n",
+                "output = \"json\"\noutput_file = '{}'\n",
                 config_output.display()
             ),
         )
