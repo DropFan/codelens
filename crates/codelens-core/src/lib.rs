@@ -310,6 +310,29 @@ fn main() {
     }
 
     #[test]
+    fn test_analyze_never_counts_codelens_internal_state() {
+        let dir = TempDir::new().unwrap();
+        create_test_file(dir.path(), "src/main.rs", "fn main() {}\n");
+        let snapshot = dir.path().join(".codelens/snapshots/2026-11-26.json");
+        create_test_file(
+            dir.path(),
+            ".codelens/snapshots/2026-11-26.json",
+            "{\"snapshot\": true}\n",
+        );
+
+        let result = analyze(&[dir.path()], &Config::default()).unwrap();
+
+        assert_eq!(result.summary.total_files, 1);
+        assert!(result.files.iter().all(|stats| !stats
+            .path
+            .components()
+            .any(|component| { component.as_os_str() == std::ffi::OsStr::new(".codelens") })));
+
+        let direct_result = analyze(&[snapshot], &Config::default()).unwrap();
+        assert_eq!(direct_result.summary.total_files, 0);
+    }
+
+    #[test]
     fn test_analyze_result_contains_elapsed_time() {
         let dir = TempDir::new().unwrap();
         create_test_file(dir.path(), "main.rs", "fn main() {}\n");

@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::error::Result;
 
 use super::pattern::PatternFilter;
-use super::smart::{SmartExclude, VcsExclude};
+use super::smart::{CodelensStateExclude, SmartExclude, VcsExclude};
 use super::Filter;
 
 /// Chain of filters applied in sequence.
@@ -17,7 +17,7 @@ pub struct FilterChain {
 impl FilterChain {
     /// Create a new filter chain from configuration.
     pub fn new(config: &Config) -> Result<Self> {
-        let mut filters: Vec<Box<dyn Filter>> = Vec::new();
+        let mut filters: Vec<Box<dyn Filter>> = vec![Box::new(CodelensStateExclude)];
 
         // Add pattern filter if patterns are specified
         if config.filter.has_patterns() {

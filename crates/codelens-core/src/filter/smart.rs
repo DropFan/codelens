@@ -7,6 +7,9 @@ use super::Filter;
 /// Version-control metadata must never be treated as project source.
 const VCS_EXCLUDE: &[&str] = &[".git", ".svn", ".hg", ".bzr", "_darcs"];
 
+/// Codelens-owned state is metadata, never project source.
+const CODELENS_STATE_DIR: &str = ".codelens";
+
 /// Common directories to always exclude.
 const ALWAYS_EXCLUDE: &[&str] = &[
     ".git",
@@ -53,6 +56,20 @@ impl Filter for VcsExclude {
             };
             name.to_str()
                 .is_some_and(|name| VCS_EXCLUDE.contains(&name))
+        })
+    }
+}
+
+/// Hard exclusion for Codelens-owned state, independent of smart excludes.
+pub(super) struct CodelensStateExclude;
+
+impl Filter for CodelensStateExclude {
+    fn should_include(&self, path: &Path, _is_dir: bool) -> bool {
+        !path.components().any(|component| {
+            matches!(
+                component,
+                Component::Normal(name) if name == CODELENS_STATE_DIR
+            )
         })
     }
 }
@@ -177,5 +194,15 @@ mod tests {
         assert!(!filter.should_include(Path::new("project/.git/objects/metadata.rs"), false));
         assert!(filter.should_include(Path::new("node_modules"), true));
         assert!(filter.should_include(Path::new("src/metadata.rs"), false));
+    }
+
+    #[test]
+    fn test_codelens_state_exclude_rejects_internal_state_at_any_depth() {
+        let filter = CodelensStateExclude;
+        assert!(!filter.should_include(Path::new(".codelens"), true));
+        assert!(
+            !filter.should_include(Path::new("project/.codelens/snapshots/metrics.json"), false)
+        );
+        assert!(filter.should_include(Path::new("src/codelens.rs"), false));
     }
 }
