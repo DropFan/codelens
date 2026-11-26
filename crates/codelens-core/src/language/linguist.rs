@@ -70,7 +70,7 @@ impl LinguistAttributes {
             return None;
         }
         Some(Self {
-            root: root.to_path_buf(),
+            root: normalize_path(root),
             overrides,
             vendored,
             generated,
@@ -79,7 +79,7 @@ impl LinguistAttributes {
 
     /// Language override for this path, if any (last matching rule wins).
     pub fn language_override(&self, path: &Path) -> Option<&str> {
-        let rel = self.rel(path);
+        let rel = self.rel(path)?;
         self.overrides
             .iter()
             .rev()
@@ -89,16 +89,26 @@ impl LinguistAttributes {
 
     /// Is this path excluded as vendored or generated?
     pub fn is_excluded(&self, path: &Path) -> bool {
-        let rel = self.rel(path);
+        let Some(rel) = self.rel(path) else {
+            return false;
+        };
         last_state(&self.vendored, &rel) || last_state(&self.generated, &rel)
     }
 
-    fn rel(&self, path: &Path) -> PathBuf {
-        path.strip_prefix(&self.root)
-            .or_else(|_| path.strip_prefix("./"))
-            .unwrap_or(path)
-            .to_path_buf()
+    fn rel(&self, path: &Path) -> Option<PathBuf> {
+        let path = normalize_path(path);
+        if self.root.as_os_str().is_empty() {
+            return Some(path);
+        }
+        path.strip_prefix(&self.root).ok().map(Path::to_path_buf)
     }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .map(|component| component.as_os_str())
+        .collect()
 }
 
 /// Final on/off state of an attribute for a path (last match wins).
@@ -205,5 +215,22 @@ mod tests {
     fn test_no_linguist_attrs_returns_none() {
         assert!(LinguistAttributes::parse(Path::new("."), "*.rs diff=rust\n").is_none());
         assert!(LinguistAttributes::parse(Path::new("."), "").is_none());
+    }
+
+    #[test]
+    fn test_attributes_do_not_apply_outside_their_root() {
+        let attrs = LinguistAttributes::parse(
+            Path::new("first"),
+            "*.rs linguist-generated linguist-language=Text\n",
+        )
+        .unwrap();
+
+        assert!(attrs.is_excluded(Path::new("first/generated.rs")));
+        assert_eq!(
+            attrs.language_override(Path::new("first/generated.rs")),
+            Some("Text")
+        );
+        assert!(!attrs.is_excluded(Path::new("second/keep.rs")));
+        assert_eq!(attrs.language_override(Path::new("second/keep.rs")), None);
     }
 }

@@ -203,6 +203,26 @@ fn main() {
     }
 
     #[test]
+    fn test_analyze_multiple_paths_scopes_linguist_attributes_per_root() {
+        let dir1 = TempDir::new().unwrap();
+        let dir2 = TempDir::new().unwrap();
+        create_test_file(dir1.path(), ".gitattributes", "*.rs linguist-generated\n");
+        create_test_file(dir1.path(), "generated.rs", "fn generated() {}\n");
+        create_test_file(
+            dir2.path(),
+            ".gitattributes",
+            "generated.rs linguist-generated\n",
+        );
+        create_test_file(dir2.path(), "generated.rs", "fn generated() {}\n");
+        create_test_file(dir2.path(), "keep.rs", "fn keep() {}\n");
+
+        let result = analyze(&[dir1.path(), dir2.path()], &Config::default()).unwrap();
+
+        assert_eq!(result.summary.total_files, 1);
+        assert!(result.files[0].path.ends_with("keep.rs"));
+    }
+
+    #[test]
     fn test_analyze_respects_gitignore() {
         let dir = TempDir::new().unwrap();
 

@@ -127,14 +127,20 @@ fn build_file_analyzer<P: AsRef<Path>>(
         analyzer = analyzer.with_duplication_sink(Arc::clone(sink));
     }
     if !config.filter.no_linguist {
-        if let Some(root) = paths.first().map(|path| path.as_ref()) {
+        let mut loaded_roots = HashSet::new();
+        for root in paths {
+            let root = root.as_ref();
             let dir = if root.is_dir() {
                 root
             } else {
                 root.parent().unwrap_or_else(|| Path::new("."))
             };
-            if let Some(attributes) = LinguistAttributes::load(dir) {
-                analyzer = analyzer.with_linguist(Arc::new(attributes));
+            let identity =
+                std::fs::canonicalize(dir).unwrap_or_else(|_| super::normalize_path(dir));
+            if loaded_roots.insert(identity) {
+                if let Some(attributes) = LinguistAttributes::load(dir) {
+                    analyzer = analyzer.with_linguist(Arc::new(attributes));
+                }
             }
         }
     }
