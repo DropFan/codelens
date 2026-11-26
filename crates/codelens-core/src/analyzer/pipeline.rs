@@ -1,7 +1,7 @@
 //! End-to-end source analysis pipeline.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,14 +21,15 @@ pub(crate) fn analyze_paths<P: AsRef<Path>>(
     config: &Config,
 ) -> Result<AnalysisResult> {
     let start = Instant::now();
+    let paths = deduplicated_roots(paths)?;
     let registry = Arc::new(crate::build_registry(config)?);
     let duplication = (!config.no_dup_scan).then(|| Arc::new(DuplicationSink::default()));
     let inline_tests = Arc::new(InlineTestSink::default());
-    let analyzer = build_file_analyzer(paths, config, registry, &duplication, &inline_tests)?;
+    let analyzer = build_file_analyzer(&paths, config, registry, &duplication, &inline_tests)?;
     let filter: Arc<dyn Filter> = Arc::new(FilterChain::new(config)?);
     let walker = ParallelWalker::new(config.walker.clone());
     let (mut files, scanned_files, skipped_files, error_files) =
-        collect_files(paths, analyzer, filter, &walker)?;
+        collect_files(&paths, analyzer, filter, &walker)?;
     let mut summary = finalize_summary(&mut files, duplication, inline_tests);
     summary.sort_languages(config.output.sort_by);
 
@@ -40,6 +41,77 @@ pub(crate) fn analyze_paths<P: AsRef<Path>>(
         skipped_files,
         error_files,
     })
+}
+
+struct AnalysisRoot {
+    path: PathBuf,
+    identity: PathBuf,
+    is_dir: bool,
+    traverses_symlink: bool,
+}
+
+/// Keep one walk for each physical tree. This prevents overlapping or
+/// differently-spelled roots from feeding duplicate files into the shared
+/// duplication and inline-test collectors.
+fn deduplicated_roots<P: AsRef<Path>>(paths: &[P]) -> Result<Vec<PathBuf>> {
+    let mut roots = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(Error::DirectoryNotFound {
+                path: path.to_path_buf(),
+            });
+        }
+        roots.push(AnalysisRoot {
+            path: path.to_path_buf(),
+            identity: std::fs::canonicalize(path).unwrap_or_else(|_| super::normalize_path(path)),
+            is_dir: path.is_dir(),
+            traverses_symlink: traverses_symlink(path),
+        });
+    }
+
+    let mut keep = vec![true; roots.len()];
+    for (index, root) in roots.iter().enumerate() {
+        for (other_index, other) in roots.iter().enumerate() {
+            if index == other_index {
+                continue;
+            }
+            if root.identity == other.identity {
+                if other_index < index {
+                    keep[index] = false;
+                    break;
+                }
+                continue;
+            }
+            if root.traverses_symlink || other.traverses_symlink {
+                continue;
+            }
+            if other.is_dir && root.identity.starts_with(&other.identity) {
+                keep[index] = false;
+                break;
+            }
+        }
+    }
+
+    Ok(roots
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(root, keep)| keep.then_some(root.path))
+        .collect())
+}
+
+fn traverses_symlink(path: &Path) -> bool {
+    let Ok(absolute) = std::path::absolute(path) else {
+        return false;
+    };
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        if std::fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.is_symlink()) {
+            return true;
+        }
+    }
+    false
 }
 
 fn build_file_analyzer<P: AsRef<Path>>(
@@ -83,11 +155,6 @@ fn collect_files<P: AsRef<Path>>(
 
     for path in paths {
         let path = path.as_ref();
-        if !path.exists() {
-            return Err(Error::DirectoryNotFound {
-                path: path.to_path_buf(),
-            });
-        }
         walker.walk_and_analyze(
             path,
             Arc::clone(&analyzer),

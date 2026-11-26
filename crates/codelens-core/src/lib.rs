@@ -390,6 +390,24 @@ fn main() {
     }
 
     #[test]
+    fn test_analyze_deduplicates_physically_equivalent_roots() {
+        let dir = TempDir::new().unwrap();
+        create_test_file(
+            dir.path(),
+            "src/lib.rs",
+            "fn only_line_in_repo() { compute_something(); }\n",
+        );
+        let file = dir.path().join("src/lib.rs");
+        let equivalent = dir.path().join("src/../src/lib.rs");
+
+        let result = analyze(&[file, equivalent], &Config::default()).unwrap();
+
+        assert_eq!(result.scanned_files, 1);
+        assert_eq!(result.summary.total_files, 1);
+        assert_eq!(result.files[0].duplicate_lines, 0);
+    }
+
+    #[test]
     fn test_analyze_collects_inline_test_health_regions() {
         let dir = TempDir::new().unwrap();
         create_test_file(
