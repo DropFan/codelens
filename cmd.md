@@ -55,6 +55,7 @@ codelens diff main...HEAD           # 从 main 与 HEAD 的共同祖先开始比
 
 # 快照对比，可以跨会话保留
 codelens trend --save --label before-refactor
+codelens trend path1 path2 --save        # 两个路径都会计入，快照写入 path1/.codelens
 codelens trend                      # 比较最近两份快照
 codelens trend --list               # 列出全部快照
 codelens trend --compare latest~2 latest
@@ -92,7 +93,7 @@ codelens . --no-smart-exclude                  # 不自动排除依赖、构建�
 codelens . --all                               # 包含默认排除的依赖、构建及 Linguist vendored/generated 文件
 ```
 
-`-a / --all` 只放开默认的依赖、构建目录智能排除，以及 `.gitattributes` 的 Linguist vendored/generated 排除。它仍遵循 `.gitignore`、`.codelensignore`、显式 include/exclude、语言和行数等过滤，并始终跳过版本控制元数据和二进制文件。
+`-a / --all` 只放开默认的依赖、构建目录智能排除，以及 `.gitattributes` 的 Linguist vendored/generated 排除。它仍遵循 `.gitignore`、`.codelensignore`、显式 include/exclude、语言和行数等过滤，并始终跳过版本控制元数据、Codelens 自己的 `.codelens/` 状态和二进制文件。
 
 配置和自定义语言：
 

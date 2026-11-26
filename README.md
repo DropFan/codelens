@@ -203,7 +203,7 @@ a test file implies it.
 
 ### Trend Tracking
 
-Save snapshots and compare codebase evolution over time. Snapshots are stored in `.codelens/snapshots/`. Use `latest`, `latest~N`, or a date prefix like `2025-01-01` as references.
+Save snapshots and compare codebase evolution over time. Snapshots are stored in `.codelens/snapshots/` and are never counted as source files. When multiple analysis paths are provided, all paths contribute to the snapshot and the snapshot is stored under the first path. Use `latest`, `latest~N`, or a date prefix like `2025-01-01` as references.
 
 ```bash
 codelens trend --save --label v1.0     # Save a labeled snapshot
@@ -294,7 +294,8 @@ codelens --all                      # Include dependency/build and Linguist-vend
 ```
 
 - `--all` keeps `.gitignore`, `.codelensignore`, explicit filters, binary
-  detection, and version-control metadata exclusions in effect.
+  detection, version-control metadata exclusions, and Codelens-owned
+  `.codelens/` state exclusions in effect.
 - Extensionless scripts are detected via shebang (`#!/usr/bin/env python`).
 - Drop a `.codelensignore` file (gitignore syntax) anywhere in the tree to
   exclude paths, like scc's `.sccignore` / tokei's `.tokeignore`.
