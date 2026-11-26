@@ -153,3 +153,48 @@ fn action_falls_back_to_three_scans_for_older_releases() {
         "unexpected environment output: {environment:?}"
     );
 }
+
+#[test]
+fn fail_on_regression_requires_a_baseline() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    fake_codelens(&bin.join("codelens"));
+    let log = dir.path().join("calls.log");
+    let github_output = dir.path().join("github-output");
+    let github_env = dir.path().join("github-env");
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(health_step_script())
+        .current_dir(dir.path())
+        .env("PATH", path)
+        .env("FAKE_LOG", &log)
+        .env("FAKE_SUPPORTS_EMIT", "1")
+        .env("INPUT_PATH", ".")
+        .env("INPUT_HEALTH_MODEL", "")
+        .env("INPUT_FAIL_UNDER", "")
+        .env("INPUT_BASELINE", "")
+        .env("INPUT_FAIL_ON_REGRESSION", "true")
+        .env("INPUT_SUMMARY", "false")
+        .env("GITHUB_OUTPUT", &github_output)
+        .env("GITHUB_ENV", &github_env)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires the baseline input"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !log.exists(),
+        "validation must happen before invoking codelens"
+    );
+}

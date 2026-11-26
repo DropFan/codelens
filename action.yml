@@ -32,7 +32,7 @@ inputs:
     required: false
     default: ''
   fail-on-regression:
-    description: 'Fail when health regressed or the v2 comparison data is insufficient'
+    description: 'Fail when health regressed or v2 data is insufficient; requires baseline'
     required: false
     default: 'false'
   summary:
@@ -131,6 +131,16 @@ runs:
           '') ;;
           v1|v2) ANALYSIS_ARGS+=(--health-model "$INPUT_HEALTH_MODEL") ;;
           *) echo "::error::invalid health-model input: expected v1 or v2"; exit 1 ;;
+        esac
+        case "$INPUT_FAIL_ON_REGRESSION" in
+          false) ;;
+          true)
+            if [ -z "$INPUT_BASELINE" ]; then
+              echo "::error::fail-on-regression requires the baseline input" >&2
+              exit 1
+            fi
+            ;;
+          *) echo "::error::invalid fail-on-regression input: expected true or false"; exit 1 ;;
         esac
         GATE_ARGS=()
         [ -n "$INPUT_FAIL_UNDER" ] && GATE_ARGS+=(--fail-under "$INPUT_FAIL_UNDER")

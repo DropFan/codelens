@@ -41,7 +41,7 @@ jobs:
 | `health-model` | 空 | 可选 `v1`/`v2`；留空时读取 `.codelens.toml`，未配置则使用兼容默认值 v1 |
 | `fail-under` | 空 | 绝对门禁：健康分低于该等级（A/B/C/D）或分数（0-100）时失败；v2 数据不足也会失败 |
 | `baseline` | 空 | 回归基线 git ref（推荐 `origin/${{ github.base_ref }}`） |
-| `fail-on-regression` | `false` | 相对基线出现回归、或 v2 比较数据不足时失败 |
+| `fail-on-regression` | `false` | 相对基线出现回归、或 v2 比较数据不足时失败；设为 `true` 时必须同时提供 `baseline`，否则 Action 会明确报错 |
 | `summary` | `true` | 报告写入 step summary |
 | `comment` | `true` | 贴/更新 PR 置顶评论（仅 pull_request 事件） |
 
