@@ -24,29 +24,10 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     let git_client = GitClient::detect(&cwd).context("Not a git repository")?;
     let paths = vec![cwd];
 
-    let (from_ref, to_ref) = match parse_ref_args(&args.from, args.to.as_deref())? {
-        RefSpec::MergeBase { from, to } => {
-            let base = git_client
-                .merge_base(&from, &to)
-                .with_context(|| format!("no merge base between '{from}' and '{to}'"))?;
-            (base[..base.len().min(12)].to_string(), Some(to))
-        }
-        RefSpec::Plain { from, to } => (from, to),
-    };
-
+    let (from_ref, to_ref) = resolve_refs(&git_client, args)?;
     let submodules = git_client.submodule_paths();
-
     let from_result = analyze_at_git_ref(&git_client, &from_ref, &paths, &config)?;
-    let (to_result, to_label) = match &to_ref {
-        Some(reference) => (
-            analyze_at_git_ref(&git_client, reference, &paths, &config)?,
-            reference.clone(),
-        ),
-        None => {
-            let result = analyze(&paths, &config).context("Analysis failed")?;
-            (result, "worktree".to_string())
-        }
-    };
+    let (to_result, to_label) = analyze_target(&git_client, to_ref.as_deref(), &paths, &config)?;
     let Some(prepared) = prepare_comparison(
         from_result,
         &from_ref,
@@ -71,20 +52,58 @@ pub(crate) fn run_diff(args: &cli::DiffArgs, advanced: &cli::AdvancedArgs) -> Re
     write_report(Report::Diff(Box::new(report)), &config.output)?;
 
     if args.fail_on_regression && failed {
-        if assessment == codelens_core::insight::health::HealthAssessment::InsufficientData {
-            eprintln!(
-                "{}: comparison from '{from_ref}' to '{to_label}' has insufficient measurement coverage; its score delta is an estimate and cannot satisfy --fail-on-regression",
-                "gate failed".red().bold(),
-            );
-        } else {
-            eprintln!(
-                "{}: health regressed from '{from_ref}' to '{to_label}'",
-                "gate failed".red().bold(),
-            );
-        }
+        print_gate_failure(assessment, &from_ref, &to_label);
         return Ok(ExitCode::FAILURE);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn resolve_refs(git_client: &GitClient, args: &cli::DiffArgs) -> Result<(String, Option<String>)> {
+    Ok(match parse_ref_args(&args.from, args.to.as_deref())? {
+        RefSpec::MergeBase { from, to } => {
+            let base = git_client
+                .merge_base(&from, &to)
+                .with_context(|| format!("no merge base between '{from}' and '{to}'"))?;
+            (base[..base.len().min(12)].to_string(), Some(to))
+        }
+        RefSpec::Plain { from, to } => (from, to),
+    })
+}
+
+fn analyze_target(
+    git_client: &GitClient,
+    to_ref: Option<&str>,
+    paths: &[PathBuf],
+    config: &codelens_core::Config,
+) -> Result<(codelens_core::AnalysisResult, String)> {
+    Ok(match to_ref {
+        Some(reference) => (
+            analyze_at_git_ref(git_client, reference, paths, config)?,
+            reference.to_string(),
+        ),
+        None => {
+            let result = analyze(paths, config).context("Analysis failed")?;
+            (result, "worktree".to_string())
+        }
+    })
+}
+
+fn print_gate_failure(
+    assessment: codelens_core::insight::health::HealthAssessment,
+    from_ref: &str,
+    to_label: &str,
+) {
+    if assessment == codelens_core::insight::health::HealthAssessment::InsufficientData {
+        eprintln!(
+            "{}: comparison from '{from_ref}' to '{to_label}' has insufficient measurement coverage; its score delta is an estimate and cannot satisfy --fail-on-regression",
+            "gate failed".red().bold(),
+        );
+    } else {
+        eprintln!(
+            "{}: health regressed from '{from_ref}' to '{to_label}'",
+            "gate failed".red().bold(),
+        );
+    }
 }
 
 /// How the FROM/TO CLI arguments resolve into refs, before any git lookup.

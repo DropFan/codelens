@@ -21,58 +21,78 @@ pub(crate) fn run_trend(args: &cli::TrendArgs, advanced: &cli::AdvancedArgs) -> 
         .unwrap_or_else(|| PathBuf::from("."));
 
     if args.list {
-        let metas = trend::list_snapshots(&project_root)?;
-        if metas.is_empty() {
-            println!("No snapshots found. Use --save to create one.");
-            return Ok(());
-        }
-        for meta in &metas {
-            let label = meta.label.as_deref().unwrap_or("");
-            let commit = meta.git_commit.as_deref().unwrap_or("");
-            println!(
-                "  {}  {}  {}",
-                meta.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                label,
-                commit
-            );
-        }
-        println!("\nTotal: {} snapshots", metas.len());
-        return Ok(());
+        return list_saved_snapshots(&project_root);
     }
 
     if args.save {
-        // Use the same filter semantics as the main command so snapshot
-        // numbers stay comparable with `codelens` output.
-        let partial = load_partial_config(advanced)?;
-        let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
-        let result = analyze(&args.paths, &config).context("Analysis failed")?;
-        let (git_commit, git_branch) = GitClient::detect(&project_root)
-            .and_then(|c| c.repo_info())
-            .map(|info| (info.commit, info.branch))
-            .unwrap_or((None, None));
-        let path = trend::save_snapshot_with_scope(
-            &project_root,
-            result,
-            &args.paths,
-            &config,
-            args.label.clone(),
-            git_commit,
-            git_branch,
-        )?;
-        println!("Snapshot saved to: {}", path.display().to_string().green());
-        return Ok(());
+        return save_current_snapshot(args, advanced, &project_root);
     }
 
+    render_trend_comparison(args, advanced, &project_root)
+}
+
+fn list_saved_snapshots(project_root: &std::path::Path) -> Result<()> {
+    let metas = trend::list_snapshots(project_root)?;
+    if metas.is_empty() {
+        println!("No snapshots found. Use --save to create one.");
+        return Ok(());
+    }
+    for meta in &metas {
+        let label = meta.label.as_deref().unwrap_or("");
+        let commit = meta.git_commit.as_deref().unwrap_or("");
+        println!(
+            "  {}  {}  {}",
+            meta.timestamp.format("%Y-%m-%d %H:%M:%S"),
+            label,
+            commit
+        );
+    }
+    println!("\nTotal: {} snapshots", metas.len());
+    Ok(())
+}
+
+fn save_current_snapshot(
+    args: &cli::TrendArgs,
+    advanced: &cli::AdvancedArgs,
+    project_root: &std::path::Path,
+) -> Result<()> {
+    // Use the same filter semantics as the main command so snapshot
+    // numbers stay comparable with `codelens` output.
+    let partial = load_partial_config(advanced)?;
+    let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
+    let result = analyze(&args.paths, &config).context("Analysis failed")?;
+    let (git_commit, git_branch) = GitClient::detect(project_root)
+        .and_then(|client| client.repo_info())
+        .map(|info| (info.commit, info.branch))
+        .unwrap_or((None, None));
+    let path = trend::save_snapshot_with_scope(
+        project_root,
+        result,
+        &args.paths,
+        &config,
+        args.label.clone(),
+        git_commit,
+        git_branch,
+    )?;
+    println!("Snapshot saved to: {}", path.display().to_string().green());
+    Ok(())
+}
+
+fn render_trend_comparison(
+    args: &cli::TrendArgs,
+    advanced: &cli::AdvancedArgs,
+    project_root: &std::path::Path,
+) -> Result<()> {
     let (from_ref, to_ref) = if let Some(ref refs) = args.compare {
         (refs[0].as_str(), refs[1].as_str())
     } else {
         ("latest~1", "latest")
     };
 
-    let mut report = trend::diff(&project_root, from_ref, to_ref)?;
+    let mut report = trend::diff(project_root, from_ref, to_ref)?;
     // Full history feeds the HTML chart and JSON consumers; losing it
     // (e.g. one unreadable snapshot) never blocks the comparison.
-    report.history = trend::history(&project_root).unwrap_or_default();
+    report.history = trend::history(project_root).unwrap_or_default();
     let partial = load_partial_config(advanced)?;
     let config = resolve_config(&args.filter, &args.output, advanced, partial.as_ref());
     write_report(Report::Trend(report), &config.output)

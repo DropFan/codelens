@@ -7,23 +7,27 @@ pub(crate) mod diff;
 pub(crate) mod estimate;
 pub(crate) mod health;
 pub(crate) mod hotspot;
+mod reporting;
+mod settings;
 pub(crate) mod trend;
 
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
-use codelens_core::config::{Config, PartialConfig};
+use codelens_core::config::Config;
 use codelens_core::git::GitClient;
 use codelens_core::insight::scoring::{HealthModelVersion, ScoringModel};
-use codelens_core::output::{create_output, OutputOptions, Report};
+use codelens_core::output::Report;
 use codelens_core::{analyze, LanguageRegistry};
 
-use crate::cli::{self, Cli};
+use crate::cli::Cli;
+
+use reporting::write_combined_html_dashboard;
+pub(crate) use reporting::{write_report, write_report_targets};
+pub(crate) use settings::{build_config, load_partial_config, resolve_config};
 
 /// Run the default (no subcommand) analysis and print the combined report.
 pub(crate) fn run_default(cli: &Cli) -> Result<ExitCode> {
@@ -277,150 +281,6 @@ pub(crate) fn list_languages(languages_file: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// Load the config file specified by `--config`, or search default locations.
-///
-/// Unlike the previous behavior, a config file that exists but fails to parse
-/// is a hard error even when found via the default search path — silently
-/// ignoring it made bad configs undiagnosable.
-pub(crate) fn load_partial_config(advanced: &cli::AdvancedArgs) -> Result<Option<PartialConfig>> {
-    if advanced.no_config {
-        return Ok(None);
-    }
-    if let Some(ref path) = advanced.config {
-        return Ok(Some(codelens_core::config::load_config_file(path)?));
-    }
-    let default_path = PathBuf::from(".codelens.toml");
-    if default_path.exists() {
-        return Ok(Some(codelens_core::config::load_config_file(
-            &default_path,
-        )?));
-    }
-    Ok(None)
-}
-
-/// Merge configuration from three layers, later layers winning:
-/// built-in defaults → config file → explicitly passed CLI arguments.
-fn resolve_config(
-    filter: &cli::FilterArgs,
-    output: &cli::OutputArgs,
-    advanced: &cli::AdvancedArgs,
-    partial: Option<&PartialConfig>,
-) -> Config {
-    let mut config = Config::default();
-    config.walker.threads = num_cpus::get();
-    config.filter.smart_exclude = true;
-
-    if let Some(partial) = partial {
-        partial.apply_to(&mut config);
-    }
-
-    // CLI overrides: only fields the user explicitly passed.
-    if let Some(threads) = advanced.threads {
-        config.walker.threads = threads;
-    }
-    if advanced.no_dup_scan {
-        config.no_dup_scan = true;
-    }
-    if let Some(health_model) = advanced.health_model {
-        config.health_model = health_model.into();
-    }
-    if let Some(ref path) = advanced.languages_file {
-        config.languages_file = Some(path.clone());
-    }
-    if filter.no_gitignore {
-        config.walker.use_gitignore = false;
-    }
-    if let Some(depth) = filter.depth {
-        config.walker.max_depth = Some(depth);
-    }
-
-    if let Some(ref excludes) = filter.exclude {
-        config.filter.excludes = excludes.clone();
-    }
-    if let Some(ref pattern) = filter.exclude_files {
-        config.filter.exclude_files = vec![pattern.clone()];
-    }
-    if let Some(ref pattern) = filter.include_files {
-        config.filter.include_files = vec![pattern.clone()];
-    }
-    if let Some(ref langs) = filter.lang {
-        config.filter.languages = langs.clone();
-    }
-    if let Some(min_lines) = filter.min_lines {
-        config.filter.min_lines = Some(min_lines);
-    }
-    if let Some(max_lines) = filter.max_lines {
-        config.filter.max_lines = Some(max_lines);
-    }
-    if filter.no_smart_exclude {
-        config.filter.smart_exclude = false;
-    }
-    if filter.all {
-        config.filter.include_all = true;
-    }
-    if filter.no_duplicates {
-        config.filter.no_duplicates = true;
-    }
-    if filter.no_min_gen {
-        config.filter.no_min_gen = true;
-    }
-    if filter.no_linguist {
-        config.filter.no_linguist = true;
-    }
-    if let Some(ref count_as) = filter.count_as {
-        config.count_as = parse_count_as(count_as);
-    }
-
-    if let Some(format) = output.format {
-        config.output.format = format.into();
-    }
-    if let Some(ref path) = output.output_file {
-        config.output.file = Some(path.clone());
-    }
-    if output.summary {
-        config.output.summary_only = true;
-    }
-    if output.by_file {
-        config.output.by_file = true;
-    }
-    if output.by_dir {
-        config.output.by_dir = true;
-    }
-    if let Some(depth) = output.dir_depth {
-        config.output.dir_depth = depth.max(1);
-    }
-    if output.tokens {
-        config.output.show_tokens = true;
-    }
-    if let Some(sort) = output.sort {
-        config.output.sort_by = sort.into();
-    }
-    if let Some(top) = output.top {
-        config.output.top_n = Some(top);
-    }
-    if output.verbose {
-        config.output.verbose = true;
-    }
-    if output.quiet {
-        config.output.quiet = true;
-    }
-    if advanced.git_info {
-        config.output.show_git_info = true;
-    }
-
-    config
-}
-
-pub(crate) fn build_config(cli: &Cli) -> Result<Config> {
-    let partial = load_partial_config(&cli.advanced)?;
-    Ok(resolve_config(
-        &cli.filter,
-        &cli.output,
-        &cli.advanced,
-        partial.as_ref(),
-    ))
-}
-
 /// Scoring model matching an analysis: when duplication was not
 /// collected the Duplication dimension is excluded (its weight
 /// redistributed) instead of scoring the absent data as clean.
@@ -446,128 +306,13 @@ pub(crate) fn rewrite_paths_repo_relative(
     }
 }
 
-/// Parse "jsp:html,tpl:php" into (extension, language) pairs.
-/// Entries without a ':' are ignored.
-fn parse_count_as(spec: &str) -> Vec<(String, String)> {
-    spec.split(',')
-        .filter_map(|pair| {
-            let (ext, lang) = pair.split_once(':')?;
-            let (ext, lang) = (ext.trim(), lang.trim());
-            if ext.is_empty() || lang.is_empty() {
-                return None;
-            }
-            Some((ext.to_string(), lang.to_string()))
-        })
-        .collect()
-}
-
-/// Colors belong on an interactive terminal only — never in an -O file,
-/// and not when stdout is piped/redirected.
-fn should_colorize(output: &codelens_core::config::OutputConfig) -> bool {
-    use std::io::IsTerminal;
-    output.file.is_none() && io::stdout().is_terminal()
-}
-
-/// Formatter options derived from the merged output config.
-fn report_output_options(output: &codelens_core::config::OutputConfig) -> OutputOptions {
-    OutputOptions {
-        summary_only: output.summary_only,
-        by_file: output.by_file,
-        by_dir: output.by_dir,
-        dir_depth: output.dir_depth,
-        show_tokens: output.show_tokens,
-        sort_by: output.sort_by,
-        top_n: output.top_n,
-        colorize: should_colorize(output),
-        show_git_info: output.show_git_info,
-    }
-}
-
-fn write_report(report: Report, output: &codelens_core::config::OutputConfig) -> Result<()> {
-    write_report_targets(&report, std::iter::once(output))
-}
-
-fn write_report_targets<'a>(
-    report: &Report,
-    outputs: impl IntoIterator<Item = &'a codelens_core::config::OutputConfig>,
-) -> Result<()> {
-    for output in outputs {
-        let output_options = report_output_options(output);
-        let formatter = create_output(output.format);
-
-        // Quiet suppresses terminal output only; an explicit -O file is still written.
-        if output.quiet && output.file.is_none() {
-            continue;
-        }
-
-        if let Some(ref path) = output.file {
-            let file = File::create(path).context("Failed to create output file")?;
-            let mut writer = BufWriter::new(file);
-            formatter.write(report, &output_options, &mut writer)?;
-            writer.flush()?;
-            if !output.quiet {
-                println!("Output written to: {}", path.display().to_string().green());
-            }
-        } else {
-            let stdout = io::stdout();
-            let mut writer = stdout.lock();
-            formatter.write(report, &output_options, &mut writer)?;
-        }
-    }
-    Ok(())
-}
-
-fn write_combined_html_dashboard(
-    combined: &codelens_core::output::CombinedReport,
-    insights: &DefaultHtmlInsights,
-    output: &codelens_core::config::OutputConfig,
-) -> Result<()> {
-    let output_options = report_output_options(output);
-    let formatter = codelens_core::output::HtmlOutput::new();
-
-    if output.quiet && output.file.is_none() {
-        return Ok(());
-    }
-
-    if let Some(ref path) = output.file {
-        let file = File::create(path).context("Failed to create output file")?;
-        let mut writer = BufWriter::new(file);
-        formatter.write_combined_dashboard(
-            combined,
-            insights.hotspot.as_ref(),
-            insights.coupling.as_ref(),
-            insights.trend.as_ref(),
-            &insights.git_history_note,
-            &insights.trend_note,
-            &output_options,
-            &mut writer,
-        )?;
-        writer.flush()?;
-        if !output.quiet {
-            println!("Output written to: {}", path.display().to_string().green());
-        }
-    } else {
-        let stdout = io::stdout();
-        let mut writer = stdout.lock();
-        formatter.write_combined_dashboard(
-            combined,
-            insights.hotspot.as_ref(),
-            insights.coupling.as_ref(),
-            insights.trend.as_ref(),
-            &insights.git_history_note,
-            &insights.trend_note,
-            &output_options,
-            &mut writer,
-        )?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::reporting::report_output_options;
     use super::*;
+    use crate::cli;
     use clap::Parser;
-    use codelens_core::config::OutputFormatType;
+    use codelens_core::config::{OutputFormatType, PartialConfig};
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).unwrap()
